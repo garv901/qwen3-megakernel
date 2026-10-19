@@ -238,66 +238,6 @@ In this model, the step is approximately 19 us faster. We did not measure this.
 
 The file `docs/data/iket_trace.json` holds the data of the charts. The script `docs/gen_trace_charts.py` draws them.
 
-## Current bottlenecks
-
-The HBM floor of the step is approximately 151 us: 1.207 GB of weights at 8 TB/s.
-The kernel takes approximately 383 us, thus 2.5 times the floor.
-In the 28 layers, the kernel uses approximately 34 % of the HBM bandwidth.
-The barriers and the latency after each barrier cause most of the difference.
-
-| Bottleneck | Cost for each step | How we measured it |
-|---|---|---|
-| Grid barrier hop (1.17 us to 1.39 us for each barrier) | approximately 140 us | IKET trace: from the last arrive to the median exit |
-| Late barrier exit of a fixed group of 78 SMs | approximately 19 us (an estimate from a model) | IKET trace |
-| First activation read after a barrier (approximately 0.5 us x 113) | approximately 56 us | Stall samples at the first use of the activations |
-| LM head | 45 us to 47 us, the floor is 39.6 us | A/B tests of the LM-head loop |
-| Release fence at the end of phase F (approximately 0.64 us x 28) | approximately 18 us | A/B test with a relaxed arrive (an incorrect kernel, used only as a limit) |
-| Attention calculation | 3.6 us | A/B test with no attention work (an incorrect kernel, used only as a limit) |
-
-The costs overlap. Do not add them.
-
-### Grid barriers
-
-The static schedule needs a grid barrier between two dependent phases.
-Each barrier costs 1.17 us to 1.39 us, also when all the CTAs arrive at the same time.
-The barrier after phase D and the barrier after phase F are full dependencies: each output row needs the full hidden state.
-
-We tried two hand-offs with a lower cost: a wait for a group of CTAs, and a low-latency flag with the data.
-The two hand-offs were slower (refer to [Ideas that did not work](#ideas-that-did-not-work)).
-Possible work: a dynamic schedule, where a CTA takes the next tile when its inputs are ready.
-
-The trace shows that a fixed group of 78 SMs exits each barrier later (refer to [A trace of the kernel](#a-trace-of-the-kernel)).
-Possible work: put the barrier counter at a different address and record the trace again. If the late group changes, the location of the counter is a cause.
-
-### The release fence at the end of phase F
-
-The release add of the arrive needs a GPU-scope fence. On sm_100, each correct GPU-scope release compiles to `MEMBAR.ALL.GPU`.
-At the end of phase F, this fence takes approximately 0.64 us.
-
-A relaxed add (incorrect) decreases the hop after phase F from 1.06 us to 0.42 us and saves 18 us for each step.
-The fence cost stays when we remove the O-projection adds, and when the gate/up copy comes from L2.
-Thus the cost comes from the fence of the CTA itself, and not from other CTAs.
-We do not know if the other three barriers have the same cost.
-Possible work: a correct release with a lower cost than a full `MEMBAR.ALL.GPU`.
-
-### The first read after a barrier
-
-After each barrier, the first read of the activations takes approximately 0.5 us.
-An L2 hit on an idle GPU takes only 0.17 us to 0.19 us.
-A queue behind other bytes causes only 40 ns to 48 ns of the difference.
-We do not know the cause of the remaining time.
-
-### The LM head
-
-The LM head reads 311 MB. At 8 TB/s, this takes 39.6 us.
-The kernel takes 45 us to 47 us. Two rows in flight for each warp is the best value that we found.
-
-### More bytes cost their full time
-
-When a change adds bytes to the step, the step becomes slower by approximately the HBM time of those bytes.
-The idle time of a barrier window does not absorb them.
-Thus, a change that adds bytes must remove more time than these bytes cost.
-
 ## Ideas that did not work
 
 Each result is the change of the isolated latency in an A/B test. A positive value is a slower step.
@@ -312,33 +252,6 @@ Each result is the change of the isolated latency in an A/B test. A positive val
 | Thread-block clusters | Not possible: with clusters, only 112 to 120 CTAs fit on the GPU |
 | CTA pipelining across phases | Not tested on the GPU: an analysis on paper showed no gain at batch 1 |
 | The `tcgen05` tensor-core path for the GEMVs | 666 us against 386 us: each MMA takes approximately 59 cycles, and at batch 1 the MMA count sets the time |
-
-## Xtrace: the trace attempt
-
-We tried to make timeline diagrams of the barriers with Xtrace (G-Watch 0.0.35, SASS tier).
-Xtrace did not work on this kernel. Thus the trace in this file comes from IKET (refer to [A trace of the kernel](#a-trace-of-the-kernel)).
-
-Xtrace adds probes to the SASS of a kernel and builds a new cubin.
-The build of the new cubin failed for all three configurations that we tried:
-
-```
-RuntimeError: the instrumented image for kernel 'qwen3_step' could not be built,
-so no probe reached the device: failed to serialize cubin
-```
-
-We found the cause with small test kernels:
-
-- The serializer fails for each kernel that has a bulk copy from global memory to shared memory with an mbarrier (`cp.async.bulk.shared::cluster.global.mbarrier`, SASS `UBLKCP.S.G`).
-- The serializer is correct for a bulk copy in the other direction, for an mbarrier alone, and for kernels with no bulk copy.
-- This kernel has 5 `UBLKCP.S.G` instructions (the TMA copies of the gate/up and down rows).
-
-The script `tools/gwatch_serialize_repro.py` shows the failure on the CPU with four small kernels.
-
-Another problem: in the warp-level mode, Xtrace found no schedule for the probes at three sites in phase D.
-The kernel uses 126 registers there, and the probes need more registers.
-The per-thread mode does not have this problem.
-
-The Xtrace paper gives an overhead of 0.9 % to 2.8 %, not 0 %.
 
 ## Reproduce the results
 
