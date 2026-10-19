@@ -287,6 +287,8 @@ You need an NVIDIA B200 (sm_100), CUDA 13, and Python 3.11 or later.
    python -m unittest tests.test_cpu
    ```
 
+   The SASS hash in the test is for NVRTC 13.0. A different NVRTC version can give a different hash.
+
 `run.py check` compares the kernel with an FP32 PyTorch reference of the same step:
 
 - `next_token` must be equal.
