@@ -24,13 +24,19 @@ PATH = [
     ("7", "host: outputs after launch", 383.05),
 ]
 
-# (system, time in us, note); None until the comparison job gives the value
-RESULTS = []
+# (system, setup, steady time per step in us); vLLM uses a different method (see the README)
+RESULTS = [
+    ("This kernel", "one persistent launch", 373.6),
+    ("FlashInfer", "CUDA graph + PDL", 877.0),
+    ("torch.compile", "max-autotune, CUDA graph", 1111.3),
+    ("cuBLAS", "CUDA graph + PDL", 1118.0),
+    ("vLLM 0.31", "decode slope, other method", 1161.6),
+]
 
 
-def hbars(t, name, title, sub, rows, xmax, ticks, floor=None, highlight=None):
+def hbars(t, name, title, sub, rows, xmax, ticks, floor=None, highlight=None, sub_x=74, lw=300):
     """Horizontal bars: rows = [(label, sublabel, value)]. One series, so no legend."""
-    lw, rw, top, bh, gap = 300, 560, 84, 22, 12
+    rw, top, bh, gap = 560, 84, 22, 12
     w = lw + rw + 90
     h = top + len(rows) * (bh + gap) + 40
     s = Svg(w, h, t)
@@ -46,7 +52,7 @@ def hbars(t, name, title, sub, rows, xmax, ticks, floor=None, highlight=None):
         y = top + i * (bh + gap)
         s.text(24, y + 15, lab, 12.5, weight="bold" if lab == highlight else "normal")
         if sub_:
-            s.text(74, y + 15, sub_, 11.5, t["fg2"])
+            s.text(sub_x, y + 15, sub_, 11.5, t["fg2"])
         color = t["work"] if lab == highlight or highlight is None else t["fg2"]
         bw = sx(v) - x0
         s.o.append(f"<path d='M{x0},{y} h{bw - 4} a4,4 0 0 1 4,4 v{bh - 8} a4,4 0 0 1 -4,4 h{-(bw - 4)} z' fill='{color}'/>")
@@ -65,6 +71,6 @@ for n, t in THEMES.items():
     if RESULTS:
         hbars(t, "results", "Decode step time of Qwen3-0.6B, batch 1, KV cache 128, B200",
               "Median steady time for each step. Lower is better.",
-              RESULTS, max(v for _, _, v in RESULTS) * 1.12, None, highlight=RESULTS[0][0])
+              RESULTS, 1300, [0, 250, 500, 750, 1000, 1250], floor=HBM_FLOOR_US, highlight=RESULTS[0][0], sub_x=130, lw=330)
 
 print("wrote", sorted(p.name for p in OUT.glob("*.svg")))

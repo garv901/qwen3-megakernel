@@ -4,7 +4,29 @@ This repository contains one CUDA kernel that does a full decode step of Qwen3-0
 The step has 28 layers, the LM head and the argmax, all in one launch.
 The kernel runs on an NVIDIA B200 at batch 1, with a KV cache of 128 tokens.
 
-<!-- RESULTS-TABLE -->
+## Current performance
+
+The kernel does one decode step in 374 us.
+This time is 2.3 times shorter than the time of the fastest baseline, FlashInfer with a CUDA graph and PDL.
+
+| System | Setup | Steady time per step (ms) | Isolated latency (ms) | Speedup |
+|---|---|---|---|---|
+| This kernel | One persistent launch | 0.374 | 0.377 to 0.382 | 1.0 |
+| FlashInfer 0.7.0.post1 | BF16 GEMM kernels, CUDA graph, PDL | 0.877 | 0.875 | 2.3 |
+| torch.compile | max-autotune, CUDA graph | 1.111 | 1.122 | 3.0 |
+| cuBLAS | PyTorch kernels, CUDA graph, PDL | 1.118 | 1.119 | 3.0 |
+| vLLM 0.31.0 | Decode slope, mean context 142 (a different method) | 1.162 | Not measured | 3.1 |
+
+- One job measured all the rows except vLLM, on one B200. The SM clock was 1965 MHz. The measured HBM bandwidth was 6569 GB/s.
+- The software was driver 580.178.04 and torch 2.13.0.
+- The kernel uses 40 % of the HBM bandwidth limit of 8 TB/s. The FlashInfer baseline uses 17 %.
+- The vLLM value is the slope of the step time against the number of decode steps. It is not a direct comparison.
+- The isolated latency in this table comes from the comparison harness. The A/B tests below use the harness of this repository, which gives 383 us.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/results-dark.svg">
+  <img alt="Steady time per step: this kernel 374 us, FlashInfer 877 us, torch.compile 1111 us, cuBLAS 1118 us, vLLM 1162 us" src="docs/img/results-light.svg">
+</picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/overview-dark.svg">
@@ -13,6 +35,7 @@ The kernel runs on an NVIDIA B200 at batch 1, with a KV cache of 128 tokens.
 
 ## Contents
 
+- [Current performance](#current-performance)
 - [The kernel in short](#the-kernel-in-short)
 - [The main ideas](#the-main-ideas)
 - [The measured path](#the-measured-path)
