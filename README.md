@@ -16,6 +16,7 @@ The kernel runs on an NVIDIA B200 at batch 1, with a KV cache of 128 tokens.
 - [The kernel in short](#the-kernel-in-short)
 - [The main ideas](#the-main-ideas)
 - [The measured path](#the-measured-path)
+- [A trace of the kernel](#a-trace-of-the-kernel)
 - [Current bottlenecks](#current-bottlenecks)
 - [Ideas that did not work](#ideas-that-did-not-work)
 - [Xtrace: the trace attempt](#xtrace-the-trace-attempt)
@@ -69,7 +70,7 @@ Each head does its attention 9 times, one time in each of its 9 CTAs.
 This extra work is small. When we removed all the attention work in a test, the step became only 3.6 us faster.
 
 The fused phase removes one grid barrier in each layer, thus 28 barriers in each step.
-One grid barrier costs approximately 1.05 us, thus the estimate of the gain is approximately 29 us.
+One grid barrier costs approximately 1.2 us (refer to [A trace of the kernel](#a-trace-of-the-kernel)), thus the estimate of the gain is approximately 34 us.
 This value is an estimate from the barrier cost. We did not measure it directly.
 
 ### 2. Split-phase grid barriers
@@ -147,6 +148,73 @@ Each row is one kernel version. The time is the median isolated latency. Two val
   <img alt="Isolated latency of each kernel version, from 484 us to 383 us, against the HBM floor of 151 us" src="docs/img/path-light.svg">
 </picture>
 
+## A trace of the kernel
+
+We recorded a trace of the kernel with IKET (`run-iket`, part of the `nvidia-cutlass-dsl` package).
+The traced build adds 16 point markers for each warp to the kernel source.
+In each phase, the markers are before and after the wait `__syncthreads`, and before and after the arrive `__syncthreads`.
+With the markers compiled out, the SASS is the same as the SASS of this kernel.
+The time stamps come from `%globaltimer`, with steps of 32 ns.
+
+The trace has all 28 layers, 148 CTAs and 16 warps for each CTA: 1.06 million markers for each launch.
+We used the launch with the median time of 20 launches.
+That launch takes 378.2 us from the first warp start to the last warp end. The 20 launches take 376.6 us to 380.7 us.
+
+The kernel without markers takes 377 us for each launch (CUDA events, which also include the launch).
+Thus the cost of the markers is small. We did not measure it more accurately.
+
+Two checks on the trace:
+
+- No marker after a barrier is earlier than the last marker before the same barrier (530432 checks, 0 failures).
+- In each warp, the markers are in the correct order (0 failures). This check does not include the marker before the wait sync. In 70 CTAs, warp 0 records one more of that marker in the prologue, so its layer count is shifted.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/layer-timeline-dark.svg">
+  <img alt="Per-CTA trace of layer 14: phase work bars for 148 CTAs and the last arrive of each phase" src="docs/img/layer-timeline-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/layer-breakdown-dark.svg">
+  <img alt="Median work, skew and hop for each phase" src="docs/img/layer-breakdown-light.svg">
+</picture>
+
+The definitions:
+
+- Work: the time from the barrier exit of a CTA to the end of its arrive sync.
+- Skew: the arrive time of the last CTA minus the arrive time of the median CTA.
+- Hop: the exit time of the median CTA into the next phase minus the arrive time of the last CTA. The hop includes the release fence, the counter add, the poll, the acquire fence and the wait sync.
+
+| Phase | Work (ns) | Skew (ns) | Hop (ns) |
+|---|---|---|---|
+| Q | 1248 | 176 | 1280 |
+| F | 2176 | 224 | 1248 |
+| G | 1536 | 128 | 1168 |
+| D | 1120 | 64 | 1392 |
+
+A layer takes 11.6 us (median). The step has three parts:
+
+| Part | Time (us) |
+|---|---|
+| Prologue (to the first exit into phase Q) | 3.2 |
+| 28 layers | 324.6 |
+| LM head and argmax (from the last arrive of phase D) | 50.4 |
+
+What the trace shows:
+
+1. The skew and the hop take approximately 48 % of each layer. The skew is small: 64 ns to 224 ns for each phase.
+2. The hop after phase D is the longest (1.39 us). The hop after phase G is the shortest (1.17 us).
+3. A fixed group of 78 of the 148 SMs exits each barrier later than the other SMs.
+   The difference is 0.53 us into phase Q, 0.26 us into phases F and D, and 0.13 us into phase G.
+   The group is the same in all 28 layers. In 27 of 28 layers, the last CTA to arrive in phase Q is in this group.
+
+Of the 78 late SMs, 38 have an SM id below 74, and 40 have an SM id of 74 or more. Thus a split by SM id does not explain the group.
+We do not know the cause.
+
+We used a model to estimate the cost: the late CTAs exit with the early CTAs, and their work stays the same.
+In this model, the step is approximately 19 us faster. We did not measure this.
+
+The file `docs/data/iket_trace.json` holds the data of the charts. The script `docs/gen_trace_charts.py` draws them.
+
 ## Current bottlenecks
 
 The HBM floor of the step is approximately 151 us: 1.207 GB of weights at 8 TB/s.
@@ -156,7 +224,8 @@ The barriers and the latency after each barrier cause most of the difference.
 
 | Bottleneck | Cost for each step | How we measured it |
 |---|---|---|
-| Grid barrier hop (approximately 1.05 us x 113) | approximately 120 us | Time stamps in the kernel, from the last arrive to the wait exit |
+| Grid barrier hop (1.17 us to 1.39 us for each barrier) | approximately 140 us | IKET trace: from the last arrive to the median exit |
+| Late barrier exit of a fixed group of 78 SMs | approximately 19 us (an estimate from a model) | IKET trace |
 | First activation read after a barrier (approximately 0.5 us x 113) | approximately 56 us | Stall samples at the first use of the activations |
 | LM head | 45 us to 47 us, the floor is 39.6 us | A/B tests of the LM-head loop |
 | Release fence at the end of phase F (approximately 0.64 us x 28) | approximately 18 us | A/B test with a relaxed arrive (an incorrect kernel, used only as a limit) |
@@ -167,12 +236,15 @@ The costs overlap. Do not add them.
 ### Grid barriers
 
 The static schedule needs a grid barrier between two dependent phases.
-Each barrier costs approximately 1.05 us, also when all the CTAs arrive at the same time.
+Each barrier costs 1.17 us to 1.39 us, also when all the CTAs arrive at the same time.
 The barrier after phase D and the barrier after phase F are full dependencies: each output row needs the full hidden state.
 
 We tried two hand-offs with a lower cost: a wait for a group of CTAs, and a low-latency flag with the data.
 The two hand-offs were slower (refer to [Ideas that did not work](#ideas-that-did-not-work)).
 Possible work: a dynamic schedule, where a CTA takes the next tile when its inputs are ready.
+
+The trace shows that a fixed group of 78 SMs exits each barrier later (refer to [A trace of the kernel](#a-trace-of-the-kernel)).
+Possible work: put the barrier counter at a different address and record the trace again. If the late group changes, the location of the counter is a cause.
 
 ### The release fence at the end of phase F
 
@@ -221,7 +293,7 @@ Each result is the change of the isolated latency in an A/B test. A positive val
 ## Xtrace: the trace attempt
 
 We tried to make timeline diagrams of the barriers with Xtrace (G-Watch 0.0.35, SASS tier).
-Xtrace did not work on this kernel. All the diagrams in this file are schematics from the source code, not traces.
+Xtrace did not work on this kernel. Thus the trace in this file comes from IKET (refer to [A trace of the kernel](#a-trace-of-the-kernel)).
 
 Xtrace adds probes to the SASS of a kernel and builds a new cubin.
 The build of the new cubin failed for all three configurations that we tried:
@@ -323,4 +395,5 @@ The O-projection adds the partial sums of the 16 heads with `red.global.add`, an
 | `tools/prune.py` | The script that removed the experiment switches from the source |
 | `docs/gen_schematics.py` | The script that draws the diagrams |
 | `tools/gwatch_serialize_repro.py` | Repro of the Xtrace serializer failure |
+| `docs/gen_trace_charts.py` | The script that draws the trace charts from `docs/data/iket_trace.json` |
 | `docs/gen_charts.py` | The script that draws the charts from the measured values |
