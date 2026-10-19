@@ -1,0 +1,5 @@
+torch
+cuda-python
+safetensors
+huggingface_hub
+transformers
