@@ -346,16 +346,16 @@ def test_skv_dyn_smem_layout():
 
 
 @pytest.mark.parametrize("npad", B.BUCKETS)
-@pytest.mark.parametrize("tsb", (0, 1))
-def test_skv_builds_compile(npad, tsb):
+@pytest.mark.parametrize("ts,tsb", ((0, 0), (128, 1)))   # TS on with TSB 0 is rejected under splitkv (hang, job 9662)
+def test_skv_builds_compile(npad, ts, tsb):
     """attn = splitkv at every bucket x MK_TSB: compiles (MK_EXPECT_DYN == DYN_SMEM static_assert checks B.dyn_smem(attn="splitkv"); the 227 KB static_assert),
     <= 128 regs, static + dyn smem fits. KNOWN DEVIATION (SPEC-P2 report): the 128-register kernel spills (A1's attend / combine_head peak at 128 registers);
     the bound below guards against growth, it is not the 0-spill goal."""
     pytest.importorskip("cuda.bindings.nvrtc")
-    _, info, _ = B.compile_build(npad, knobs=(("MK_TS", 256), ("MK_TSB", tsb)), attn="splitkv")
+    _, info, _ = B.compile_build(npad, knobs=(("MK_TS", ts), ("MK_TSB", tsb)), attn="splitkv")
     assert info["regs"] <= 128, info
     assert info["spill_stores"] <= 1024 and info["spill_loads"] <= 1024, info
-    assert info["static_smem"] + B.dyn_smem(npad, ts=256, tsb=tsb, attn="splitkv") <= 227 * 1024
+    assert info["static_smem"] + B.dyn_smem(npad, ts=ts, tsb=tsb, attn="splitkv") <= 227 * 1024
 
 
 @pytest.mark.parametrize("npad,knobs", [(16, (("MK_RING", 3),)), (32, (("MK_LMR", 4),)), (64, (("MK_LMP", 0),)), (128, (("MK_TS", 128),)), (128, (("MK_TS", 128), ("MK_TSB", 1))),
