@@ -1,7 +1,9 @@
 # Environment for regimebench GPU jobs; sourced by slurm/regime.sbatch.
 # Same caches as vibe-megakernel (/raid/garv901/.cache) so FlashInfer cubins and vLLM caches are reused.
 C=/raid/garv901/.cache
-REPO=/raid/garv901/regime-megakernel
+# Repo = the checkout the job was submitted from (main or a worktree such as /raid/garv901/regime-mk-small).
+REPO=${REPO:-$(git -C "${SLURM_SUBMIT_DIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null || echo /raid/garv901/regime-megakernel)}
+export REPO
 export PY=/raid/garv901/vibe-megakernel/.venv/bin/python
 export PATH=/usr/local/cuda/bin:$PATH
 export PYTHONPATH=$REPO

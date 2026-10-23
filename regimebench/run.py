@@ -22,7 +22,7 @@ import traceback
 from pathlib import Path
 
 from .sol import sol, sol_both
-from .workload import Workload, regime_grid, select
+from .workload import OWNER_POINTS, Workload, regime_grid, select
 
 DEFAULT_SEEDS = (7301, 8917, 42811)
 DEFAULT_ARMS = ("fi-graph", "hv2g", "hv2-repeat", "vllm")
@@ -72,7 +72,7 @@ def select_workloads(ids: str | None, smoke: bool) -> list[Workload]:
     names = [x.strip() for x in ids.split(",") if x.strip()] if ids else None
     pool = select(names)
     if names:
-        known = {w.id for w in regime_grid()} | {w.regime for w in regime_grid()}
+        known = {w.id for w in regime_grid()} | {w.regime for w in regime_grid()} | set(OWNER_POINTS)
         unknown = [n for n in names if n not in known]
         if unknown:
             raise SystemExit(f"unknown workloads/regimes {unknown}; "

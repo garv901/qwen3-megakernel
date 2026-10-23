@@ -82,6 +82,9 @@ ARMS: dict[str, str] = {
     "fi-graph": "regimebench.arms.fi_graph:FiGraphArm",
     "hv2-repeat": "regimebench.arms.hv2_repeat:Hv2RepeatArm",
     "hv2g": "regimebench.arms.hv2g:Hv2gArm",
+    # Bespoke decode megakernels, one owner session each (docs/briefs/).
+    "mk_small": "regimebench.arms.mk_small:MkSmallArm",
+    "mk_batch": "regimebench.arms.mk_batch:MkBatchArm",
 }
 OUT_OF_PROCESS_ARMS = ("vllm",)
 

@@ -21,6 +21,8 @@ import statistics
 DASH = "-"
 FALLBACK_CLOCK_MHZ = 1965
 HEADLINE = "hv2g"
+# Megakernel arms compared against the best baseline in their own table (bespoke kernels: docs/briefs/).
+MK_ARMS = ("hv2g", "mk_small", "mk_batch")
 PROXY = "hv2-repeat"
 # hv2-repeat runs b1/kv128 work per launch; it matches the real step only where every sequence is kv 128, q 1.
 PROXY_REGIMES = {"R0", "R1"}
@@ -131,7 +133,8 @@ def point_row(d: Data, w: dict) -> dict:
     ffma = d.ffma_sol_us(wid)
     mtn = d.best(wid, HEADLINE, ("mtn",))
     vgpu = d.steady_gpu_us(wid, VLLM, v[0]) if v else None
-    return {"id": wid, "ffma_us": ffma, "mtn": mtn, "vllm_gpu": vgpu,
+    mk = {a: d.best(wid, a, ("auto",)) or d.best(wid, a) for a in MK_ARMS}
+    return {"id": wid, "ffma_us": ffma, "mtn": mtn, "vllm_gpu": vgpu, "mk": mk,
             "pct_ffma_hv2g": 100 * ffma / h[1] if ffma and h else None,
             "sol_us": sol_us, "bound": sol["bound"] if sol else None,
             "hv2g": h, "proxy": p, "best": b, "vllm": v,
@@ -156,6 +159,22 @@ def regime_table(d: Data, regime: str) -> str:
             r["id"], f"{_f(r['sol_us'])} ({r['bound'] or DASH})", _f(r["ffma_us"]), _cell(r["hv2g"]),
             _cell(r["mtn"]), _cell(r["proxy"]) if regime in PROXY_REGIMES else "n/a", best, vl,
             _f(r["ratio"], "{:.2f}"), _f(r["pct_hv2g"]), _f(r["pct_ffma_hv2g"]), _f(r["pct_best"])]) + " |")
+    return "\n".join(out)
+
+
+def mk_table(d: Data) -> str:
+    """Every megakernel arm present vs best fi-graph, vLLM and SOL, one row per point."""
+    arms = [a for a in MK_ARMS if any(a == arm for t in d.timing.values() for (arm, _) in t)]
+    head = ["point", "SOL us", "best baseline us", "vllm us"] + [f"{a} us" for a in arms] + \
+        [f"{a}/best" for a in arms]
+    out = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    for w in ordered_workloads(d):
+        r = point_row(d, w)
+        b = r["best"][1] if r["best"] else None
+        vals = [r["mk"][a][1] if r["mk"][a] else None for a in arms]
+        out.append("| " + " | ".join([r["id"], _f(r["sol_us"]), _cell(r["best"]), _cell(r["vllm"])]
+                                      + [_f(v) for v in vals]
+                                      + [_f(v / b, "{:.2f}") if v and b else DASH for v in vals]) + " |")
     return "\n".join(out)
 
 
@@ -355,6 +374,8 @@ def plot_regime(d: Data, regime: str, out_dir: Path) -> Path | None:
                 ax.plot(*zip(*pairs), label=label, **{"marker": "o", **kw})
         series([r["hv2g"][1] if r["hv2g"] else None for r in rows], "hv2g", color="C3")
         series([r["mtn"][1] if r["mtn"] else None for r in rows], "hv2g mtn", color="C1")
+        for a, c in (("mk_small", "C4"), ("mk_batch", "C5")):
+            series([r["mk"][a][1] if r["mk"][a] else None for r in rows], a, color=c)
         if regime in PROXY_REGIMES:
             series([r["proxy"][1] if r["proxy"] else None for r in rows], "hv2-repeat (proxy)",
                    color="C3", linestyle="--")
@@ -409,6 +430,8 @@ def write_csv(d: Data, path: Path) -> None:
 
 def render(d: Data, records: list[dict], plot_files: dict[str, str]) -> str:
     parts = [header(d, records), "", "## Executive summary", "", summary_table(d), ""]
+    if any(arm in ("mk_small", "mk_batch") for t in d.timing.values() for (arm, _) in t):
+        parts += ["## Megakernel arms vs best baseline", "", mk_table(d), ""]
     if "overview" in plot_files:
         parts += ["![overview](overview.png)", ""]
     regimes = [r for r in REGIME_ORDER if any(w["regime"] == r for w in d.workloads.values())]
