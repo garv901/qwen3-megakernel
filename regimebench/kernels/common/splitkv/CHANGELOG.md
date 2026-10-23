@@ -75,3 +75,5 @@
 - 2026-10-23 (P8, job 9708, tag splitkv-v3): `SKV_FORCE_ENGINE` default -1 -> 1 (TMA-only build; LDG compiled out). The TMA maps are
   needed at every plan (the planner's `engine` field is ignored by this build). `-DSKV_FORCE_ENGINE=0` (LDG-only) is faster at
   b1 kv <= 2K (0.1-0.2 us/layer) and b256 kv128 (1.4); `-1` restores the runtime choice.
+- 2026-10-23 (P9b, job 9711, tag splitkv-v4): `SKV_ITEM_PREFETCH` default 1 for iface 1 / SKV_QMAX 1 builds (item k+1's record + q are
+  loaded during item k). b256 kv128 -5.2, b128 -1.2 us/layer; b1 +0.05..+0.08. No interface change.

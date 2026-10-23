@@ -72,7 +72,11 @@
 #define SKV_TICKET 0        // (default 0) 1 = deferred last-arriver merge inside attend: ao is complete after attend + the caller's grid barrier (no combine_head / merge_th call). Needs Params::tickets (CHANGELOG)
 #endif
 #ifndef SKV_ITEM_PREFETCH
-#define SKV_ITEM_PREFETCH 0 // (default 0: no gain, job 9610) 1 = item k+1's record + q are loaded during item k, and the LDG engine issues its first K/V loads before item k's merge
+#if SKV_IFACE == 1 && SKV_QMAX == 1
+#define SKV_ITEM_PREFETCH 1 // (default 1 since P9b job 9711: b256 kv128 -5.2, b128 -1.2, b32 kv1K -0.4 us/layer; b1 +0.05..+0.08) item k+1's record + q are loaded during item k
+#else                       // (and the LDG engine issues its first K/V loads before item k's merge)
+#define SKV_ITEM_PREFETCH 0 // iface 2 and the R6 consumer do not support it
+#endif
 #endif
 
 namespace skv {
