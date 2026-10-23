@@ -34,7 +34,7 @@
 - Update 2026-10-23 (MK-attn correction, splitkv/CHANGELOG.md): attend() does NOT re-init its mbarriers per call (that hung the
   TMA ring at kv >= 16K, jobs 9581 / 9598 / 9599). attend_smem_bytes() = 82,496 B; bytes [0, skv::kBarOff = 82,432) are free between
   calls (GEMM / LM / TS rings, combine_head xs slot); the last 64 B (mbarriers) must stay unchanged for the whole kernel; ring_phase
-  starts at 0 per CTA and the same variable is passed to every layer. MK-core integration rule: place the attention scratch at
+  starts at 0 per CTA and the same variable is passed to every layer. Scratch base needs 128 B alignment (MK-attn, agreed). MK-core integration rule: place the attention scratch at
   OFF_BARS - 82,432 so its 64 B of mbarriers sit in a reserved hole of mk's barrier region (never overlaid); keep overlays below OFF_BARS.
 - MK-attn bench barrier (= hv2g bar_arrive/bar_wait): 1.12 us (job 9567) vs 1.7-2.7 us "wait" in mk v0 stamps: v0 waits
   include imbalance / phase-edge work (P1 bench separates them).
