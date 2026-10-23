@@ -98,9 +98,13 @@ def strip_knobs(src: str) -> str:
     return re.sub(r"mk_null\(\d+\)", "false", src)
 
 
+# splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8) and item prefetch (P9)
+SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH")
+
+
 def knob_defines(knobs: dict | None) -> list[str]:
     k = {**DEFAULT_KNOBS, **(knobs or {})}
-    unknown = set(k) - set(DEFAULT_KNOBS)
+    unknown = set(k) - set(DEFAULT_KNOBS) - set(SKV_PASS)
     if unknown:
         raise KeyError(f"unknown knobs {sorted(unknown)}")
     return [f"{n}={int(v)}" for n, v in sorted(k.items())]
