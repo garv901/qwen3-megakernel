@@ -429,6 +429,10 @@ __device__ __forceinline__ void ts_phase(GS& g, int l, int ntok, EpiF epi) {
             }
         }
     } else if (!NUL && warp >= 4) {   // ---- epilogue: quadrant q = warp & 3, column chunks (warp >> 2) - 1 + 3 m (disjoint per (quadrant, chunk))
+        if constexpr (PAIR) {   // GU: epi(-1, ..) = per-token setup by the 12 epilogue warps while the MMAs run (r2 into smem; ends with a 384-thread named barrier)
+            u32 none[16];
+            if (nt > 0) epi(-1, lane, 0, 0, 0, none);
+        }
         for (int ti = 0; ti < nt; ++ti) {
             const int b = ti & 1, t = t0 + ti, rb = (t / KS) / C::NTT, tt = (t / KS) % C::NTT;
             mbar_wait(accf + 8 * b, (ti >> 1) & 1);
@@ -784,6 +788,11 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
         if constexpr (TSB) {
             // P5b: GU on the tile stream (A = wgu row block rb: 64 gate + 64 up rows, B = xb2 by TMA, KS 1): the epilogue turns the TMEM accumulator into act = bf16(silu(r2 g) * (r2 u))
             auto epi = [&](int q, int lane, int grp, int rb, int cb, const u32 (&v)[16]) {
+                if (q < 0) {   // setup: s_ss[t] = r2 of token t (s_ss is the LM head's table; re-zeroed after this phase). One load per token, not one per (token, chunk) in the loop below (job 9618: those loads cost ~8.6 us/layer at b256)
+                    for (int t = tid - 128; t < ntok; t += 384) s_ss[t] = rsqrtf(__ldcg(ss2 + t) * (1.f / HID) + EPS);
+                    named_bar_sync(7, 384);
+                    return;
+                }
                 const int pid = grp * 2 + (q & 1);   // the pair (quadrants q & 1 and (q & 1) + 2 of group grp): named barrier id 1 + pid, 64 threads
                 float* ex = reinterpret_cast<float*>(sm + TS_XOFF) + pid * 512;   // [16 tokens][32 lanes] fp32
                 if (q >= 2) {   // u warp: lanes 64..127 of the tile = up of channel 64 rb + 32 (q - 2) + lane
@@ -802,7 +811,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                     for (int i = 0; i < 16; ++i) {
                         const int t = cb + i;
                         if (t < ntok) {   // warp-uniform
-                            const float r = rsqrtf(__ldcg(ss2 + t) * (1.f / HID) + EPS);
+                            const float r = s_ss[t];
                             const float gg = r * __uint_as_float(v[i]);
                             const float h = MK_SILU(gg) * (r * ua[i]);
                             act[(size_t)t * INTER + ch] = (bf16_t)(pack_bf16(h, 0.f) & 0xffffu);
@@ -811,7 +820,10 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 }
             };
             ts_phase<PhGu, GU_TT, GU_KS, 9, mk_null(4)>(g, l, ntok, epi);
-            if constexpr (!mk_null(4)) { if (warp >= 4) fence_proxy_async_global(); }   // act: generic stores -> D's TMA reads (after the grid barrier)
+            if constexpr (!mk_null(4)) {
+                if (warp >= 4) fence_proxy_async_global();   // act: generic stores -> D's TMA reads (after the grid barrier)
+                for (int t = tid; t < ntok; t += NT) s_ss[t] = 0.f;   // the LM head accumulates into s_ss (zero since the prologue); the join barrier above ordered the epilogue reads
+            }   // act: generic stores -> D's TMA reads (after the grid barrier)
         } else {
             const bf16_t* lnw = ln2 + (size_t)l * HID;
             auto get = [&](int t, int k, int) -> uint4 {

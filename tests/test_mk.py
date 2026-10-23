@@ -430,7 +430,7 @@ def test_skv_placeholder_sass_identical_to_head(tmp_path):
     if arc.returncode != 0:
         pytest.skip(f"commit {HEAD_P2} not available")
     subprocess.run(["tar", "-x", "-C", str(tmp_path)], input=arc.stdout, check=True)
-    cfgs = ((16, 256, 0), (64, 256, 0), (256, 256, 1))
+    cfgs = ((16, 256, 0), (64, 256, 0), (256, 256, 0))   # TSB 1 changed after P2 on purpose (GU r2 setup)
     code = ("import sys,re,subprocess,tempfile,pathlib;from regimebench.kernels.mk import build as B\n"
             "for npad,ts,tsb in %r:\n"
             " c=B.compile_build(npad,knobs=(('MK_TS',ts),('MK_TSB',tsb)))[0];p=pathlib.Path(tempfile.mkdtemp())/'k.cubin';p.write_bytes(c)\n"

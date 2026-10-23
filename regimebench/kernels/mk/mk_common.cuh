@@ -197,7 +197,7 @@ __device__ __forceinline__ void tc_fence_after() { asm volatile("tcgen05.fence::
 __device__ __forceinline__ void tc_fence_before() { asm volatile("tcgen05.fence::before_thread_sync;" ::: "memory"); }
 __device__ __forceinline__ void fence_proxy_async() { asm volatile("fence.proxy.async.shared::cta;" ::: "memory"); }
 __device__ __forceinline__ void fence_proxy_async_global() { asm volatile("fence.proxy.async.global;" ::: "memory"); }   // generic writes to global -> later TMA reads (TS: xb)
-// named barrier (bar.sync id, n threads): ids 1..6 = the GU exchange pairs (mk_step.cu); id 0 is __syncthreads
+// named barrier (bar.sync id, n threads): ids 1..6 = the GU exchange pairs, 7 = the GU epilogue setup (384 threads) (mk_step.cu); id 0 is __syncthreads
 __device__ __forceinline__ void named_bar_sync(int id, int n) { asm volatile("bar.sync %0, %1;" :: "r"(id), "r"(n) : "memory"); }
 __device__ __forceinline__ void tc_wait_ld() { asm volatile("tcgen05.wait::ld.sync.aligned;" ::: "memory"); }
 __host__ __device__ constexpr u32 tc_idesc(int M, int N) { return (1u << 4) | (1u << 7) | (1u << 10) | ((u32)(N >> 3) << 17) | ((u32)(M >> 4) << 24); }
