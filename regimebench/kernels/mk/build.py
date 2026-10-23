@@ -258,13 +258,17 @@ def encode_skv_maps(kc_ptr: int, vc_ptr: int, rows: int, n_layers: int = NL, qma
 
 
 def auto_attn(seqs) -> str:
-    """attn = "auto": splitkv when every sequence has q_len == 1 (A1 v1: pair_info is indexed by token) and the longest kv_len >= SKV_AUTO_MIN_KV, else the placeholder.
-    At kv128 the A1 combine in the O phase costs more than attend saves (job 9674: R0-b1 +33, b64 +117, b256 +286 us; R2-kv1024 -211, R3-b32-kv1024 -523). ``seqs``: iterable of (kv_len, q_len)."""
+    """attn = "auto": splitkv (A1 v2) when every sequence has q_len == 1 and (the longest kv_len >= SKV_AUTO_MIN_KV or n_seq >= SKV_AUTO_MIN_SEQ), else the placeholder.
+    Job 9702 (splitkv-v2 vs placeholder, 28 points): kv >= 512 all win (R2-kv512 -67 .. kv32768 -8051, R3-b8-kv1024 -20); kv128: b16 -1.3, b32 -125, b64 -133, b128 -272,
+    b256 -897, but b1 / b2 +23..+41 and b4 / b8 +81..+83 (the combine at S > 1). q_len > 1 (R6, SKV_QMAX 16 build): not measured yet -> placeholder. ``seqs``: iterable of (kv_len, q_len)."""
     seqs = [(int(k), int(q)) for k, q in seqs]
-    return "splitkv" if seqs and all(q == 1 for _, q in seqs) and max(k for k, _ in seqs) >= SKV_AUTO_MIN_KV else "placeholder"
+    if not seqs or any(q != 1 for _, q in seqs):
+        return "placeholder"
+    return "splitkv" if max(k for k, _ in seqs) >= SKV_AUTO_MIN_KV or len(seqs) >= SKV_AUTO_MIN_SEQ else "placeholder"
 
 
-SKV_AUTO_MIN_KV = 512   # [H] kv512 unmeasured; kv128 loses, kv1024 wins
+SKV_AUTO_MIN_KV = 512   # job 9702: kv512 -67 us (b1)
+SKV_AUTO_MIN_SEQ = 16   # job 9702: kv128 b16 -1.3, b8 +81 us
 
 
 # ---- tensor maps (host; 2D bf16 SW128, box {64 k, 128 rows}, one per weight tensor, 128 B each in global memory) ----

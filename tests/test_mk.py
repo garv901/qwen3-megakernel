@@ -400,8 +400,8 @@ def test_skv_plan_matches_mk_layout_on_mk_points():
             assert all(len(w2) == 1 for w2 in [pl.cta_positions[:1]])
         else:
             assert used[w.id] == "placeholder", w.id
-    exp = {w.id: ("splitkv" if all(s.q_len == 1 for s in w.seqs) and max(s.kv_len for s in w.seqs) >= B.SKV_AUTO_MIN_KV else "placeholder") for w in pts}
-    assert used == exp and sum(v == "splitkv" for v in used.values()) == 13   # R2-kv512..32768, R3-*
+    exp = {w.id: ("splitkv" if all(s.q_len == 1 for s in w.seqs) and (max(s.kv_len for s in w.seqs) >= B.SKV_AUTO_MIN_KV or len(w.seqs) >= B.SKV_AUTO_MIN_SEQ) else "placeholder") for w in pts}
+    assert used == exp and sum(v == "splitkv" for v in used.values()) == 18   # R2-kv512..32768, R3-*, R1-b16..b256
 
 
 def test_skv_attn_option_and_supports():

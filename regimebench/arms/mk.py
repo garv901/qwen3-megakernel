@@ -101,7 +101,8 @@ class MkStep:
             from ..kernels.common.splitkv import plan as skv_plan
             assert ld.knobs["MK_KU"] == 128, "attn=splitkv needs MK_KU 128"
             pl = skv_plan.plan([(s.kv_len, s.q_len) for s in w.seqs], n_cta=self.nb)
-            assert list(pl.row_base) == list(d.t_base), "A1 row_base != mk t_base (fixture packs seq s at the sum of the previous kv_len + 1)"
+            tok0 = [sum(x.q_len for x in w.seqs[:i]) for i in range(len(w.seqs))]   # t_base is per token, row_base per seq (equal lists only when every q_len is 1)
+            assert list(pl.row_base) == [int(d.t_base[t]) for t in tok0], "A1 row_base != mk t_base of the seq's first token (fixture packs seq s at the sum of the previous kv_len + q_len)"
             assert pl.total_q == c.ntok == w.total_q and pl.cache_rows == rows
             self.plan = pl
             t = pl.to_torch(dev)
