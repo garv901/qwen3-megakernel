@@ -1,0 +1,108 @@
+== ENG=0
+xover.cu(87): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+xover.cu(42): warning #177-D: variable "NW" was declared but never referenced
+  constexpr int NT = 512, NW = 16, GRID = 148, RINGB = 65536, UB = 32768;
+                          ^
+
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z5k_refPK13__nv_bfloat16S1_PKfiiiPjS4_' for 'sm_100a'
+ptxas info    : Function properties for _Z5k_refPK13__nv_bfloat16S1_PKfiiiPjS4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers
+ptxas info    : Compile time = 10.625 ms
+ptxas info    : Compiling entry function '_Z6k_initP13__nv_bfloat16mj' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_initP13__nv_bfloat16mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.895 ms
+ptxas info    : Compiling entry function '_Z7k_xover14CUtensorMap_stPK13__nv_bfloat16PfiiiiixiPjPy' for 'sm_100a'
+ptxas info    : Function properties for _Z7k_xover14CUtensorMap_stPK13__nv_bfloat16PfiiiiixiPjPy
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 112 registers, used 1 barriers
+ptxas info    : Compile time = 53.200 ms
+== ENG=1
+xover.cu(87): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+xover.cu(42): warning #177-D: variable "NW" was declared but never referenced
+  constexpr int NT = 512, NW = 16, GRID = 148, RINGB = 65536, UB = 32768;
+                          ^
+
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z5k_refPK13__nv_bfloat16S1_PKfiiiPjS4_' for 'sm_100a'
+ptxas info    : Function properties for _Z5k_refPK13__nv_bfloat16S1_PKfiiiPjS4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers
+ptxas info    : Compile time = 10.515 ms
+ptxas info    : Compiling entry function '_Z6k_initP13__nv_bfloat16mj' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_initP13__nv_bfloat16mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.884 ms
+ptxas info    : Compiling entry function '_Z7k_xover14CUtensorMap_stPK13__nv_bfloat16PfiiiiixiPjPy' for 'sm_100a'
+ptxas info    : Function properties for _Z7k_xover14CUtensorMap_stPK13__nv_bfloat16PfiiiiixiPjPy
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 116 registers, used 1 barriers
+ptxas info    : Compile time = 64.840 ms
+== ENG=2
+xover.cu(87): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+xover.cu(42): warning #177-D: variable "NW" was declared but never referenced
+  constexpr int NT = 512, NW = 16, GRID = 148, RINGB = 65536, UB = 32768;
+                          ^
+
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z5k_refPK13__nv_bfloat16S1_PKfiiiPjS4_' for 'sm_100a'
+ptxas info    : Function properties for _Z5k_refPK13__nv_bfloat16S1_PKfiiiPjS4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers
+ptxas info    : Compile time = 10.603 ms
+ptxas info    : Compiling entry function '_Z6k_initP13__nv_bfloat16mj' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_initP13__nv_bfloat16mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.906 ms
+ptxas info    : Compiling entry function '_Z7k_xover14CUtensorMap_stPK13__nv_bfloat16PfiiiiixiPjPy' for 'sm_100a'
+ptxas info    : Function properties for _Z7k_xover14CUtensorMap_stPK13__nv_bfloat16PfiiiiixiPjPy
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 119 registers, used 1 barriers
+ptxas info    : Compile time = 90.804 ms
+== ENG=-1
+xover.cu(87): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+xover.cu(42): warning #177-D: variable "NW" was declared but never referenced
+  constexpr int NT = 512, NW = 16, GRID = 148, RINGB = 65536, UB = 32768;
+                          ^
+
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z5k_refPK13__nv_bfloat16S1_PKfiiiPjS4_' for 'sm_100a'
+ptxas info    : Function properties for _Z5k_refPK13__nv_bfloat16S1_PKfiiiPjS4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers
+ptxas info    : Compile time = 10.612 ms
+ptxas info    : Compiling entry function '_Z6k_initP13__nv_bfloat16mj' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_initP13__nv_bfloat16mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.903 ms
+ptxas info    : Compiling entry function '_Z7k_xover14CUtensorMap_stPK13__nv_bfloat16PfiiiiixiPjPy' for 'sm_100a'
+ptxas info    : Function properties for _Z7k_xover14CUtensorMap_stPK13__nv_bfloat16PfiiiiixiPjPy
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 112 registers, used 1 barriers
+ptxas info    : Compile time = 36.218 ms

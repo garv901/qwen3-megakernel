@@ -34,8 +34,8 @@ The baseline runs ~312 kernels/step and sits at 14-38 % of SOL here, so a megake
 1. Dashboard: https://claude.ai/artifact/7GnFfGth9jEXPu5LqA7Kmz (Artifact tool, action "read"; numbers are in
    `results/2026-10-22-b200/summary.csv` here). `results/2026-10-22-b200/FINDINGS.md`, `REPORT.md`.
 2. `README.md`, `SPEC.md`, `docs/METHODOLOGY.md` (harness, arms, SOL). `regimebench/arms/{base.py, hv2g.py}`.
-3. **The crossover bench that set this design:** `/raid/garv901/regime-megakernel/probe/xover/{SPEC.md, RESULT.md,
-   xover.cu}` (job 9521; in the main checkout, untracked - read it there). One GEMM phase, 148 CTAs: tcgen05 is flat
+3. **The crossover bench that set this design:** `probe/xover/{SPEC.md, RESULT.md, NOTES.md,
+   xover.cu, run.sh}` (job 9521; `run.sh` rebuilds `bin/`). One GEMM phase, 148 CTAs: tcgen05 is flat
    in T (GU 7.74 -> 7.88 us, D 5.10 -> 5.18 from T=1 to 8; GU 14.1 / D 9.1 at T=256) and wins from T=2.
 4. Skeleton and token loop to copy: `regimebench/kernels/hv2g/{hv2g_common.cuh, hv2g_mt1.cu, hv2g_mtn.cu, build.py,
    coop.py, NOTES.md}`; `regimebench/kernels/hv2/hv2_submission.py` (`R11_SKEW` stamps, lines 469-490).

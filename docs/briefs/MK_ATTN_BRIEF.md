@@ -36,7 +36,7 @@ KV bytes = 114,688 B per cached token across all 28 layers (bf16, 8 kv-heads x 1
    per (token, q-head)), `kernels/hv2g/NOTES.md`.
 4. `/raid/garv901/vibe-megakernel/megabench/mkprobe/handoff-step3/LEARNINGS.md` F43, F58-F62 (attention cost at s128
    is mostly fixed overhead), `.../mkprobe/markers/LIMITATIONS.md`.
-5. The design decision context: `/raid/garv901/regime-megakernel/probe/xover/RESULT.md` (main checkout, untracked):
+5. The design decision context: `probe/xover/RESULT.md` (job 9521):
    the whole kernel is tcgen05, so it already runs at ~1845 MHz.
 6. Method: `/raid/garv901/vibe-megakernel/megabench/sota/pi05/` - `mk/SPEC-load-hoist.md` (SPEC template),
    `cute/NOTES.md`, `probe/mk_nullatt_ab.py` (null-attention oracle), `probe/mk_attk2_ab.py`, `probe/ubench/{hbm_ramp.cu,

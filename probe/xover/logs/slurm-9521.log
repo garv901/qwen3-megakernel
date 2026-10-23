@@ -1,0 +1,204 @@
+GPU 0: NVIDIA B200 (UUID: GPU-c88e489a-0693-2c29-a1e3-30952377f742)
+built: xover_e0 xover_e1 xover_e2 xover_em1  (ptxas log: logs/build.log)
+SKIP eng=-1 GU T=1 max|d|=4.264e+01 bad=6144
+{"floor":1,"shape":"GU","T":1,"us_weight_stream":1.94,"us_ffma_math":0.17}
+{"eng":-1,"shape":"GU","T":1,"us_phase":4.963,"us_reps":[4.924,4.982,4.963,4.962,4.976],"mhz":1964,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"GU","T":2,"us_weight_stream":1.94,"us_ffma_math":0.34}
+{"eng":-1,"shape":"GU","T":2,"us_phase":5.030,"us_reps":[4.990,5.030,5.047,5.035,5.016],"mhz":1963,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"GU","T":4,"us_weight_stream":1.94,"us_ffma_math":0.68}
+{"eng":-1,"shape":"GU","T":4,"us_phase":5.107,"us_reps":[5.068,5.107,5.106,5.123,5.119],"mhz":1963,"pass":null,"regs":112,"spill":0}
+SKIP eng=-1 GU T=8 max|d|=4.283e+01 bad=49144
+{"floor":1,"shape":"GU","T":8,"us_weight_stream":1.94,"us_ffma_math":1.35}
+{"eng":-1,"shape":"GU","T":8,"us_phase":5.304,"us_reps":[5.285,5.323,5.304,5.307,5.304],"mhz":1963,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"GU","T":16,"us_weight_stream":1.94,"us_ffma_math":2.71}
+{"eng":-1,"shape":"GU","T":16,"us_phase":5.764,"us_reps":[5.760,5.765,5.764,5.796,5.763],"mhz":1962,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"GU","T":32,"us_weight_stream":1.94,"us_ffma_math":5.41}
+{"eng":-1,"shape":"GU","T":32,"us_phase":6.657,"us_reps":[6.616,6.657,6.663,6.643,6.659],"mhz":1961,"pass":null,"regs":112,"spill":0}
+SKIP eng=-1 GU T=64 max|d|=4.865e+01 bad=393152
+{"floor":1,"shape":"GU","T":64,"us_weight_stream":1.94,"us_ffma_math":10.82}
+{"eng":-1,"shape":"GU","T":64,"us_phase":8.835,"us_reps":[8.835,8.873,8.829,8.838,8.834],"mhz":1960,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"GU","T":128,"us_weight_stream":1.94,"us_ffma_math":21.64}
+{"eng":-1,"shape":"GU","T":128,"us_phase":13.186,"us_reps":[13.185,13.184,13.189,13.186,13.206],"mhz":1961,"pass":null,"regs":112,"spill":0}
+SKIP eng=-1 GU T=256 max|d|=5.103e+01 bad=1572623
+{"floor":1,"shape":"GU","T":256,"us_weight_stream":1.94,"us_ffma_math":43.29}
+{"eng":-1,"shape":"GU","T":256,"us_phase":22.247,"us_reps":[22.237,22.269,22.246,22.263,22.247],"mhz":1962,"pass":null,"regs":112,"spill":0}
+SKIP eng=-1 D T=1 max|d|=5.725e+01 bad=1022
+{"floor":1,"shape":"D","T":1,"us_weight_stream":0.97,"us_ffma_math":0.08}
+{"eng":-1,"shape":"D","T":1,"us_phase":3.531,"us_reps":[3.515,3.530,3.555,3.532,3.531],"mhz":1964,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"D","T":2,"us_weight_stream":0.97,"us_ffma_math":0.17}
+{"eng":-1,"shape":"D","T":2,"us_phase":3.582,"us_reps":[3.583,3.582,3.575,3.573,3.585],"mhz":1963,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"D","T":4,"us_weight_stream":0.97,"us_ffma_math":0.34}
+{"eng":-1,"shape":"D","T":4,"us_phase":3.640,"us_reps":[3.623,3.645,3.640,3.621,3.641],"mhz":1963,"pass":null,"regs":112,"spill":0}
+SKIP eng=-1 D T=8 max|d|=7.252e+01 bad=8190
+{"floor":1,"shape":"D","T":8,"us_weight_stream":0.97,"us_ffma_math":0.68}
+{"eng":-1,"shape":"D","T":8,"us_phase":3.791,"us_reps":[3.787,3.789,3.809,3.800,3.791],"mhz":1963,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"D","T":16,"us_weight_stream":0.97,"us_ffma_math":1.35}
+{"eng":-1,"shape":"D","T":16,"us_phase":4.265,"us_reps":[4.263,4.282,4.260,4.279,4.265],"mhz":1963,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"D","T":32,"us_weight_stream":0.97,"us_ffma_math":2.71}
+{"eng":-1,"shape":"D","T":32,"us_phase":5.156,"us_reps":[5.156,5.161,5.160,5.143,5.136],"mhz":1962,"pass":null,"regs":112,"spill":0}
+SKIP eng=-1 D T=64 max|d|=8.493e+01 bad=65529
+{"floor":1,"shape":"D","T":64,"us_weight_stream":0.97,"us_ffma_math":5.41}
+{"eng":-1,"shape":"D","T":64,"us_phase":6.496,"us_reps":[6.508,6.496,6.527,6.494,6.493],"mhz":1962,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"D","T":128,"us_weight_stream":0.97,"us_ffma_math":10.82}
+{"eng":-1,"shape":"D","T":128,"us_phase":9.218,"us_reps":[9.218,9.238,9.195,9.224,9.203],"mhz":1961,"pass":null,"regs":112,"spill":0}
+SKIP eng=-1 D T=256 max|d|=8.882e+01 bad=262124
+{"floor":1,"shape":"D","T":256,"us_weight_stream":0.97,"us_ffma_math":21.64}
+{"eng":-1,"shape":"D","T":256,"us_phase":14.631,"us_reps":[14.645,14.664,14.631,14.614,14.627],"mhz":1960,"pass":null,"regs":112,"spill":0}
+PASS eng=0 GU T=1 max|d|=1.907e-05 bad=0
+{"floor":1,"shape":"GU","T":1,"us_weight_stream":1.94,"us_ffma_math":0.17}
+{"eng":0,"shape":"GU","T":1,"us_phase":6.909,"us_reps":[6.907,6.958,6.899,6.909,6.919],"mhz":1960,"pass":true,"regs":112,"spill":0}
+{"floor":1,"shape":"GU","T":2,"us_weight_stream":1.94,"us_ffma_math":0.34}
+{"eng":0,"shape":"GU","T":2,"us_phase":7.878,"us_reps":[7.866,7.880,7.879,7.878,7.867],"mhz":1960,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"GU","T":4,"us_weight_stream":1.94,"us_ffma_math":0.68}
+{"eng":0,"shape":"GU","T":4,"us_phase":9.799,"us_reps":[9.799,9.783,9.804,9.781,9.803],"mhz":1960,"pass":null,"regs":112,"spill":0}
+PASS eng=0 GU T=8 max|d|=3.433e-05 bad=0
+{"floor":1,"shape":"GU","T":8,"us_weight_stream":1.94,"us_ffma_math":1.35}
+{"eng":0,"shape":"GU","T":8,"us_phase":13.937,"us_reps":[13.915,13.957,13.935,13.937,13.937],"mhz":1960,"pass":true,"regs":112,"spill":0}
+{"floor":1,"shape":"GU","T":16,"us_weight_stream":1.94,"us_ffma_math":2.71}
+{"eng":0,"shape":"GU","T":16,"us_phase":22.115,"us_reps":[22.107,22.121,22.115,22.113,22.120],"mhz":1961,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"GU","T":32,"us_weight_stream":1.94,"us_ffma_math":5.41}
+{"eng":0,"shape":"GU","T":32,"us_phase":38.510,"us_reps":[38.505,38.510,38.615,38.519,38.497],"mhz":1961,"pass":null,"regs":112,"spill":0}
+PASS eng=0 GU T=64 max|d|=3.815e-05 bad=0
+{"floor":1,"shape":"GU","T":64,"us_weight_stream":1.94,"us_ffma_math":10.82}
+{"eng":0,"shape":"GU","T":64,"us_phase":71.548,"us_reps":[71.529,71.548,71.583,71.562,71.545],"mhz":1962,"pass":true,"regs":112,"spill":0}
+{"floor":1,"shape":"GU","T":128,"us_weight_stream":1.94,"us_ffma_math":21.64}
+{"eng":0,"shape":"GU","T":128,"us_phase":137.623,"us_reps":[137.617,137.623,137.615,137.626,137.669],"mhz":1962,"pass":null,"regs":112,"spill":0}
+PASS eng=0 GU T=256 max|d|=3.815e-05 bad=0
+{"floor":1,"shape":"GU","T":256,"us_weight_stream":1.94,"us_ffma_math":43.29}
+{"eng":0,"shape":"GU","T":256,"us_phase":269.622,"us_reps":[269.610,269.620,269.634,269.643,269.622],"mhz":1962,"pass":true,"regs":112,"spill":0}
+PASS eng=0 D T=1 max|d|=6.485e-05 bad=0
+{"floor":1,"shape":"D","T":1,"us_weight_stream":0.97,"us_ffma_math":0.08}
+{"eng":0,"shape":"D","T":1,"us_phase":5.008,"us_reps":[5.002,5.015,4.996,5.009,5.008],"mhz":1961,"pass":true,"regs":112,"spill":0}
+{"floor":1,"shape":"D","T":2,"us_weight_stream":0.97,"us_ffma_math":0.17}
+{"eng":0,"shape":"D","T":2,"us_phase":5.726,"us_reps":[5.699,5.740,5.707,5.726,5.765],"mhz":1961,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"D","T":4,"us_weight_stream":0.97,"us_ffma_math":0.34}
+{"eng":0,"shape":"D","T":4,"us_phase":6.936,"us_reps":[6.917,6.936,6.926,6.936,6.936],"mhz":1961,"pass":null,"regs":112,"spill":0}
+PASS eng=0 D T=8 max|d|=8.774e-05 bad=0
+{"floor":1,"shape":"D","T":8,"us_weight_stream":0.97,"us_ffma_math":0.68}
+{"eng":0,"shape":"D","T":8,"us_phase":9.691,"us_reps":[9.691,9.675,9.692,9.686,9.692],"mhz":1960,"pass":true,"regs":112,"spill":0}
+{"floor":1,"shape":"D","T":16,"us_weight_stream":0.97,"us_ffma_math":1.35}
+{"eng":0,"shape":"D","T":16,"us_phase":15.192,"us_reps":[15.185,15.182,15.192,15.201,15.195],"mhz":1959,"pass":null,"regs":112,"spill":0}
+{"floor":1,"shape":"D","T":32,"us_weight_stream":0.97,"us_ffma_math":2.71}
+{"eng":0,"shape":"D","T":32,"us_phase":26.289,"us_reps":[26.250,26.289,26.300,26.323,26.285],"mhz":1958,"pass":null,"regs":112,"spill":0}
+PASS eng=0 D T=64 max|d|=9.155e-05 bad=0
+{"floor":1,"shape":"D","T":64,"us_weight_stream":0.97,"us_ffma_math":5.41}
+{"eng":0,"shape":"D","T":64,"us_phase":48.512,"us_reps":[48.469,48.498,48.529,48.512,48.531],"mhz":1958,"pass":true,"regs":112,"spill":0}
+{"floor":1,"shape":"D","T":128,"us_weight_stream":0.97,"us_ffma_math":10.82}
+{"eng":0,"shape":"D","T":128,"us_phase":92.800,"us_reps":[92.793,92.824,92.800,92.818,92.783],"mhz":1958,"pass":null,"regs":112,"spill":0}
+PASS eng=0 D T=256 max|d|=9.918e-05 bad=0
+{"floor":1,"shape":"D","T":256,"us_weight_stream":0.97,"us_ffma_math":21.64}
+{"eng":0,"shape":"D","T":256,"us_phase":181.191,"us_reps":[181.191,181.206,181.163,181.221,181.191],"mhz":1957,"pass":true,"regs":112,"spill":0}
+PASS eng=1 GU T=1 max|d|=2.670e-05 bad=0
+{"floor":1,"shape":"GU","T":1,"us_weight_stream":1.94,"us_ffma_math":0.17}
+{"eng":1,"shape":"GU","T":1,"us_phase":7.735,"us_reps":[7.708,7.744,7.738,7.735,7.719],"mhz":1850,"pass":true,"regs":116,"spill":0}
+{"floor":1,"shape":"GU","T":2,"us_weight_stream":1.94,"us_ffma_math":0.34}
+{"eng":1,"shape":"GU","T":2,"us_phase":7.757,"us_reps":[7.752,7.756,7.772,7.758,7.757],"mhz":1848,"pass":null,"regs":116,"spill":0}
+{"floor":1,"shape":"GU","T":4,"us_weight_stream":1.94,"us_ffma_math":0.68}
+{"eng":1,"shape":"GU","T":4,"us_phase":7.793,"us_reps":[7.777,7.793,7.791,7.795,7.806],"mhz":1848,"pass":null,"regs":116,"spill":0}
+PASS eng=1 GU T=8 max|d|=3.052e-05 bad=0
+{"floor":1,"shape":"GU","T":8,"us_weight_stream":1.94,"us_ffma_math":1.35}
+{"eng":1,"shape":"GU","T":8,"us_phase":7.882,"us_reps":[7.861,7.889,7.888,7.881,7.882],"mhz":1848,"pass":true,"regs":116,"spill":0}
+{"floor":1,"shape":"GU","T":16,"us_weight_stream":1.94,"us_ffma_math":2.71}
+{"eng":1,"shape":"GU","T":16,"us_phase":8.031,"us_reps":[8.030,8.031,8.049,8.031,8.043],"mhz":1848,"pass":null,"regs":116,"spill":0}
+{"floor":1,"shape":"GU","T":32,"us_weight_stream":1.94,"us_ffma_math":5.41}
+{"eng":1,"shape":"GU","T":32,"us_phase":8.215,"us_reps":[8.197,8.324,8.215,8.210,8.216],"mhz":1847,"pass":null,"regs":116,"spill":0}
+PASS eng=1 GU T=64 max|d|=4.196e-05 bad=0
+{"floor":1,"shape":"GU","T":64,"us_weight_stream":1.94,"us_ffma_math":10.82}
+{"eng":1,"shape":"GU","T":64,"us_phase":8.560,"us_reps":[8.544,8.574,8.538,8.560,8.577],"mhz":1842,"pass":true,"regs":116,"spill":0}
+{"floor":1,"shape":"GU","T":128,"us_weight_stream":1.94,"us_ffma_math":21.64}
+{"eng":1,"shape":"GU","T":128,"us_phase":9.983,"us_reps":[9.989,9.965,10.005,9.962,9.983],"mhz":1834,"pass":null,"regs":116,"spill":0}
+PASS eng=1 GU T=256 max|d|=4.578e-05 bad=0
+{"floor":1,"shape":"GU","T":256,"us_weight_stream":1.94,"us_ffma_math":43.29}
+{"eng":1,"shape":"GU","T":256,"us_phase":14.097,"us_reps":[14.087,14.081,14.097,14.103,14.120],"mhz":1836,"pass":true,"regs":116,"spill":0}
+PASS eng=1 D T=1 max|d|=6.866e-05 bad=0
+{"floor":1,"shape":"D","T":1,"us_weight_stream":0.97,"us_ffma_math":0.08}
+{"eng":1,"shape":"D","T":1,"us_phase":5.097,"us_reps":[5.086,5.097,5.104,5.107,5.082],"mhz":1848,"pass":true,"regs":116,"spill":0}
+{"floor":1,"shape":"D","T":2,"us_weight_stream":0.97,"us_ffma_math":0.17}
+{"eng":1,"shape":"D","T":2,"us_phase":5.118,"us_reps":[5.106,5.125,5.133,5.118,5.101],"mhz":1847,"pass":null,"regs":116,"spill":0}
+{"floor":1,"shape":"D","T":4,"us_weight_stream":0.97,"us_ffma_math":0.34}
+{"eng":1,"shape":"D","T":4,"us_phase":5.139,"us_reps":[5.125,5.144,5.145,5.136,5.139],"mhz":1849,"pass":null,"regs":116,"spill":0}
+PASS eng=1 D T=8 max|d|=9.155e-05 bad=0
+{"floor":1,"shape":"D","T":8,"us_weight_stream":0.97,"us_ffma_math":0.68}
+{"eng":1,"shape":"D","T":8,"us_phase":5.180,"us_reps":[5.170,5.181,5.180,5.192,5.175],"mhz":1848,"pass":true,"regs":116,"spill":0}
+{"floor":1,"shape":"D","T":16,"us_weight_stream":0.97,"us_ffma_math":1.35}
+{"eng":1,"shape":"D","T":16,"us_phase":5.252,"us_reps":[5.250,5.248,5.254,5.252,5.253],"mhz":1848,"pass":null,"regs":116,"spill":0}
+{"floor":1,"shape":"D","T":32,"us_weight_stream":0.97,"us_ffma_math":2.71}
+{"eng":1,"shape":"D","T":32,"us_phase":5.379,"us_reps":[5.362,5.379,5.380,5.393,5.374],"mhz":1847,"pass":null,"regs":116,"spill":0}
+PASS eng=1 D T=64 max|d|=9.918e-05 bad=0
+{"floor":1,"shape":"D","T":64,"us_weight_stream":0.97,"us_ffma_math":5.41}
+{"eng":1,"shape":"D","T":64,"us_phase":5.746,"us_reps":[5.726,5.747,5.766,5.746,5.722],"mhz":1842,"pass":true,"regs":116,"spill":0}
+{"floor":1,"shape":"D","T":128,"us_weight_stream":0.97,"us_ffma_math":10.82}
+{"eng":1,"shape":"D","T":128,"us_phase":6.718,"us_reps":[6.715,6.733,6.718,6.729,6.713],"mhz":1836,"pass":null,"regs":116,"spill":0}
+PASS eng=1 D T=256 max|d|=1.144e-04 bad=0
+{"floor":1,"shape":"D","T":256,"us_weight_stream":0.97,"us_ffma_math":21.64}
+{"eng":1,"shape":"D","T":256,"us_phase":9.087,"us_reps":[9.069,9.075,9.095,9.087,9.090],"mhz":1847,"pass":true,"regs":116,"spill":0}
+PASS eng=2 GU T=1 max|d|=1.907e-05 bad=0
+{"floor":1,"shape":"GU","T":1,"us_weight_stream":1.94,"us_ffma_math":0.17}
+{"eng":2,"shape":"GU","T":1,"us_phase":7.725,"us_reps":[7.725,7.764,7.703,7.734,7.721],"mhz":1961,"pass":true,"regs":119,"spill":0}
+PASS eng=3 GU T=1 max|d|=2.670e-05 bad=0
+{"eng":3,"shape":"GU","T":1,"us_phase":8.178,"us_reps":[8.177,8.199,8.176,8.178,8.194],"mhz":1848,"pass":true,"regs":119,"spill":0}
+{"floor":1,"shape":"GU","T":2,"us_weight_stream":1.94,"us_ffma_math":0.34}
+{"eng":2,"shape":"GU","T":2,"us_phase":8.669,"us_reps":[8.668,8.691,8.668,8.669,8.684],"mhz":1961,"pass":null,"regs":119,"spill":0}
+{"eng":3,"shape":"GU","T":2,"us_phase":8.233,"us_reps":[8.235,8.228,8.224,8.233,8.246],"mhz":1848,"pass":null,"regs":119,"spill":0}
+{"floor":1,"shape":"GU","T":4,"us_weight_stream":1.94,"us_ffma_math":0.68}
+{"eng":2,"shape":"GU","T":4,"us_phase":10.641,"us_reps":[10.609,10.641,10.664,10.625,10.662],"mhz":1960,"pass":null,"regs":119,"spill":0}
+{"eng":3,"shape":"GU","T":4,"us_phase":8.263,"us_reps":[8.251,8.282,8.263,8.262,8.268],"mhz":1848,"pass":null,"regs":119,"spill":0}
+PASS eng=2 GU T=8 max|d|=3.433e-05 bad=0
+{"floor":1,"shape":"GU","T":8,"us_weight_stream":1.94,"us_ffma_math":1.35}
+{"eng":2,"shape":"GU","T":8,"us_phase":14.901,"us_reps":[14.903,14.901,14.906,14.901,14.884],"mhz":1961,"pass":true,"regs":119,"spill":0}
+PASS eng=3 GU T=8 max|d|=3.052e-05 bad=0
+{"eng":3,"shape":"GU","T":8,"us_phase":8.355,"us_reps":[8.327,8.355,8.354,8.359,8.359],"mhz":1848,"pass":true,"regs":119,"spill":0}
+{"floor":1,"shape":"GU","T":16,"us_weight_stream":1.94,"us_ffma_math":2.71}
+{"eng":2,"shape":"GU","T":16,"us_phase":23.198,"us_reps":[23.329,23.197,23.190,23.198,23.200],"mhz":1961,"pass":null,"regs":119,"spill":0}
+{"eng":3,"shape":"GU","T":16,"us_phase":8.491,"us_reps":[8.483,8.505,8.491,8.510,8.486],"mhz":1849,"pass":null,"regs":119,"spill":0}
+{"floor":1,"shape":"GU","T":32,"us_weight_stream":1.94,"us_ffma_math":5.41}
+{"eng":2,"shape":"GU","T":32,"us_phase":39.901,"us_reps":[39.869,39.954,39.901,39.914,39.897],"mhz":1961,"pass":null,"regs":119,"spill":0}
+{"eng":3,"shape":"GU","T":32,"us_phase":8.704,"us_reps":[8.680,8.704,8.701,8.727,8.722],"mhz":1845,"pass":null,"regs":119,"spill":0}
+PASS eng=2 GU T=64 max|d|=3.433e-05 bad=0
+{"floor":1,"shape":"GU","T":64,"us_weight_stream":1.94,"us_ffma_math":10.82}
+{"eng":2,"shape":"GU","T":64,"us_phase":73.591,"us_reps":[73.598,73.608,73.591,73.591,73.591],"mhz":1962,"pass":true,"regs":119,"spill":0}
+PASS eng=3 GU T=64 max|d|=4.196e-05 bad=0
+{"eng":3,"shape":"GU","T":64,"us_phase":9.212,"us_reps":[9.185,9.212,9.177,9.238,9.213],"mhz":1842,"pass":true,"regs":119,"spill":0}
+{"floor":1,"shape":"GU","T":128,"us_weight_stream":1.94,"us_ffma_math":21.64}
+{"eng":2,"shape":"GU","T":128,"us_phase":140.378,"us_reps":[140.378,140.397,140.431,140.373,140.373],"mhz":1962,"pass":null,"regs":119,"spill":0}
+{"eng":3,"shape":"GU","T":128,"us_phase":10.445,"us_reps":[10.445,10.493,10.447,10.443,10.420],"mhz":1835,"pass":null,"regs":119,"spill":0}
+PASS eng=2 GU T=256 max|d|=3.815e-05 bad=0
+{"floor":1,"shape":"GU","T":256,"us_weight_stream":1.94,"us_ffma_math":43.29}
+{"eng":2,"shape":"GU","T":256,"us_phase":273.760,"us_reps":[273.784,273.798,273.760,273.719,273.739],"mhz":1961,"pass":true,"regs":119,"spill":0}
+PASS eng=3 GU T=256 max|d|=4.578e-05 bad=0
+{"eng":3,"shape":"GU","T":256,"us_phase":14.521,"us_reps":[14.515,14.518,14.540,14.521,14.545],"mhz":1839,"pass":true,"regs":119,"spill":0}
+PASS eng=2 D T=1 max|d|=6.866e-05 bad=0
+{"floor":1,"shape":"D","T":1,"us_weight_stream":0.97,"us_ffma_math":0.08}
+{"eng":2,"shape":"D","T":1,"us_phase":5.653,"us_reps":[5.636,5.674,5.653,5.676,5.651],"mhz":1962,"pass":true,"regs":119,"spill":0}
+PASS eng=3 D T=1 max|d|=6.866e-05 bad=0
+{"eng":3,"shape":"D","T":1,"us_phase":5.722,"us_reps":[5.722,5.722,5.724,5.728,5.705],"mhz":1850,"pass":true,"regs":119,"spill":0}
+{"floor":1,"shape":"D","T":2,"us_weight_stream":0.97,"us_ffma_math":0.17}
+{"eng":2,"shape":"D","T":2,"us_phase":6.234,"us_reps":[6.239,6.215,6.231,6.234,6.238],"mhz":1962,"pass":null,"regs":119,"spill":0}
+{"eng":3,"shape":"D","T":2,"us_phase":5.684,"us_reps":[5.680,5.703,5.682,5.684,5.703],"mhz":1852,"pass":null,"regs":119,"spill":0}
+{"floor":1,"shape":"D","T":4,"us_weight_stream":0.97,"us_ffma_math":0.34}
+{"eng":2,"shape":"D","T":4,"us_phase":7.533,"us_reps":[7.511,7.538,7.531,7.556,7.533],"mhz":1960,"pass":null,"regs":119,"spill":0}
+{"eng":3,"shape":"D","T":4,"us_phase":5.719,"us_reps":[5.708,5.724,5.711,5.721,5.719],"mhz":1852,"pass":null,"regs":119,"spill":0}
+PASS eng=2 D T=8 max|d|=8.011e-05 bad=0
+{"floor":1,"shape":"D","T":8,"us_weight_stream":0.97,"us_ffma_math":0.68}
+{"eng":2,"shape":"D","T":8,"us_phase":10.351,"us_reps":[10.351,10.346,10.349,10.369,10.367],"mhz":1959,"pass":true,"regs":119,"spill":0}
+PASS eng=3 D T=8 max|d|=8.774e-05 bad=0
+{"eng":3,"shape":"D","T":8,"us_phase":5.765,"us_reps":[5.754,5.783,5.762,5.765,5.766],"mhz":1851,"pass":true,"regs":119,"spill":0}
+{"floor":1,"shape":"D","T":16,"us_weight_stream":0.97,"us_ffma_math":1.35}
+{"eng":2,"shape":"D","T":16,"us_phase":15.930,"us_reps":[15.920,15.923,15.944,15.930,15.947],"mhz":1958,"pass":null,"regs":119,"spill":0}
+{"eng":3,"shape":"D","T":16,"us_phase":5.852,"us_reps":[5.841,5.875,5.852,5.850,5.852],"mhz":1850,"pass":null,"regs":119,"spill":0}
+{"floor":1,"shape":"D","T":32,"us_weight_stream":0.97,"us_ffma_math":2.71}
+{"eng":2,"shape":"D","T":32,"us_phase":27.234,"us_reps":[27.204,27.233,27.237,27.234,27.251],"mhz":1957,"pass":null,"regs":119,"spill":0}
+{"eng":3,"shape":"D","T":32,"us_phase":6.033,"us_reps":[6.017,6.035,6.040,6.033,6.012],"mhz":1847,"pass":null,"regs":119,"spill":0}
+PASS eng=2 D T=64 max|d|=8.774e-05 bad=0
+{"floor":1,"shape":"D","T":64,"us_weight_stream":0.97,"us_ffma_math":5.41}
+{"eng":2,"shape":"D","T":64,"us_phase":50.089,"us_reps":[50.064,50.102,50.087,50.103,50.089],"mhz":1957,"pass":true,"regs":119,"spill":0}
+PASS eng=3 D T=64 max|d|=9.155e-05 bad=0
+{"eng":3,"shape":"D","T":64,"us_phase":6.416,"us_reps":[6.389,6.422,6.416,6.403,6.422],"mhz":1843,"pass":true,"regs":119,"spill":0}
+{"floor":1,"shape":"D","T":128,"us_weight_stream":0.97,"us_ffma_math":10.82}
+{"eng":2,"shape":"D","T":128,"us_phase":94.819,"us_reps":[94.791,94.787,94.823,94.819,94.853],"mhz":1957,"pass":null,"regs":119,"spill":0}
+{"eng":3,"shape":"D","T":128,"us_phase":7.186,"us_reps":[7.169,7.185,7.186,7.189,7.188],"mhz":1836,"pass":null,"regs":119,"spill":0}
+PASS eng=2 D T=256 max|d|=1.068e-04 bad=0
+{"floor":1,"shape":"D","T":256,"us_weight_stream":0.97,"us_ffma_math":21.64}
+{"eng":2,"shape":"D","T":256,"us_phase":184.125,"us_reps":[184.124,184.111,184.125,184.198,184.130],"mhz":1957,"pass":true,"regs":119,"spill":0}
+PASS eng=3 D T=256 max|d|=1.068e-04 bad=0
+{"eng":3,"shape":"D","T":256,"us_phase":9.621,"us_reps":[9.625,9.621,9.623,9.619,9.615],"mhz":1848,"pass":true,"regs":119,"spill":0}
