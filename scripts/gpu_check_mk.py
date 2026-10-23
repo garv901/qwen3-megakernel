@@ -6,7 +6,8 @@
 
 Default check, per workload: rel-L2 of logits / k_new / v_new to the FP32 reference against the BF16 reference's own rel-L2 (pass = worst ratio
 <= 2, harness/accuracy.py), next_token match rate, repeat-launch idempotence (same logits to a small tolerance: red.add order is not fixed),
-one steady timing (graph replay, median of 5 x 20 launches). Exit code 1 on any FAIL / ERROR.
+one steady timing (graph replay, median of 5 x 20 launches). Repeat check: second launch passes the band too and
+the launch-to-launch rel-L2 is < 0.1 x the BF16 band; next_token must equal the argmax of mk's own logits. Exit code 1 on any FAIL / ERROR.
 --null MASK: bit p-1 = phase p (1..6), bit 6 = LM head; prints the median step time next to the full build's.
 --stamps: median over CTAs and layers 4..23 of (wait exit of the previous barrier -> arrive) per phase, and of (arrive -> wait exit) per barrier.
 """
@@ -67,15 +68,22 @@ def check(args, dev: str) -> int:
                 assert tuple(out[k].shape) == shape and str(out[k].dtype).endswith(dt), f"{k}: {out[k].shape} {out[k].dtype}"
             gr = accuracy.grade_vs_oracle(accuracy.compare(out, ref32), band)
             m32 = accuracy.compare(out, ref32)
+            self_arg = float((out["next_token"].long() == out["logits"].argmax(-1)).float().mean())   # argmax of mk's own logits
             step.launch(); torch.cuda.synchronize()
-            idem = float((step.outputs()["logits"] - out["logits"]).abs().max())
+            out2 = step.outputs()
+            gr2 = accuracy.grade_vs_oracle(accuracy.compare(out2, ref32), band)
+            idem = float((out2["logits"] - out["logits"]).abs().max())
+            # red.add order is not fixed: repeat launches must each pass the band and differ by << the BF16 band
+            rep = max(float((out2[k].float() - out[k].float()).norm() / out[k].float().norm().clamp_min(1e-30)) / max(band[k], accuracy.BAND_FLOOR)
+                      for k in ("logits", "k_new", "v_new"))
             us = timed(step)
-            ok = gr["verdict"] == "pass" and idem < 1e-2   # red.add order is not fixed: repeat launches agree to a tolerance, not bit-exactly
+            ok = gr["verdict"] == "pass" and gr2["verdict"] == "pass" and rep < 0.1 and self_arg == 1.0
             failures += not ok
             c = step.config
             rows.append((w.id, "PASS" if ok else "FAIL",
                          f"ratio {gr['worst_ratio']:.2f} (logits {gr['ratios']['logits']:.2f} k {gr['ratios']['k_new']:.2f} v {gr['ratios']['v_new']:.2f}) "
-                         f"tok_match {m32['next_token']['match_rate']:.2f} repeat max_abs {idem:.1e} | npad {c['npad']} regs {c['regs']} local {c['local_bytes']} | {us:.1f} us"))
+                         f"tok_match {m32['next_token']['match_rate']:.2f} (ref argmax {m32['logits']['argmax_match_rate']:.2f}, self {self_arg:.2f}) "
+                         f"repeat {rep:.3f} x band, max_abs {idem:.1e} | npad {c['npad']} regs {c['regs']} local {c['local_bytes']} | {us:.1f} us"))
         except Exception as e:  # noqa: BLE001
             traceback.print_exc(); failures += 1
             rows.append((w.id, "ERROR", f"{type(e).__name__}: {str(e)[:120]}"))

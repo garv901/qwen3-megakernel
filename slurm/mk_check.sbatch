@@ -16,5 +16,8 @@ OUT=results/2026-10-23-mk
 "$PY" scripts/gpu_check_mk.py --json "$OUT/mk_check_$SLURM_JOB_ID.json" "$@"
 rc=$?
 echo "check exit $rc"
-[ $rc -eq 0 ] && "$PY" scripts/gpu_check_mk.py --stamps "$@"
+"$PY" scripts/gpu_check_mk.py --stamps "$@"
 echo "stamps exit $?"
+for m in 0x04 0x3b 0x40; do   # null attention; only attention real; null LM head
+  "$PY" scripts/gpu_check_mk.py --null $m "$@"; echo "null $m exit $?"
+done
