@@ -89,7 +89,7 @@ def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SME
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     off_bars = ring * ub + max(2 * xs, attn_bytes)
-    if lmp and npad <= 64:
+    if lmp and npad <= 64 and ku == 128:
         return 1024 + max(off_bars, 8 * xs + lm_ring(npad, lmr) * ub) + 384
     return 1024 + off_bars + 256
 

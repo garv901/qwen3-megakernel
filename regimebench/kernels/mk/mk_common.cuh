@@ -76,8 +76,7 @@ constexpr int XREG = (2 * XS > ATTN_BYTES) ? 2 * XS : ATTN_BYTES;
 constexpr int OFF_X = RING * UB;              // B-tile slots (offset from the 1024-aligned smem base)
 // LM head, pipelined path (SPEC-lm), NPAD <= 64: smem from the base = [XL: 8 k-chunks x XS][LM ring: LMR x UB]; overlays every other region
 // (no other phase runs after the LM phase); the barriers stay behind the larger of the two layouts.
-constexpr bool LMP = MK_LMP && NPAD <= 64;
-static_assert(!LMP || MK_KU == 128, "MK_LMP needs MK_KU = 128 (8 k-chunks of 128)");
+constexpr bool LMP = MK_LMP && NPAD <= 64 && MK_KU == 128;   // KU 64 keeps the v0 LM path
 constexpr int LMR = MK_LMR ? MK_LMR : (NPAD == 16 ? 4 : NPAD == 32 ? 3 : 2);   // keep in sync with build.py:lm_ring
 constexpr int LM_EPI_WARPS = 4 * (NPAD / 16 < 3 ? NPAD / 16 : 3);   // epilogue warps of the LM head (accempty count)
 constexpr int LM_RING_OFF = 8 * XS;
