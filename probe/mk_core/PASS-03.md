@@ -28,8 +28,14 @@ P3 goes first; P2 follows when v2 is in.
 - Check (job 9588): ALL PASS at 11 points; LM phase (stamps) 44.8 (b1) / 48.9 (b16) / 54.0 (b32) us = 6.9 / 6.4 / 5.8 TB/s
   (was ~99 / 112). Still v0 LM path: 129 (b64) / 173 (b128) / 304 (b256) us.
 
+- P3b (9a965f8): NPAD 64 on the pipelined path with LMR 2 (dyn 198016 B, 113 regs; the 12 epilogue warps loop over 4 column
+  chunks). A/B (job 9590, 9 rounds): R1-b64 -36.8 [-37.6, -34.4]; R0-b1 -51.8, R1-b16 -68.5 (same as P3). **Kept.**
+  MK_KU 64 keeps the v0 LM path (test fail at bc685f7, fixed 9a965f8).
+- e2e v2 (job 9589, tag mk-core-v2): R1-b64 missing. The job read the kernel source after the P3b edit with the old build.py
+  (static_assert dyn smem). The other 27 points are v2 SASS. From now on e2e jobs run from a detached snapshot worktree (REPO=...).
+
 ## Next
-- P3b: the pipelined LM head at NPAD >= 64. NPAD 64: XL = 128 KB + LMR 2 = 193 KB, fits as is. NPAD 128 / 256: X does not fit
+- P3c: the pipelined LM head at NPAD >= 128. NPAD 128 / 256: X does not fit
   (256 / 512 KB); options: X k-chunk ring (restage per k-chunk, 8 chunks, shared by all row blocks of a pass over a row group), or
   output tiles of N = 64 tokens with the weights re-read from L2 (2 / 4 passes). Epilogue cost at b256 (logits 256 x 151936 fp32
   = 156 MB of writes) is a floor of ~24 us by itself.

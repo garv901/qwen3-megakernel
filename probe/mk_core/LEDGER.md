@@ -10,6 +10,8 @@
 | P1 | barrier | bench: v0 barrier is the cheapest of 7 (1.095 us); MK_PFA: prefetch after arrive | b1 -60..-100 | -66 (b1), -74 (b16), -26 (b64), -30 (b256), -48 (R2-kv8192); latency 1.02 us/barrier after | 9579, 9580, 9582, 9583 | 0.05 | yes (MK_PFA=1) | mk-core-v1 |
 | v1 e2e | all | v1 = P1 (b83147c), all 28 points, mk vs fi-graph interleaved | - | mk 796 (b1) / 956 (b16) / 1671 (b64) / 2835 (b128) / 5735 (b256); -63..-86 vs v0 at 27/28 points; b128 +68 vs v0 [H: other GPU, 9578 GPU-623e, 9584 GPU-0192; recheck in the P3 A/B]. Wins vs P0 fi: 11/28 (R1-b1..b16, R2-kv128/512, R3-b8-kv1024, R6-q2/q4/q8); R0-b1 795.6 vs 787 still loses. Accuracy pass at all points. results/2026-10-23-mk/v1 | 9584 | 0 (background) | - | - |
 | P3 | LM head | MK_LMP: X staged once, LM ring of LMR units, 2 TMEM accumulators, producer / MMA / epilogue warps (NPAD 16, 32) | b1 -35..-45 | -60 (b1), -68 (b16), -67 (b32), -51 (R2-kv8192), -60 (R6-q4); LM phase 99 -> 44.8 us at b1 (6.9 TB/s); check ALL PASS | 9585 (trap, arm smem), 9586, 9588 | 0.05 | yes (MK_LMP=1, LMR 4 / 3) | mk-core-v2 |
+| v2 e2e | all | v2 (7f7aad1), 27 points (R1-b64 failed: source changed under the job) | - | see results/2026-10-23-mk/v2 | 9589 | 0 (background) | - | - |
+| P3b | LM head | pipelined LM head at NPAD 64 (LMR 2) | -30..-40 | -36.8 (R1-b64) | 9590 | 0.03 | yes | mk-core-v3 |
 
 ## Requests to MK-attn (2026-10-23, agreed by message)
 - A1 v1 output: bf16 `[total_q, 2048]` row-major (O-proj tcgen05 B operand). Input q: bf16 `[total_q, 16, 128]`
