@@ -119,7 +119,8 @@ harness/) goes to the user/orchestrator as a request; it lands on `main`, then y
   `--time` (the run-gpu-job skill). Jobs cap at 2 h.
 - Submit from the worktree root: `slurm/regime.sbatch` runs the code of the checkout you submit from (it prints
   `REPO=... branch sha` in the log - check it).
-- `pytest` is not installed in the venv (`/raid/garv901/vibe-megakernel/.venv`); ask the user before installing anything.
+- CPU tests: `PYTHONPATH=$PWD $PY -m pytest -q tests` (venv `/raid/garv901/vibe-megakernel/.venv`, shared with other
+  projects: ask the user before installing anything into it).
 
 ## Deliverable at the end
 MK-core owns the single Artifact page for `mk`. You write your section as `probe/mk_attn/PAGE_SECTION.md` on your
