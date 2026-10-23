@@ -13,6 +13,7 @@
 | v2 e2e | all | v2 (7f7aad1), 27 points (R1-b64 failed: source changed under the job) | - | see results/2026-10-23-mk/v2 | 9589 | 0 (background) | - | - |
 | P3b | LM head | pipelined LM head at NPAD 64 (LMR 2) | -30..-40 | -36.8 (R1-b64) | 9590 | 0.03 | yes | mk-core-v3 |
 | v3 e2e | all | v3 (b5cb2f2, snapshot worktree), all 28 points | - | mk 737 (b1) / 886 (b16) / 1134 (b32) / 1639 (b64) / 2837 (b128) / 5723 (b256); -46..-70 vs v1 at the NPAD <= 64 points, b128 +2.4 / b256 -11 (same LM path). **Wins vs P0 fi: 13/28** (R0-b1, R1-b1..b32, R2-kv128/512, R3-b8-kv1024, R6-q2/q4/q8). Losses: KV >= 1024 at b1 (attention placeholder: 1.03-5.9x), R3-b8-kv4096, R3-b32, R6-q16, R1-b64..b256 (GEMM at L + attention). Accuracy pass at all points. results/2026-10-23-mk/v3 | 9591 | 0 (background) | - | - |
+| P5a | QKV (NPAD 256) | tile-stream engine, QKV with B = bf16 xb by TMA; xb by D ticket finalize + prologue; MK_TS = min NPAD (256) | -150..-250 (b256) | -210.8 (R1-b256); b128 +54.2 so off there (D finalize on the critical path, 9603); check 9609 ALL PASS 11/11 (b256 5529 us) | 9602 / 9603 / 9609 | 0.6 | yes (b256 only) | mk-core-v4 |
 
 ## Requests to MK-attn (2026-10-23, agreed by message)
 - A1 v1 output: bf16 `[total_q, 2048]` row-major (O-proj tcgen05 B operand). Input q: bf16 `[total_q, 16, 128]`

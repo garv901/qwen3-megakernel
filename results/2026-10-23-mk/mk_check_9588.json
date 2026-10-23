@@ -1,0 +1,57 @@
+[
+ {
+  "workload": "R0-b1-kv128",
+  "verdict": "PASS",
+  "detail": "ratio 0.53 (logits 0.52 k 0.52 v 0.53) tok_match 0.00 (ref argmax 0.00, self 1.00) repeat 0.210 x band, max_abs 2.4e-02 | npad 16 regs 86 local 0 | 735.4 us"
+ },
+ {
+  "workload": "R1-b2-kv128",
+  "verdict": "PASS",
+  "detail": "ratio 0.47 (logits 0.47 k 0.47 v 0.47) tok_match 0.50 (ref argmax 0.50, self 1.00) repeat 0.206 x band, max_abs 3.5e-02 | npad 16 regs 86 local 0 | 748.9 us"
+ },
+ {
+  "workload": "R1-b8-kv128",
+  "verdict": "PASS",
+  "detail": "ratio 0.49 (logits 0.48 k 0.48 v 0.49) tok_match 1.00 (ref argmax 1.00, self 1.00) repeat 0.138 x band, max_abs 3.0e-02 | npad 16 regs 86 local 0 | 766.8 us"
+ },
+ {
+  "workload": "R1-b16-kv128",
+  "verdict": "PASS",
+  "detail": "ratio 0.47 (logits 0.47 k 0.47 v 0.47) tok_match 0.94 (ref argmax 0.94, self 1.00) repeat 0.177 x band, max_abs 3.7e-02 | npad 16 regs 86 local 0 | 886.5 us"
+ },
+ {
+  "workload": "R1-b32-kv128",
+  "verdict": "PASS",
+  "detail": "ratio 0.46 (logits 0.45 k 0.46 v 0.46) tok_match 0.94 (ref argmax 0.94, self 1.00) repeat 0.172 x band, max_abs 3.9e-02 | npad 32 regs 80 local 0 | 1142.0 us"
+ },
+ {
+  "workload": "R1-b64-kv128",
+  "verdict": "PASS",
+  "detail": "ratio 0.47 (logits 0.46 k 0.47 v 0.47) tok_match 0.92 (ref argmax 0.92, self 1.00) repeat 0.190 x band, max_abs 6.4e-02 | npad 64 regs 116 local 0 | 1671.7 us"
+ },
+ {
+  "workload": "R1-b128-kv128",
+  "verdict": "PASS",
+  "detail": "ratio 0.48 (logits 0.47 k 0.48 v 0.48) tok_match 0.95 (ref argmax 0.95, self 1.00) repeat 0.179 x band, max_abs 5.8e-02 | npad 128 regs 115 local 0 | 2831.6 us"
+ },
+ {
+  "workload": "R1-b256-kv128",
+  "verdict": "PASS",
+  "detail": "ratio 0.48 (logits 0.47 k 0.48 v 0.48) tok_match 0.94 (ref argmax 0.94, self 1.00) repeat 0.179 x band, max_abs 6.4e-02 | npad 256 regs 113 local 0 | 5741.1 us"
+ },
+ {
+  "workload": "R2-b1-kv8192",
+  "verdict": "PASS",
+  "detail": "ratio 0.47 (logits 0.47 k 0.47 v 0.46) tok_match 0.00 (ref argmax 0.00, self 1.00) repeat 0.219 x band, max_abs 2.5e-02 | npad 16 regs 86 local 0 | 2946.0 us"
+ },
+ {
+  "workload": "R3-b8-kv4096",
+  "verdict": "PASS",
+  "detail": "ratio 0.46 (logits 0.44 k 0.45 v 0.46) tok_match 1.00 (ref argmax 1.00, self 1.00) repeat 0.194 x band, max_abs 3.5e-02 | npad 16 regs 86 local 0 | 1928.8 us"
+ },
+ {
+  "workload": "R6-b1-kv1024-q4",
+  "verdict": "PASS",
+  "detail": "ratio 0.45 (logits 0.43 k 0.45 v 0.45) tok_match 1.00 (ref argmax 1.00, self 1.00) repeat 0.181 x band, max_abs 2.6e-02 | npad 16 regs 86 local 0 | 989.6 us"
+ }
+]
