@@ -1,0 +1,42 @@
+[
+ {
+  "workload": "R1-b1-kv128",
+  "variant": "graph-pdl-best",
+  "verdict": "PASS",
+  "accuracy": "ratio 0.81 (<=2) repeat-launch max_abs 0.0e+00",
+  "tok_match": "1.00",
+  "steady_us": "779.7",
+  "attn": "decode/cute-dsl/tc=True",
+  "gemm/pdl": "gemm={'qkv': 'cute-dsl', 'o': 'cute-dsl', 'gu': 'cute-dsl', 'down': 'cute-dsl', 'lm_head': 'cute-dsl'} pdl=254/312"
+ },
+ {
+  "workload": "R1-b16-kv128",
+  "variant": "graph-pdl-best",
+  "verdict": "PASS",
+  "accuracy": "ratio 0.82 (<=2) repeat-launch max_abs 0.0e+00",
+  "tok_match": "0.81",
+  "steady_us": "936.4",
+  "attn": "decode/cute-dsl/tc=True",
+  "gemm/pdl": "gemm={'qkv': 'cute-dsl', 'o': 'cute-dsl', 'gu': 'cute-dsl', 'down': 'cute-dsl', 'lm_head': 'cute-dsl'} pdl=254/312"
+ },
+ {
+  "workload": "R1-b64-kv128",
+  "variant": "graph-pdl-best",
+  "verdict": "PASS",
+  "accuracy": "ratio 0.80 (<=2) repeat-launch max_abs 0.0e+00",
+  "tok_match": "0.94",
+  "steady_us": "1337.1",
+  "attn": "decode/trtllm-direct",
+  "gemm/pdl": "gemm={'qkv': 'cudnn', 'o': 'tgv', 'gu': 'cute-dsl', 'down': 'tgv', 'lm_head': 'cute-dsl'} pdl=197/312"
+ },
+ {
+  "workload": "R1-b256-kv128",
+  "variant": "graph-pdl-best",
+  "verdict": "PASS",
+  "accuracy": "ratio 0.80 (<=2) repeat-launch max_abs 0.0e+00",
+  "tok_match": "0.89",
+  "steady_us": "2268.0",
+  "attn": "decode/fa2/tc=False",
+  "gemm/pdl": "gemm={'qkv': 'cudnn', 'o': 'cudnn', 'gu': 'cublas', 'down': 'cute-dsl', 'lm_head': 'cudnn'} pdl=141/312"
+ }
+]
