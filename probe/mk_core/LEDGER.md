@@ -20,3 +20,9 @@
   K-major SW128 into the B slot `xs` (layout of mk_step.cu:96-115 @0be7b19, rows >= ntok zero), 0 B scratch smem.
   Called after the O-proj barrier while the Wo TMA is in flight; MK-core fences proxy.async after it. Global ao
   [total_q, 2048] stays the fallback. Owed by MK-core: the unit rule of the NPAD 256 (cta_group::2) bucket.
+- P2 interface v2 (2026-10-23, agreed in principle by message): A1 takes fp32 qkv split-K sums + rr1 + qn/kn + RoPE table +
+  t_base/t_vis and does q/k-norm + RoPE + KV write. The last KV split of each (seq, kv-head) owns the new-token rows (only
+  writer, uses them from smem). MK-attn estimate [H]: +0.1-0.3 us/layer at b1, +0.3-0.8 at b256. Lands behind a flag; v1
+  (post-RoPE bf16 q) stays. MK-core sends the SPEC with exact layouts when P2 starts.
+- MK-attn bench barrier (= hv2g bar_arrive/bar_wait): 1.12 us (job 9567) vs 1.7-2.7 us "wait" in mk v0 stamps: v0 waits
+  include imbalance / phase-edge work (P1 bench separates them).

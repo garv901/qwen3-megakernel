@@ -1,0 +1,57 @@
+[
+ {
+  "workload": "R0-b1-kv128",
+  "verdict": "FAIL",
+  "detail": "ratio 0.54 (logits 0.53 k 0.53 v 0.54) tok_match 0.00 repeat max_abs 2.4e-02 | npad 16 regs 86 local 0 | 867.7 us"
+ },
+ {
+  "workload": "R1-b2-kv128",
+  "verdict": "FAIL",
+  "detail": "ratio 0.48 (logits 0.48 k 0.46 v 0.46) tok_match 1.00 repeat max_abs 2.7e-02 | npad 16 regs 86 local 0 | 878.3 us"
+ },
+ {
+  "workload": "R1-b8-kv128",
+  "verdict": "FAIL",
+  "detail": "ratio 0.48 (logits 0.47 k 0.48 v 0.48) tok_match 1.00 repeat max_abs 4.2e-02 | npad 16 regs 86 local 0 | 914.6 us"
+ },
+ {
+  "workload": "R1-b16-kv128",
+  "verdict": "FAIL",
+  "detail": "ratio 0.47 (logits 0.47 k 0.47 v 0.47) tok_match 0.88 repeat max_abs 3.6e-02 | npad 16 regs 86 local 0 | 1030.6 us"
+ },
+ {
+  "workload": "R1-b32-kv128",
+  "verdict": "FAIL",
+  "detail": "ratio 0.46 (logits 0.45 k 0.46 v 0.46) tok_match 0.97 repeat max_abs 4.3e-02 | npad 32 regs 86 local 0 | 1266.3 us"
+ },
+ {
+  "workload": "R1-b64-kv128",
+  "verdict": "FAIL",
+  "detail": "ratio 0.47 (logits 0.46 k 0.47 v 0.47) tok_match 0.92 repeat max_abs 5.8e-02 | npad 64 regs 119 local 0 | 1704.7 us"
+ },
+ {
+  "workload": "R1-b128-kv128",
+  "verdict": "FAIL",
+  "detail": "ratio 0.48 (logits 0.47 k 0.48 v 0.48) tok_match 0.95 repeat max_abs 5.6e-02 | npad 128 regs 117 local 0 | 2770.0 us"
+ },
+ {
+  "workload": "R1-b256-kv128",
+  "verdict": "FAIL",
+  "detail": "ratio 0.48 (logits 0.47 k 0.48 v 0.48) tok_match 0.95 repeat max_abs 6.6e-02 | npad 256 regs 106 local 0 | 5789.9 us"
+ },
+ {
+  "workload": "R2-b1-kv8192",
+  "verdict": "FAIL",
+  "detail": "ratio 0.46 (logits 0.46 k 0.46 v 0.46) tok_match 0.00 repeat max_abs 2.8e-02 | npad 16 regs 86 local 0 | 3070.3 us"
+ },
+ {
+  "workload": "R3-b8-kv4096",
+  "verdict": "FAIL",
+  "detail": "ratio 0.46 (logits 0.43 k 0.45 v 0.46) tok_match 1.00 repeat max_abs 3.1e-02 | npad 16 regs 86 local 0 | 2071.0 us"
+ },
+ {
+  "workload": "R6-b1-kv1024-q4",
+  "verdict": "FAIL",
+  "detail": "ratio 0.45 (logits 0.43 k 0.45 v 0.45) tok_match 1.00 repeat max_abs 3.2e-02 | npad 16 regs 86 local 0 | 1129.2 us"
+ }
+]
