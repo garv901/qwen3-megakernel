@@ -49,3 +49,18 @@ def test_main_report_writes_files(tmp_path):
     rows = list(csv.DictReader(open(out / "summary.csv")))
     assert {r["arm"] for r in rows} >= {"hv2g", "fi-graph", "vllm", "hv2-repeat"}
     assert (out / "R1.png").exists()
+
+
+def test_summary_and_ffma():
+    from regimebench.report import summary_rows, summary_table
+    recs = fake_records()
+    recs.append({"record_type": "probe", "run_id": "r", "clock": {"sm_mhz": 1900}})
+    d = Data(recs)
+    rows = {r["regime"]: r for r in summary_rows(d)}
+    assert rows["R1"]["points"] == 2 and rows["R1"]["wins"] == 2
+    assert rows["R1"]["gmean"] == __import__("pytest").approx((420 / 800 * 500 / 900) ** 0.5)
+    assert rows["R1"]["crossover"] == "none"
+    assert d.clock_mhz("R0-b1-kv128") == 1900
+    assert d.ffma_sol_us("R4-b1-T16") is None
+    assert d.ffma_sol_us("R0-b1-kv128") >= d.sol("R0-b1-kv128")["t_bw_us"]
+    assert "R1" in summary_table(d)

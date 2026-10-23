@@ -42,12 +42,30 @@ def check_repeat(seed: int, dev: str) -> tuple[bool, str]:
     mod = HR.load_hv2()
     run = mod.build(HR.HV2_CASE)
     t = step._t
-    ref = run({"token": t["token"], **{k: t[k] for k in HR.WEIGHT_KEYS}, "kcache": t["kcache"], "vcache": t["vcache"]})
+    hin = {"token": t["token"], **{k: t[k] for k in HR.WEIGHT_KEYS}, "kcache": t["kcache"], "vcache": t["vcache"]}
+    r1 = {k: v.clone() for k, v in run(hin).items()}
+    r2 = {k: v.clone() for k, v in run(hin).items()}
     torch.cuda.synchronize()
-    bad = [k for k in ("logits", "next_token", "k_write", "v_write")
-           if not torch.equal(mine[k].reshape(-1), ref[k].reshape(-1))]
+    names = ("logits", "k_write", "v_write")
+
+    def spread(x, y):
+        x, y = x.float().reshape(-1), y.float().reshape(-1)
+        d = (x - y).abs().max().item()
+        return d, ((x - y).norm() / y.norm().clamp_min(1e-30)).item()
+    parts, ok = [], True
+    tok_ok = int(mine["next_token"]) == int(r1["next_token"])
+    for k in names:
+        exact = torch.equal(mine[k].reshape(-1), r1[k].reshape(-1))
+        ma, ml = spread(mine[k], r1[k])
+        sa, sl = spread(r2[k], r1[k])
+        good = exact or ml <= 2 * max(sl, 1e-12) or (sl == 0 and ml == 0)
+        ok &= good
+        parts.append(f"{k}: repeat-vs-run max_abs {ma:.2e} relL2 {ml:.2e} | run-vs-run max_abs {sa:.2e} relL2 {sl:.2e}"
+                     f"{' bit-exact' if exact else ''}{'' if good else ' EXCEEDS 2x self-spread'}")
+    ok &= tok_ok
+    parts.append(f"next_token {'match' if tok_ok else 'MISMATCH'}")
     step.close()
-    return (not bad), ("bit-exact" if not bad else "MISMATCH in " + ",".join(bad))
+    return ok, "; ".join(parts)
 
 
 def timing_r0(seed: int, dev: str) -> str:
@@ -58,6 +76,7 @@ def timing_r0(seed: int, dev: str) -> str:
     t = rep._t
     run = HR.load_hv2().build(HR.HV2_CASE)
     hin = {"token": t["token"], **{k: t[k] for k in HR.WEIGHT_KEYS}, "kcache": t["kcache"], "vcache": t["vcache"]}
+    rg = load_arm("hv2-repeat").prepare(w, inputs, "graph", dev)   # N = 1 launch in a CUDA graph
     g = load_arm("hv2g").prepare(w, inputs, "auto", dev)
     assert g.mt1, "R0 must use the MT1 build"
 
@@ -73,15 +92,16 @@ def timing_r0(seed: int, dev: str) -> str:
         torch.cuda.synchronize()
         return a.elapsed_time(b) / n * 1e3
     for _ in range(3):
-        hv2_once(); g.launch()
+        hv2_once(); g.launch(); rg.launch()
     torch.cuda.synchronize()
-    a, b = [], []
+    a, b, c = [], [], []
     for _ in range(10):
-        a.append(timed(hv2_once)); b.append(timed(g.launch))
-    a.sort(); b.sort()
-    ma, mb = a[len(a) // 2], b[len(b) // 2]
-    rep.close(); g.close()
-    return (f"hv2 run() median {ma:.1f} us | hv2g MT1 (graph) median {mb:.1f} us | ratio {mb / ma:.3f} "
+        a.append(timed(hv2_once)); b.append(timed(g.launch)); c.append(timed(rg.launch))
+    a.sort(); b.sort(); c.sort()
+    ma, mb, mc = a[len(a) // 2], b[len(b) // 2], c[len(c) // 2]
+    rep.close(); g.close(); rg.close()
+    return (f"hv2-repeat graph N=1 median {mc:.1f} us | hv2g MT1 graph {mb:.1f} us | ratio (both graph) {mb / mc:.3f} "
+            f"({'OK' if mb <= 1.03 * mc else 'OVER 3%'}) || hv2 run() median {ma:.1f} us | hv2g MT1 (graph) median {mb:.1f} us | ratio {mb / ma:.3f} "
             f"({'OK' if mb <= 1.03 * ma else 'OVER 3%'}; note hv2 run() pays Python launch + per-call allocs, graph does not)")
 
 

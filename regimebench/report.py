@@ -13,9 +13,13 @@ import csv
 from pathlib import Path
 
 from .harness.records import read_records
+from .sol import fp32_ffma_peak
 from .workload import Workload, regime_grid
+import math
+import statistics
 
 DASH = "-"
+FALLBACK_CLOCK_MHZ = 1965
 HEADLINE = "hv2g"
 PROXY = "hv2-repeat"
 BASELINE = "fi-graph"
@@ -47,12 +51,20 @@ class Data:
         self.workloads: dict[str, dict] = {}
         self.env: dict = {}
         self.probe: dict = {}
+        self.probes: dict[str, dict] = {}   # run_id -> probe record
+        self.run_jobs: dict[str, str] = {}  # run_id -> slurm job id
+        self.wid_run: dict[str, str] = {}   # workload id -> run_id of its timing records
         for r in records:
             t = r.get("record_type")
             wd = r.get("workload")
             if wd:
                 self.workloads.setdefault(wd["id"], wd)
+            if r.get("run_id") and r.get("slurm_job_id"):
+                self.run_jobs.setdefault(r["run_id"], str(r["slurm_job_id"]))
+            if t == "probe":
+                self.probes.setdefault(r.get("run_id"), r)
             if t == "timing" and wd:
+                self.wid_run.setdefault(wd["id"], r.get("run_id"))
                 self.timing.setdefault(wd["id"], {})[(r["arm"], r["variant"])] = r
             elif t == "skip":
                 self.skips.append(r)
@@ -76,6 +88,22 @@ class Data:
         cands = [c for c in cands if c[1] is not None]
         return min(cands, key=lambda c: c[1]) if cands else None
 
+    def clock_mhz(self, wid: str) -> float:
+        c = (self.probes.get(self.wid_run.get(wid), {}).get("clock") or {}).get("sm_mhz")
+        return c or FALLBACK_CLOCK_MHZ
+
+    def ffma_sol_us(self, wid: str) -> float | None:
+        """max(T_bw, flops / FP32 FFMA peak at the run's probed SM clock), in us."""
+        s = self.sol(wid)
+        if not s:
+            return None
+        t_fl = s["flops"] / fp32_ffma_peak(self.clock_mhz(wid) * 1e6) * 1e6
+        return max(s["t_bw_us"], t_fl)
+
+    def steady_gpu_us(self, wid: str, arm: str, variant: str) -> float | None:
+        r = self.timing.get(wid, {}).get((arm, variant)) or {}
+        return _us((r.get("steady_gpu") or {}).get("median"))
+
     def sol(self, wid: str, kind: str = "spec") -> dict | None:
         for r in self.timing.get(wid, {}).values():
             s = (r.get("sol") or {}).get(kind)
@@ -98,7 +126,12 @@ def point_row(d: Data, w: dict) -> dict:
     b = d.best(wid, BASELINE)
     v = d.best(wid, VLLM)
     pct = lambda x: 100 * sol_us / x if sol_us and x else None  # noqa: E731
-    return {"id": wid, "sol_us": sol_us, "bound": sol["bound"] if sol else None,
+    ffma = d.ffma_sol_us(wid)
+    mtn = d.best(wid, HEADLINE, ("mtn",))
+    vgpu = d.steady_gpu_us(wid, VLLM, v[0]) if v else None
+    return {"id": wid, "ffma_us": ffma, "mtn": mtn, "vllm_gpu": vgpu,
+            "pct_ffma_hv2g": 100 * ffma / h[1] if ffma and h else None,
+            "sol_us": sol_us, "bound": sol["bound"] if sol else None,
             "hv2g": h, "proxy": p, "best": b, "vllm": v,
             "ratio": (h[1] / b[1]) if h and b else None,
             "pct_hv2g": pct(h[1] if h else None), "pct_best": pct(b[1] if b else None)}
@@ -110,16 +143,100 @@ def _cell(x) -> str:
 
 def regime_table(d: Data, regime: str) -> str:
     rows = [point_row(d, w) for w in ordered_workloads(d) if w["regime"] == regime]
-    head = ["point", "SOL us (bound)", "hv2g us", "best baseline us (variant)", "vllm us",
-            "hv2g/best", "%SOL hv2g", "%SOL best"]
+    head = ["point", "SOL us (bound)", "FFMA-SOL us", "hv2g us", "hv2g mtn us", "hv2-repeat us (proxy)",
+            "best baseline us (variant)", "vllm wall / gpu us", "hv2g/best", "%SOL hv2g",
+            "%FFMA-SOL hv2g", "%SOL best"]
     out = ["| " + " | ".join(head) + " |", "|" + "|".join("---" for _ in head) + "|"]
     for r in rows:
         best = f"{_f(r['best'][1])} ({r['best'][0]})" if r["best"] else DASH
-        vl = f"{_f(r['vllm'][1])} ({r['vllm'][0]})" if r["vllm"] else DASH
+        vl = (f"{_f(r['vllm'][1])} / {_f(r['vllm_gpu'])} ({r['vllm'][0]})") if r["vllm"] else DASH
         out.append("| " + " | ".join([
-            r["id"], f"{_f(r['sol_us'])} ({r['bound'] or DASH})", _cell(r["hv2g"]), best, vl,
-            _f(r["ratio"], "{:.2f}"), _f(r["pct_hv2g"]), _f(r["pct_best"])]) + " |")
+            r["id"], f"{_f(r['sol_us'])} ({r['bound'] or DASH})", _f(r["ffma_us"]), _cell(r["hv2g"]),
+            _cell(r["mtn"]), _cell(r["proxy"]), best, vl,
+            _f(r["ratio"], "{:.2f}"), _f(r["pct_hv2g"]), _f(r["pct_ffma_hv2g"]), _f(r["pct_best"])]) + " |")
     return "\n".join(out)
+
+
+def _crossover(rows: list[dict], ws: list[dict], xkey: str):
+    """Axis value of the first point (ascending x) where best baseline beats hv2g (ratio > 1)."""
+    pts = [(w["axis"].get(xkey), r) for w, r in zip(ws, rows) if r["ratio"] is not None]
+    pts = [(x, r) for x, r in pts if isinstance(x, (int, float))]
+    for x, r in sorted(pts, key=lambda t: t[0]):
+        if r["ratio"] > 1:
+            return x
+    return None
+
+
+def summary_rows(d: Data) -> list[dict]:
+    out = []
+    for reg in REGIME_ORDER:
+        ws = [w for w in ordered_workloads(d) if w["regime"] == reg]
+        if not ws:
+            continue
+        rows = [point_row(d, w) for w in ws]
+        both = [r for r in rows if r["ratio"] is not None]
+        ratios = [r["ratio"] for r in both]
+        xkey, gkey = REGIME_AXES.get(reg, ("B", None))
+        cross = None
+        if gkey:  # one crossover per group
+            groups: dict = {}
+            for w, r in zip(ws, rows):
+                groups.setdefault(w["axis"].get(gkey), ([], []))
+                groups[w["axis"].get(gkey)][0].append(w)
+                groups[w["axis"].get(gkey)][1].append(r)
+            cross = "; ".join(f"{gkey}={g}: {_crossover(rr, wws, xkey) or 'none'}"
+                              for g, (wws, rr) in groups.items())
+        else:
+            c = _crossover(rows, ws, xkey)
+            cross = "none" if c is None else f"{xkey}={c}"
+        med = lambda k: statistics.median([r[k] for r in rows if r[k] is not None]) \
+            if any(r[k] is not None for r in rows) else None  # noqa: E731
+        out.append({"regime": reg, "points": len(ws), "compared": len(both),
+                    "wins": sum(1 for r in both if r["ratio"] < 1),
+                    "gmean": math.exp(sum(map(math.log, ratios)) / len(ratios)) if ratios else None,
+                    "crossover": cross, "pct_hv2g": med("pct_hv2g"), "pct_best": med("pct_best")})
+    return out
+
+
+def summary_table(d: Data) -> str:
+    head = ["regime", "points", "hv2g wins", "geomean hv2g/best", "crossover (best baseline first beats hv2g)",
+            "median %SOL hv2g", "median %SOL best"]
+    out = ["| " + " | ".join(head) + " |", "|" + "|".join("---" for _ in head) + "|"]
+    for r in summary_rows(d):
+        out.append("| " + " | ".join([r["regime"], str(r["points"]), f"{r['wins']}/{r['compared']}",
+                                      _f(r["gmean"], "{:.2f}"), str(r["crossover"]),
+                                      _f(r["pct_hv2g"]), _f(r["pct_best"])]) + " |")
+    return "\n".join(out)
+
+
+def plot_overview(d: Data, out_dir: Path) -> Path | None:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    pts = [(w, point_row(d, w)) for w in ordered_workloads(d)]
+    pts = [(w, r) for w, r in pts if r["ratio"] is not None]
+    if not pts:
+        return None
+    fig, ax = plt.subplots(figsize=(max(6, 0.28 * len(pts)), 4))
+    for i, (w, r) in enumerate(pts):
+        ax.scatter(i, r["ratio"], color=f"C{int(w['regime'][1:]) % 10}", s=22)
+    for reg in REGIME_ORDER:
+        idx = [i for i, (w, _) in enumerate(pts) if w["regime"] == reg]
+        if idx:
+            ax.axvspan(idx[0] - 0.5, idx[-1] + 0.5, alpha=0.06 * (1 + int(reg[1:]) % 2), color="gray")
+            ax.text((idx[0] + idx[-1]) / 2, 1.02, reg, ha="center", va="bottom", fontsize=8,
+                    transform=ax.get_xaxis_transform())
+    ax.axhline(1.0, color="k", lw=0.8)
+    ax.set_yscale("log")
+    ax.set_xticks(range(len(pts)))
+    ax.set_xticklabels([w["id"] for w, _ in pts], rotation=90, fontsize=5)
+    ax.set_ylabel("hv2g / best fi-graph (<1: hv2g faster)")
+    ax.grid(True, axis="y", which="both", alpha=0.3)
+    fig.tight_layout()
+    path = out_dir / "overview.png"
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+    return path
 
 
 def winners_table(d: Data) -> str:
@@ -191,6 +308,16 @@ def header(d: Data, records: list[dict]) -> str:
              f"SM clock at probe {clk.get('sm_mhz', DASH)} MHz",
              "- All times are microseconds per step (steady = back-to-back launches). "
              "hv2-repeat is a timing proxy (N repeated b1 decodes), not a correct forward."]
+    lines.append("- FFMA-SOL = max(T_bw, flops / (148 SMs x 128 lanes x 2 x probed SM clock)); a ceiling for an "
+                 "FP32-FFMA design like hv2g, not for a tensor-core one (hypothesis-grade model, not a measurement).")
+    for rid in sorted({r.get("run_id") for r in records if r.get("run_id")}):
+        regs = sorted({d.workloads[w]["regime"] for w, run in d.wid_run.items() if run == rid},
+                      key=REGIME_ORDER.index)
+        clk_r = (d.probes.get(rid, {}).get("clock") or {}).get("sm_mhz")
+        lines.append(f"- Run {rid} (slurm job {d.run_jobs.get(rid, DASH)}, SM clock at probe {clk_r or DASH} MHz): "
+                     f"regimes {', '.join(regs) or DASH}")
+    lines.append("- Cross-regime comparisons are across jobs (and possibly GPUs); ratios within a point are "
+                 "interleaved in one job and are the reliable comparison.")
     return "\n".join(lines)
 
 
@@ -224,11 +351,13 @@ def plot_regime(d: Data, regime: str, out_dir: Path) -> Path | None:
             if pairs:
                 ax.plot(*zip(*pairs), label=label, **{"marker": "o", **kw})
         series([r["hv2g"][1] if r["hv2g"] else None for r in rows], "hv2g", color="C3")
+        series([r["mtn"][1] if r["mtn"] else None for r in rows], "hv2g mtn", color="C1")
         series([r["proxy"][1] if r["proxy"] else None for r in rows], "hv2-repeat (proxy)",
                color="C3", linestyle="--")
         series([r["best"][1] if r["best"] else None for r in rows], "best fi-graph", color="C0")
         series([r["vllm"][1] if r["vllm"] else None for r in rows], "vllm", color="C2")
         series([r["sol_us"] for r in rows], "SOL spec", color="k", linestyle=":", marker="")
+        series([r["ffma_us"] for r in rows], "FFMA-SOL", color="k", linestyle=(0, (1, 3)), marker="")
         series([(d.sol(w["id"], "measured") or {}).get("t_sol_us") for w in pts],
                "SOL measured", color="gray", linestyle="-.", marker="")
         ax.set_yscale("log")
@@ -249,7 +378,7 @@ def plot_regime(d: Data, regime: str, out_dir: Path) -> Path | None:
 # -- csv -----------------------------------------------------------------
 
 CSV_FIELDS = ["workload", "regime", "arm", "variant", "steady_us", "steady_ci_lo_us",
-              "steady_ci_hi_us", "isolated_us", "tokens_per_s", "sol_spec_us", "sol_measured_us",
+              "steady_ci_hi_us", "isolated_us", "tokens_per_s", "sol_spec_us", "sol_measured_us", "ffma_sol_us",
               "bound", "pct_sol_spec", "n_launch_per_sample"]
 
 
@@ -269,17 +398,19 @@ def write_csv(d: Data, path: Path) -> None:
                     "steady_us": med, "steady_ci_lo_us": _us(ci[0]), "steady_ci_hi_us": _us(ci[1]),
                     "isolated_us": _us((r.get("isolated") or {}).get("median")),
                     "tokens_per_s": r.get("tokens_per_s"), "sol_spec_us": sp.get("t_sol_us"),
-                    "sol_measured_us": me.get("t_sol_us"), "bound": sp.get("bound"),
+                    "sol_measured_us": me.get("t_sol_us"), "ffma_sol_us": d.ffma_sol_us(w["id"]), "bound": sp.get("bound"),
                     "pct_sol_spec": 100 * sp["t_sol_us"] / med if sp and med else None,
                     "n_launch_per_sample": r.get("n_launch_per_sample")})
 
 
 def render(d: Data, records: list[dict], plot_files: dict[str, str]) -> str:
-    parts = [header(d, records), ""]
+    parts = [header(d, records), "", "## Executive summary", "", summary_table(d), ""]
+    if "overview" in plot_files:
+        parts += ["![overview](overview.png)", ""]
     regimes = [r for r in REGIME_ORDER if any(w["regime"] == r for w in d.workloads.values())]
     for reg in regimes:
         parts += [f"## {reg}", "", regime_table(d, reg), ""]
-        if reg in plot_files:
+        if reg in plot_files and reg != "overview":
             parts += [f"![{reg}]({plot_files[reg]})", ""]
     parts += ["## Winner variants and backends", "", winners_table(d), "",
               "## Accuracy (FP32 oracle band, pass = rel-L2 <= 2x BF16 reference's own)", "",
@@ -304,6 +435,11 @@ def main_report(runs: list[str], out: str) -> int:
             pth = None
         if pth:
             plots[reg] = pth.name
+    try:
+        if plot_overview(d, out_dir):
+            plots["overview"] = "overview.png"
+    except Exception as exc:
+        print(f"overview plot failed: {exc!r}")
     write_csv(d, out_dir / "summary.csv")
     (out_dir / "REPORT.md").write_text(render(d, records, plots))
     print(f"wrote {out_dir}/REPORT.md, summary.csv, {len(plots)} plots")

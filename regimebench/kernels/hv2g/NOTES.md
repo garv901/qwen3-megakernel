@@ -1,6 +1,7 @@
 # hv2g: hv2 generalized (runtime context, many tokens)
 
-Status: written and compiled on CPU only (NVRTC, sm_100). NOTHING here has run on a GPU yet. Every correctness and
+Status (2026-10-23): GPU-checked. Jobs 9464/9468 pass every check point (FP32 oracle band); MT1 R0 379.7 us vs hv2 374.9 us (graph, +1.3 %).
+Full-grid timings: results/2026-10-22-b200/. Original note follows: every correctness and
 speed statement below is a design intent or hypothesis until `scripts/gpu_check_hv2g.py` has run.
 
 ## Files
