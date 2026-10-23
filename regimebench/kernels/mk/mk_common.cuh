@@ -42,10 +42,10 @@
 #define MK_EPI2 0   // TMEM read: 2 chunks of 16 columns per warp iteration (1) or one (0, default: 1 spills at NPAD 16..256)
 #endif
 #ifndef MK_LMP
-#define MK_LMP 0   // 1: pipelined LM head (SPEC-lm): X staged once, LM ring of MK_LMR units, 2 TMEM accumulators, warp-specialized (NPAD <= 32 only; larger NPAD keeps the v0 LM path)
+#define MK_LMP 1   // 1 (default, job 9586): pipelined LM head (SPEC-lm): X staged once, LM ring of MK_LMR units, 2 TMEM accumulators, warp-specialized (NPAD <= 32 only; larger NPAD keeps the v0 LM path)
 #endif
 #ifndef MK_LMR
-#define MK_LMR 4   // LM ring slots (32 KB each) of the MK_LMP path
+#define MK_LMR 0   // LM ring slots (32 KB each) of the MK_LMP path; 0 = per bucket: 4 at NPAD 16, 3 at NPAD 32 (job 9586)
 #endif
 #ifndef MK_STG
 #define MK_STG 4   // staging chunks (16 B) in flight per thread
@@ -54,7 +54,7 @@ static_assert(NPAD == 16 || NPAD == 32 || NPAD == 64 || NPAD == 128 || NPAD == 2
 static_assert(MK_KU == 128 || MK_KU == 64, "MK_KU");
 static_assert(MK_RING >= 2 && MK_RING <= 4, "MK_RING");
 static_assert(MK_LMP == 0 || MK_LMP == 1, "MK_LMP");
-static_assert(MK_LMR >= 2 && MK_LMR <= 8, "MK_LMR");
+static_assert(MK_LMR == 0 || (MK_LMR >= 2 && MK_LMR <= 8), "MK_LMR");
 static_assert(MK_XTMA == 0, "MK_XTMA = 1 (O-phase B tile by TMA) is not implemented in v0");
 
 typedef unsigned int u32;
@@ -78,7 +78,7 @@ constexpr int OFF_X = RING * UB;              // B-tile slots (offset from the 1
 // (no other phase runs after the LM phase); the barriers stay behind the larger of the two layouts.
 constexpr bool LMP = MK_LMP && NPAD <= 32;
 static_assert(!LMP || MK_KU == 128, "MK_LMP needs MK_KU = 128 (8 k-chunks of 128)");
-constexpr int LMR = MK_LMR;
+constexpr int LMR = MK_LMR ? MK_LMR : (NPAD == 16 ? 4 : 3);   // keep in sync with build.py:lm_ring
 constexpr int LM_RING_OFF = 8 * XS;
 constexpr int LM_BYTES = LMP ? 8 * XS + LMR * UB : 0;
 constexpr int OFF_BARS = (OFF_X + XREG > LM_BYTES) ? OFF_X + XREG : LM_BYTES;   // tma bars [0, RING), mma bars at +64, tmem slot at +128
