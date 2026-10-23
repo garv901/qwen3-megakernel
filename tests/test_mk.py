@@ -400,22 +400,23 @@ def test_skv_plan_matches_mk_layout_on_mk_points():
             assert all(len(w2) == 1 for w2 in [pl.cta_positions[:1]])
         else:
             assert used[w.id] == "placeholder", w.id
-    assert all(v == "splitkv" for k, v in used.items() if "-q" not in k) and all(used[k] == "placeholder" for k in used if "-q" in k)
-    assert sum(v == "splitkv" for v in used.values()) == len(pts) - 4
+    exp = {w.id: ("splitkv" if all(s.q_len == 1 for s in w.seqs) and max(s.kv_len for s in w.seqs) >= B.SKV_AUTO_MIN_KV else "placeholder") for w in pts}
+    assert used == exp and sum(v == "splitkv" for v in used.values()) == 13   # R2-kv512..32768, R3-*
 
 
 def test_skv_attn_option_and_supports():
-    assert MkArm().attn == "placeholder"
+    assert MkArm().attn == "auto"
     with pytest.raises(ValueError):
         MkArm(attn="nope")
-    w1 = Workload("t", "R1", tuple(Seq(128, 1) for _ in range(8)))
+    w1 = Workload("t", "R1", tuple(Seq(1024, 1) for _ in range(8)))
     wq = Workload("t2", "R6", (Seq(1024, 4),))
     assert MkArm(attn="auto").resolve_attn(w1) == "splitkv" and MkArm(attn="auto").resolve_attn(wq) == "placeholder"
+    assert MkArm(attn="auto").resolve_attn(Workload("t3", "R1", tuple(Seq(128, 1) for _ in range(8)))) == "placeholder"   # kv < SKV_AUTO_MIN_KV
     assert MkArm(attn="auto", ku=64).resolve_attn(w1) == "placeholder"
     assert MkArm(attn="splitkv").supports(w1, "auto") is None
     assert "q_len == 1" in MkArm(attn="splitkv").supports(wq, "auto")
     assert "MK_KU" in MkArm(attn="splitkv", ku=64).supports(w1, "auto")
-    assert MkArm(attn="placeholder").supports(wq, "auto") is None and B.auto_attn([(128, 1), (5, 1)]) == "splitkv" and B.auto_attn([(128, 1), (5, 2)]) == "placeholder"
+    assert MkArm(attn="placeholder").supports(wq, "auto") is None and B.auto_attn([(1024, 1), (5, 1)]) == "splitkv" and B.auto_attn([(128, 1), (5, 1)]) == "placeholder" and B.auto_attn([(128, 1), (5, 2)]) == "placeholder"
 
 
 def test_skv_map_specs():

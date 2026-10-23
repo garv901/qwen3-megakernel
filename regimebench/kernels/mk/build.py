@@ -221,8 +221,13 @@ def encode_skv_maps(kc_ptr: int, vc_ptr: int, rows: int, n_layers: int = NL) -> 
 
 
 def auto_attn(seqs) -> str:
-    """attn = "auto": splitkv when every sequence has q_len == 1 (A1 v1: pair_info is indexed by token), else the placeholder. ``seqs``: iterable of (kv_len, q_len)."""
-    return "splitkv" if all(int(q) == 1 for _, q in seqs) else "placeholder"
+    """attn = "auto": splitkv when every sequence has q_len == 1 (A1 v1: pair_info is indexed by token) and the longest kv_len >= SKV_AUTO_MIN_KV, else the placeholder.
+    At kv128 the A1 combine in the O phase costs more than attend saves (job 9674: R0-b1 +33, b64 +117, b256 +286 us; R2-kv1024 -211, R3-b32-kv1024 -523). ``seqs``: iterable of (kv_len, q_len)."""
+    seqs = [(int(k), int(q)) for k, q in seqs]
+    return "splitkv" if seqs and all(q == 1 for _, q in seqs) and max(k for k, _ in seqs) >= SKV_AUTO_MIN_KV else "placeholder"
+
+
+SKV_AUTO_MIN_KV = 512   # [H] kv512 unmeasured; kv128 loses, kv1024 wins
 
 
 # ---- tensor maps (host; 2D bf16 SW128, box {64 k, 128 rows}, one per weight tensor, 128 B each in global memory) ----

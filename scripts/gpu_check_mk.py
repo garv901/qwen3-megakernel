@@ -156,7 +156,7 @@ def main() -> int:
     ap.add_argument("--null", type=lambda s: int(s, 0), default=None)
     ap.add_argument("--stamps", action="store_true")
     ap.add_argument("--knobs", type=json.loads, default={}, help='MkArm options as JSON, e.g. {"ts": 256, "tsb": 0}')
-    ap.add_argument("--attn", default="placeholder", help="MkArm attn option: placeholder | splitkv | auto")
+    ap.add_argument("--attn", default="auto", help="MkArm attn option: placeholder | splitkv | auto")
     args = ap.parse_args()
     dev = "cuda"
     if args.null is not None:
