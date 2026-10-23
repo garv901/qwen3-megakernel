@@ -10,6 +10,8 @@
 //   MK_STAMPS 1: thread 0 stores %globaltimer at every bar_arrive and bar_wait exit into smem, one dump to mk_stamps at the end.
 //   MK_LMP    1: pipelined LM head (NPAD <= 64; NOTES.md "LM head, pipelined"); MK_LMR LM ring slots.
 //   MK_TS     N: tile-stream engine at NPAD >= N (0 off, 1 = 128, default 256) (SPEC-P5a; NOTES.md "Tile-stream QKV"): QKV phase with B = bf16 xb by TMA (NPAD >= 128, MK_KU 128 only; else no effect).
+//   MK_TSB    1: P5b (SPEC-P5b) on top of MK_TS: GU and D on the tile stream (B = bf16 xb2 / act by TMA, A = interleaved wg|wu), act written by the GU epilogue,
+//             bf16 conversions (xb2 + ss2 after O, xb after D) done by idle CTAs on tickets. Default 0 = the P5a build (SASS identical).
 //   MK_NULL   bitmask, bit p-1 = phase p (1..6), bit 6 = LM head: the phase keeps its barrier(s), weight TMAs and ring waits and skips
 //             staging, MMA, TMEM read and output (wrong outputs by design; null-work oracle).
 #ifndef NPAD
@@ -51,6 +53,9 @@
 #ifndef MK_TS
 #define MK_TS 256   // 0 off; N (128 / 256): QKV on the tile-stream engine (ts_phase) at NPAD >= N (1 = 128; default 256: job 9602 b256 -211, b128 +54 us); the D phase writes xb = bf16(x * ln1[l+1]) (see NOTES.md)
 #endif
+#ifndef MK_TSB
+#define MK_TSB 0   // 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
+#endif
 #ifndef MK_STG
 #define MK_STG 4   // staging chunks (16 B) in flight per thread
 #endif
@@ -58,6 +63,7 @@ static_assert(NPAD == 16 || NPAD == 32 || NPAD == 64 || NPAD == 128 || NPAD == 2
 static_assert(MK_KU == 128 || MK_KU == 64, "MK_KU");
 static_assert(MK_RING >= 2 && MK_RING <= 4, "MK_RING");
 static_assert(MK_TS == 0 || MK_TS == 1 || MK_TS == 128 || MK_TS == 256, "MK_TS");
+static_assert(MK_TSB == 0 || MK_TSB == 1, "MK_TSB");
 static_assert(MK_LMP == 0 || MK_LMP == 1, "MK_LMP");
 static_assert(MK_LMR == 0 || (MK_LMR >= 2 && MK_LMR <= 8), "MK_LMR");
 static_assert(MK_XTMA == 0, "MK_XTMA = 1 (O-phase B tile by TMA) is not implemented in v0");
@@ -73,7 +79,9 @@ constexpr int MAXTOK = 256;
 constexpr float EPS = 1e-6f;
 constexpr int TS_MIN = MK_TS == 1 ? 128 : MK_TS;   // smallest NPAD bucket on the tile stream (keep in sync with build.py:ts_min)
 constexpr bool TS = MK_TS && NPAD >= TS_MIN && MK_KU == 128;   // tile-stream QKV (SPEC-P5a)
-constexpr int NMAP = TS ? 9 : 8;   // tensor maps: wq, wk, wv, wo, wg, wu, wd, embed (+ xb when TS), 128 B each, in global memory
+constexpr bool TSB = TS && MK_TSB;
+// tensor maps: wq, wk, wv, wo, wg, wu, wd, embed (+ xb when TS) (+ xb2, wgu, act when TSB: maps 9, 10, 11), 128 B each, in global memory
+constexpr int NMAP = TSB ? 12 : TS ? 9 : 8;
 
 constexpr int KU = MK_KU, NBOX = KU / 64, RING = MK_RING;
 constexpr int UB = NBOX * 16384;              // bytes of one weight unit in the ring (128 rows x KU k bf16)
@@ -95,10 +103,18 @@ constexpr int LMB_FULL = 192, LMB_EMPTY = 256, LMB_ACCF = 320, LMB_ACCE = 336;
 constexpr int TS_TT = 128;                                  // tokens per tile (B box rows); NPAD 256: 2 token tiles, NPAD 128: 1
 constexpr int TS_KS = (NPAD == 256) ? 2 : 4;                // split-K factor of the tile stream (job 9592 best per bucket)
 constexpr int TS_SLOT = 32768 + TS_TT * 256;                // ring slot bytes: A (128 rows x 128 k bf16) + B (TS_TT x 128 k bf16)
-constexpr int TS_SMEM_AVAIL = 227 * 1024 - 11280 - 1024 - 384;   // dyn smem budget after static smem, alignment slack and barriers
-constexpr int TS_R_FIT = TS_SMEM_AVAIL / TS_SLOT;           // 3
-constexpr int TS_R = TS ? (TS_R_FIT < 8 ? TS_R_FIT : 8) : 1;     // ring depth: as many slots as fit
-constexpr int TS_BYTES = TS ? TS_R * TS_SLOT : 0;
+// P5b phase configs (TT tokens per tile / KS split-K): GU 128 / 1 (NPAD 256), 64 / 1 (NPAD 128); D 128 / 8 (256), 128 / 12 (128). QKV = (TS_TT, TS_KS).
+constexpr int GU_TT = NPAD == 256 ? 128 : 64, GU_KS = 1;
+constexpr int D_TT = 128, D_KS = NPAD == 256 ? 8 : 12;
+constexpr int TS_EXCH = TSB ? 12288 : 0;                    // GU exchange region: [3 groups][2 quadrant pairs][16 tokens][32 lanes] fp32
+constexpr int TS_SMEM_AVAIL = 227 * 1024 - 11280 - 1024 - 384 - TS_EXCH;   // dyn smem budget after static smem, alignment slack, barriers and the exchange region
+constexpr int ts_slot(int tt) { return 32768 + tt * 256; }
+constexpr int ts_ringn(int tt) { return TS_SMEM_AVAIL / ts_slot(tt) < 8 ? TS_SMEM_AVAIL / ts_slot(tt) : 8; }   // ring depth of a phase with TT = tt: as many slots as fit
+constexpr int TS_R = TS ? ts_ringn(TS_TT) : 1;              // QKV ring depth
+constexpr int TS_RING_A = TS ? ts_ringn(TS_TT) * ts_slot(TS_TT) : 0, TS_RING_B = TSB ? ts_ringn(GU_TT) * ts_slot(GU_TT) : 0;
+constexpr int TS_RING_BYTES = TS_RING_A > TS_RING_B ? TS_RING_A : TS_RING_B;   // largest ring over the phases (D shares QKV's TT)
+constexpr int TS_XOFF = TS_RING_BYTES;                      // GU exchange region offset (after the ring, below OFF_BARS)
+constexpr int TS_BYTES = TS ? TS_RING_BYTES + TS_EXCH : 0;
 constexpr int mk_max3(int a, int b, int c) { return a > b ? (a > c ? a : c) : (b > c ? b : c); }
 constexpr int OFF_BARS = mk_max3(OFF_X + XREG, LM_BYTES, TS_BYTES);   // tma bars [0, RING), mma bars at +64, tmem slot at +128
 constexpr int BARS_BYTES = (LMP || TS) ? 384 : 256;
@@ -164,6 +180,8 @@ __device__ __forceinline__ void tc_fence_after() { asm volatile("tcgen05.fence::
 __device__ __forceinline__ void tc_fence_before() { asm volatile("tcgen05.fence::before_thread_sync;" ::: "memory"); }
 __device__ __forceinline__ void fence_proxy_async() { asm volatile("fence.proxy.async.shared::cta;" ::: "memory"); }
 __device__ __forceinline__ void fence_proxy_async_global() { asm volatile("fence.proxy.async.global;" ::: "memory"); }   // generic writes to global -> later TMA reads (TS: xb)
+// named barrier (bar.sync id, n threads): ids 1..6 = the GU exchange pairs (mk_step.cu); id 0 is __syncthreads
+__device__ __forceinline__ void named_bar_sync(int id, int n) { asm volatile("bar.sync %0, %1;" :: "r"(id), "r"(n) : "memory"); }
 __device__ __forceinline__ void tc_wait_ld() { asm volatile("tcgen05.wait::ld.sync.aligned;" ::: "memory"); }
 __host__ __device__ constexpr u32 tc_idesc(int M, int N) { return (1u << 4) | (1u << 7) | (1u << 10) | ((u32)(N >> 3) << 17) | ((u32)(M >> 4) << 24); }
 // UMMA smem descriptor: K-major, SWIZZLE_128B, SBO = 1024 B (8 rows x 128 B), LBO unused, sm100 version bit

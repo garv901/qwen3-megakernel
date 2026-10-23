@@ -28,7 +28,8 @@ struct PhGu {
     static constexpr int ID = 4, NRB = 48, K = HID;
     static constexpr bool WHOLE = false;
     __device__ static void src(int l, int rb, int& m, int& row) {
-        if (rb < 24) { m = 4; row = l * INTER + rb * 128; }
+        if (TSB) { m = 10; row = l * 6144 + rb * 128; }   // P5b: wgu, row block rb = 64 gate rows + the 64 matching up rows (rb = 0..47)
+        else if (rb < 24) { m = 4; row = l * INTER + rb * 128; }
         else { m = 5; row = l * INTER + (rb - 24) * 128; }
     }
 };
@@ -48,6 +49,10 @@ static_assert(XREG >= ATTN_BYTES, "attention smem overlay");
 static_assert(DYN_SMEM + 11280 <= 227 * 1024, "dynamic + static smem (11280 B: LM tables) exceed 227 KB (MK_LMR too large for this NPAD)");
 static_assert(!TS || (2 * TS_TT <= 256 && NPAD % TS_TT == 0 && TS_R >= 2), "TS: two accumulators of TS_TT columns in the 256-column TMEM allocation; ring >= 2");
 static_assert(!TS || (PhQkv::K % (TS_KS * 128) == 0), "TS: split-K factor");
+static_assert(!TSB || (2 * GU_TT <= 256 && 2 * D_TT <= 256 && NPAD % GU_TT == 0 && NPAD % D_TT == 0 && ts_ringn(GU_TT) >= 2 && ts_ringn(D_TT) >= 2), "TSB: TMEM columns / ring depth per phase");
+static_assert(!TSB || (PhGu::K % (GU_KS * 128) == 0 && PhD::K % (D_KS * 128) == 0 && PhGu::NRB == 48 && PhD::NRB == 8), "TSB: split-K factors");
+static_assert(!TSB || ts_ringn(D_TT) == ts_ringn(TS_TT), "TSB: D shares the QKV ring depth (TS_RING_A)");
+static_assert(!TSB || NB > PhO::NRB * (PhO::K / KU), "TSB: the idle-CTA finalizers need CTAs without an O unit (grid > 128); no last-arriver fallback is built");
 static_assert(!TS || DYN_SMEM + 11280 <= 227 * 1024, "TS: dynamic + static smem exceed 227 KB");
 #if defined(MK_EXPECT_DYN) && MK_EXPECT_DYN
 static_assert(MK_EXPECT_DYN == DYN_SMEM, "host dyn_smem (build.py) != kernel DYN_SMEM");
@@ -309,6 +314,7 @@ __device__ __forceinline__ void lm_phase(GS& g, GetF get, EpiF epi) {
 // slot [A: 128 rows x 128 k | B: TT tokens x 128 k]; the B boxes come from the bf16 xb map (map 8). Barrier indices are LOCAL to the phase (re-initialised in ts_first).
 template <class PH, int TT, int KS> struct TsC {
     static constexpr int NTT = NPAD >= TT ? NPAD / TT : 1, NTILE = PH::NRB * NTT * KS, SPT = PH::K / (KS * 128), KSL = PH::K / KS, NCH = TT / 16;
+    static constexpr int R = ts_ringn(TT), SLOT = ts_slot(TT);   // ring depth and slot bytes of this phase (QKV: TS_R, TS_SLOT)
 };
 struct TsGeom { int t0, nt, nst; };
 template <class PH, int TT, int KS>
@@ -329,54 +335,55 @@ __device__ __forceinline__ void ts_fill_a(const GS& g, int l, int t0, int j, int
     PH::src(l, rb, m, row);
     const u32 bar = g.bars + LMB_FULL + 8 * s;
     mbar_expect_tx(bar, UB);
-    mk_tma_unit(g.base + s * TS_SLOT, g.maps + m * 128, kc, row, bar);
+    mk_tma_unit(g.base + s * C::SLOT, g.maps + m * 128, kc, row, bar);
 }
-// tid 0: B boxes of step j (map 8 = xb, k kc.., tokens TT tt..) into ring slot s (full[s] arrival 2); only after the grid barrier + fence.proxy.async.global
-template <class PH, int TT, int KS>
+// tid 0: B boxes of step j (map BM = 8 xb | 9 xb2 | 11 act, k kc.., tokens TT tt..) into ring slot s (full[s] arrival 2); only after the grid barrier + fence.proxy.async.global
+template <class PH, int TT, int KS, int BM>
 __device__ __forceinline__ void ts_fill_b(const GS& g, int t0, int j, int s) {
     using C = TsC<PH, TT, KS>;
     const int t = t0 + j / C::SPT, kc = (t % KS) * C::KSL + (j % C::SPT) * 128, tt = (t / KS) % C::NTT;
     const u32 bar = g.bars + LMB_FULL + 8 * s;
     mbar_expect_tx(bar, TT * 256);
 #pragma unroll
-    for (int a = 0; a < 2; ++a) tma2(g.base + s * TS_SLOT + 32768 + a * (TT * 128), g.maps + 8 * 128, kc + a * 64, tt * TT, bar);
+    for (int a = 0; a < 2; ++a) tma2(g.base + s * C::SLOT + 32768 + a * (TT * 128), g.maps + BM * 128, kc + a * 64, tt * TT, bar);
 }
 // barrier window before the tile-stream phase (replaces prefetch_next<PhQkv>): tid 0 re-initialises the TS mbarriers and issues the A boxes of the first min(R, nst) steps
 template <class PH, int TT, int KS>
 __device__ __forceinline__ void ts_first(const GS& g, int l) {
     if (threadIdx.x == 0) {
         const u32 fullb = g.bars + LMB_FULL, emptyb = g.bars + LMB_EMPTY, accf = g.bars + LMB_ACCF, acce = g.bars + LMB_ACCE;
-        for (int i = 0; i < TS_R; ++i) { mbar_init(fullb + 8 * i, 2); mbar_init(emptyb + 8 * i, 1); }
+        for (int i = 0; i < TsC<PH, TT, KS>::R; ++i) { mbar_init(fullb + 8 * i, 2); mbar_init(emptyb + 8 * i, 1); }
         for (int b = 0; b < 2; ++b) { mbar_init(accf + 8 * b, 1); mbar_init(acce + 8 * b, 12); }   // accempty: the 12 epilogue warps (4 quadrants x 3 chunk groups)
         mbar_fence_init();
         const TsGeom ge = ts_geom<PH, TT, KS>();
-        for (int i = 0; i < TS_R && i < ge.nst; ++i) ts_fill_a<PH, TT, KS>(g, l, ge.t0, i, i);
+        for (int i = 0; i < TsC<PH, TT, KS>::R && i < ge.nst; ++i) ts_fill_a<PH, TT, KS>(g, l, ge.t0, i, i);
     }
 }
 // All threads. Precondition: ts_first ran in the barrier window and the grid barrier has been passed. epi(row, c0, v, rb): as gemm_phase (c0 = first token column).
 // Returns after a __syncthreads that joins the roles. NUL: producer + full waits only.
-template <class PH, int TT, int KS, bool NUL, class EpiF>
+template <class PH, int TT, int KS, int BM, bool NUL, class EpiF>
 __device__ __forceinline__ void ts_phase(GS& g, int l, int ntok, EpiF epi) {
     using C = TsC<PH, TT, KS>;
-    constexpr int SPT = C::SPT, NCH = C::NCH, R = TS_R;
+    constexpr int SPT = C::SPT, NCH = C::NCH, R = C::R;
+    constexpr bool PAIR = TSB && PH::ID == PhGu::ID;   // P5b GU: g / u quadrant pairs, epi(q, lane, group, rb, cb, v) exchanges through smem
     const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, q = warp & 3;
     const TsGeom ge = ts_geom<PH, TT, KS>();
     const int t0 = ge.t0, nt = ge.nt, nst = ge.nst;
     const u32 fullb = g.bars + LMB_FULL, emptyb = g.bars + LMB_EMPTY, accf = g.bars + LMB_ACCF, acce = g.bars + LMB_ACCE;
     if (tid == 0) {   // ---- producer
         fence_proxy_async_global();   // xb was written with generic stores (D phase / prologue of other CTAs, released by the grid barrier)
-        for (int i = 0; i < R && i < nst; ++i) ts_fill_b<PH, TT, KS>(g, t0, i, i);   // B of the window-prefetched steps
+        for (int i = 0; i < R && i < nst; ++i) ts_fill_b<PH, TT, KS, BM>(g, t0, i, i);   // B of the window-prefetched steps
         if (NUL) {
             for (int j = 0; j < nst; ++j) {
                 mbar_wait(fullb + 8 * (j % R), (j / R) & 1);
-                if (j + R < nst) { ts_fill_a<PH, TT, KS>(g, l, t0, j + R, j % R); ts_fill_b<PH, TT, KS>(g, t0, j + R, j % R); }
+                if (j + R < nst) { ts_fill_a<PH, TT, KS>(g, l, t0, j + R, j % R); ts_fill_b<PH, TT, KS, BM>(g, t0, j + R, j % R); }
             }
         } else {
             for (int j = R; j < nst; ++j) {
                 const int s = j % R;
                 mbar_wait(emptyb + 8 * s, ((j / R) - 1) & 1);   // step j - R (use j / R - 1 of the slot) has been read by its MMAs
                 ts_fill_a<PH, TT, KS>(g, l, t0, j, s);
-                ts_fill_b<PH, TT, KS>(g, t0, j, s);
+                ts_fill_b<PH, TT, KS, BM>(g, t0, j, s);
             }
             for (int j = nst > R ? nst - R : 0; j < nst; ++j) mbar_wait(emptyb + 8 * (j % R), (j / R) & 1);   // drain: last use of every slot is complete
         }
@@ -389,7 +396,7 @@ __device__ __forceinline__ void ts_phase(GS& g, int l, int ntok, EpiF epi) {
                 const int f = ti * SPT + k, s = f % R;
                 mbar_wait(fullb + 8 * s, (f / R) & 1);
                 tc_fence_after();
-                const u32 sa = g.base + s * TS_SLOT, sb = sa + 32768;
+                const u32 sa = g.base + s * C::SLOT, sb = sa + 32768;
 #pragma unroll
                 for (int kk = 0; kk < 8; ++kk) {
                     const int a = kk >> 2, off = (kk & 3) * 32;
@@ -405,6 +412,17 @@ __device__ __forceinline__ void ts_phase(GS& g, int l, int ntok, EpiF epi) {
             mbar_wait(accf + 8 * b, (ti >> 1) & 1);
             tc_fence_after();
             const int row = rb * 128 + mk_row_of(q, lane);
+            if constexpr (PAIR) {   // one chunk per iteration: warps w and w + 2 of a group (quadrants q, q + 2) hold g and u of the same channel and run the same chunks
+                const int grp = (warp >> 2) - 1;
+                for (int c = grp; c < NCH; c += 3) {
+                    const int cb = tt * TT + c * 16;
+                    if (cb >= ntok) break;   // warp-uniform and equal for both warps of the pair
+                    u32 v0[16];
+                    mk_tmem_read16(v0, g.tb + b * TT, q, c * 16);
+                    tc_wait_ld();
+                    epi(q, lane, grp, rb, cb, v0);
+                }
+            } else {
             for (int c = (warp >> 2) - 1; c < NCH; c += 6) {
                 const int cb = tt * TT + c * 16;
                 if (cb >= ntok) break;   // warp-uniform: nothing stored at columns >= ntok (chunks c + 3, c + 6.. are further right)
@@ -415,6 +433,7 @@ __device__ __forceinline__ void ts_phase(GS& g, int l, int ntok, EpiF epi) {
                 tc_wait_ld();
                 epi(row, cb, v0, rb);
                 if (two) epi(row, cb + 48, v1, rb);
+            }
             }
             tc_fence_before();
             __syncwarp();
@@ -450,6 +469,62 @@ __device__ __forceinline__ uint4 pack_xw(const float4 a, const float4 b, const u
                       pack_bf16(b.x * bflo(w.z), b.y * bfhi(w.z)), pack_bf16(b.z * bflo(w.w), b.w * bfhi(w.w)));
 }
 
+// ---------------------------------------------------------------- P5b: idle-CTA finalizers (SPEC-P5b; NOTES.md "GU and D on the tile stream")
+// Ticket layout in tk[64]: O tickets tk[0 .. 8 NTT) (index rb * NTT + tt, target 16 = the units of a row block), D tickets tk[TK_D ..] (same index, target D_KS).
+constexpr int TK_D = 16;
+// CTA b of an NTILE-unit phase owns [lo(b), lo(b + 1)) (the formula of geom / ts_geom); idle = owns none. rank = index of this CTA among the idle CTAs in blockIdx order, nidle = their count.
+template <int NTILE>
+__device__ __forceinline__ void idle_rank(int& rank, int& nidle) {
+    rank = -1; nidle = 0;
+    for (int b = 0; b < (int)gridDim.x; ++b) {
+        const int lo = (int)(((long long)b * NTILE) / gridDim.x), hi = (int)(((long long)(b + 1) * NTILE) / gridDim.x);
+        if (hi == lo) { if (b == (int)blockIdx.x) rank = nidle; ++nidle; }
+    }
+}
+// All threads of an idle CTA (block-uniform; other CTAs return at once). Jobs = (rb, tt) with TT = 128 tokens: job j = rb * NTT + tt, idle CTA r takes j = r, r + nidle, ...
+// IS_O: wait tk[j] == 16, xb2[t][rb 128 ..] = bf16(x * ln2[l]) and ss2[t] += sum of x^2 over the 128 columns; else: wait tk[TK_D + j] == D_KS, xb = bf16(x * ln1[l + 1]).
+// Ends with fence.proxy.async.global in every writing thread (the caller then arrives at the grid barrier).
+template <bool IS_O, int NTILE>
+__device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw, bf16_t* out, float* ss2, unsigned* tk, int ntok) {
+    constexpr int NTT = NPAD / 128, TARGET = IS_O ? PhO::K / KU : D_KS;
+    int rank, nidle;
+    idle_rank<NTILE>(rank, nidle);
+    if (rank < 0) return;   // not an idle CTA (block-uniform)
+    const int tid = threadIdx.x;
+    for (int job = rank; job < 8 * NTT; job += nidle) {
+        const int rb = job / NTT, tt = job % NTT;
+        unsigned* tick = tk + (IS_O ? 0 : TK_D) + job;
+        if (tid == 0) {
+            unsigned v;
+            do {
+                asm volatile("ld.acquire.gpu.global.u32 %0, [%1];" : "=r"(v) : "l"(tick) : "memory");
+                if (v != TARGET) __nanosleep(64);
+            } while (v != TARGET);
+            atomicExch(tick, 0u);   // reset: every worker add of this layer has landed (the target is reached); the next use is a layer later, behind grid barriers
+        }
+        __syncthreads();   // broadcast: tid 0's acquire orders the other threads' reads of x below
+        const int ntl = min(ntok - tt * 128, 128), items = ntl > 0 ? ntl * 16 : 0;
+        const bf16_t* lw = lnw + rb * 128;
+        for (int i0 = 0; i0 < items; i0 += NT) {   // block-uniform trip count (the shuffles below need all lanes)
+            const int i = i0 + tid, t = tt * 128 + (i >> 4), cg = i & 15;
+            const bool ok = i < items;
+            float4 a = make_float4(0.f, 0.f, 0.f, 0.f), b = a;
+            if (ok) {
+                const float* xp = x + (size_t)t * HID + rb * 128 + cg * 8;
+                a = __ldcg(reinterpret_cast<const float4*>(xp)); b = __ldcg(reinterpret_cast<const float4*>(xp + 4));
+            }
+            if (ok) *reinterpret_cast<uint4*>(out + (size_t)t * HID + rb * 128 + cg * 8) = pack_xw(a, b, __ldg(reinterpret_cast<const uint4*>(lw + cg * 8)));
+            if constexpr (IS_O) {
+                float sq = a.x * a.x + a.y * a.y + a.z * a.z + a.w * a.w + b.x * b.x + b.y * b.y + b.z * b.z + b.w * b.w;
+#pragma unroll
+                for (int o = 8; o; o >>= 1) sq += __shfl_xor_sync(0xffffffffu, sq, o);   // the 16 lanes of one token (16 consecutive i)
+                if (ok && cg == 0) atomicAdd(ss2 + t, sq);
+            }
+        }
+    }
+    fence_proxy_async_global();   // generic writes of xb2 / xb -> TMA reads after the grid barrier
+}
+
 extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     const long long* __restrict__ token,
     const bf16_t* __restrict__ ln1, const bf16_t* __restrict__ qn, const bf16_t* __restrict__ kn,
@@ -462,7 +537,8 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     const float* __restrict__ rope, const int* __restrict__ t_base, const int* __restrict__ t_vis,
     const int* __restrict__ lm_tok, const int* __restrict__ lm_seq,
     const int ntok, const int n_lm, const int cache_rows,
-    bf16_t* xb, unsigned* tk)   // MK_TS: xb = bf16(x * ln1) [MAXTOK][HID] (TMA B of QKV), tk = row-block tickets [8]; last, so that the other argument offsets do not change
+    bf16_t* xb, unsigned* tk,   // MK_TS: xb = bf16(x * ln1) [MAXTOK][HID] (TMA B of QKV), tk = tickets [64] (P5b; [8] in P5a); last, so that the other argument offsets do not change
+    bf16_t* xb2, float* ss2, bf16_t* act)   // MK_TSB: xb2 = bf16(x * ln2) [MAXTOK][HID] (B of GU), ss2 = sum x^2 per token [MAXTOK], act = bf16(silu * up) [MAXTOK][INTER] (B of D); tk is [64]
 {
     extern __shared__ unsigned char smraw[];
     __shared__ float s_ss[MAXTOK];        // LM: sum of squares of the staged x rows (lm slot)
@@ -527,7 +603,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             __stcg(x + i, bf2f(embed[(size_t)token[i / HID] * HID + (i % HID)]));
     }
     zero_f32(qkv, ntok * QKVN);
-    zero_f32(gu, ntok * GUN);
+    if constexpr (!TSB) zero_f32(gu, ntok * GUN);   // TSB: no gu buffer (GU accumulates in TMEM, ss2 is zeroed in the QKV extra())
     if (MK_DBG_EXIT == 2) return;
     if constexpr (TS) fence_proxy_async_global();   // xb generic stores -> TMA reads of every CTA after the grid barrier
     MK_PF_ARRIVE(if constexpr (TS) { ts_first<PhQkv, TS_TT, TS_KS>(g, 0); } else if (tid == 0) {   // layer 0 QKV: first weight units (landing during the barrier)
@@ -551,10 +627,10 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 for (int i = 0; i < 16; ++i)
                     if (c0 + i < ntok) red_add(qkv + (size_t)(c0 + i) * QKVN + row, __uint_as_float(v[i]));
             };
-            auto extra = [&]() { rr_of_x(x, rr1, ntok); zero_f32(gu, ntok * GUN); };
+            auto extra = [&]() { rr_of_x(x, rr1, ntok); if constexpr (TSB) zero_f32(ss2, ntok); else zero_f32(gu, ntok * GUN); };
             skv_prefetch(l, blockIdx.x, gridDim.x);
             if constexpr (TS) {
-                ts_phase<PhQkv, TS_TT, TS_KS, mk_null(0)>(g, l, ntok, epi);   // joined by a __syncthreads inside
+                ts_phase<PhQkv, TS_TT, TS_KS, 8, mk_null(0)>(g, l, ntok, epi);   // joined by a __syncthreads inside
                 if constexpr (!mk_null(0)) extra();
             } else {
                 gemm_phase<PhQkv, mk_null(0)>(g, l, ntok, get, epi, extra);
@@ -619,13 +695,58 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                     if (c0 + i < ntok) red_add(x + (size_t)(c0 + i) * HID + row, __uint_as_float(v[i]));
             };
             auto extra = [&]() { zero_f32(qkv, ntok * QKVN); };
-            gemm_phase<PhO, mk_null(3)>(g, l, ntok, get, epi, extra);
+            if constexpr (TSB) {
+                // P5b: after a CTA's flush of row block rb its O tickets (one per token tile) get nk units; the idle CTAs (no O unit) convert x -> xb2, ss2 once a ticket reaches 16
+                auto fin = [&](int rb, int nk) {
+                    __syncthreads();   // every thread's red.adds of this row block are issued
+                    if (tid == 0) {
+                        __threadfence();   // release: the CTA's red.adds (ordered before this by the barrier) precede the ticket adds
+                        for (int tt = 0; tt < NPAD / 128; ++tt) atomicAdd(tk + rb * (NPAD / 128) + tt, (unsigned)nk);
+                    }
+                };
+                gemm_phase<PhO, mk_null(3)>(g, l, ntok, get, epi, extra, fin);
+                if constexpr (!mk_null(3))
+                    idle_finalize<true, PhO::NRB * (PhO::K / KU)>(x, ln2 + (size_t)l * HID, xb2, ss2, tk, ntok);
+            } else {
+                gemm_phase<PhO, mk_null(3)>(g, l, ntok, get, epi, extra);
+            }
         }
-        MK_PF_ARRIVE(prefetch_next<PhGu>(g, l));
+        MK_PF_ARRIVE(if constexpr (TSB) ts_first<PhGu, GU_TT, GU_KS>(g, l); else prefetch_next<PhGu>(g, l));
         bar_wait(bar_cnt, bar_target);
 
         // ---- Phase 5: GU GEMM, B = bf16(x * ln2), red.add -> gu (rows 0..3071 gate, 3072.. up); rr2 ----
-        {
+        if constexpr (TSB) {
+            // P5b: GU on the tile stream (A = wgu row block rb: 64 gate + 64 up rows, B = xb2 by TMA, KS 1): the epilogue turns the TMEM accumulator into act = bf16(silu(r2 g) * (r2 u))
+            auto epi = [&](int q, int lane, int grp, int rb, int cb, const u32 (&v)[16]) {
+                const int pid = grp * 2 + (q & 1);   // the pair (quadrants q & 1 and (q & 1) + 2 of group grp): named barrier id 1 + pid, 64 threads
+                float* ex = reinterpret_cast<float*>(sm + TS_XOFF) + pid * 512;   // [16 tokens][32 lanes] fp32
+                if (q >= 2) {   // u warp: lanes 64..127 of the tile = up of channel 64 rb + 32 (q - 2) + lane
+#pragma unroll
+                    for (int i = 0; i < 16; ++i) ex[i * 32 + lane] = __uint_as_float(v[i]);
+                    named_bar_sync(1 + pid, 64);   // u written
+                    named_bar_sync(1 + pid, 64);   // g warp has read them (slot reusable)
+                } else {        // g warp: lanes 0..63 = gate of channel 64 rb + 32 q + lane
+                    float ua[16];
+                    named_bar_sync(1 + pid, 64);
+#pragma unroll
+                    for (int i = 0; i < 16; ++i) ua[i] = ex[i * 32 + lane];
+                    named_bar_sync(1 + pid, 64);
+                    const int ch = 64 * rb + 32 * q + lane;
+#pragma unroll
+                    for (int i = 0; i < 16; ++i) {
+                        const int t = cb + i;
+                        if (t < ntok) {   // warp-uniform
+                            const float r = rsqrtf(__ldcg(ss2 + t) * (1.f / HID) + EPS);
+                            const float gg = r * __uint_as_float(v[i]);
+                            const float h = MK_SILU(gg) * (r * ua[i]);
+                            act[(size_t)t * INTER + ch] = (bf16_t)(pack_bf16(h, 0.f) & 0xffffu);
+                        }
+                    }
+                }
+            };
+            ts_phase<PhGu, GU_TT, GU_KS, 9, mk_null(4)>(g, l, ntok, epi);
+            if constexpr (!mk_null(4)) { if (warp >= 4) fence_proxy_async_global(); }   // act: generic stores -> D's TMA reads (after the grid barrier)
+        } else {
             const bf16_t* lnw = ln2 + (size_t)l * HID;
             auto get = [&](int t, int k, int) -> uint4 {
                 if (t >= ntok) return make_uint4(0u, 0u, 0u, 0u);
@@ -641,7 +762,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             auto extra = [&]() { rr_of_x(x, rr2, ntok); };
             gemm_phase<PhGu, mk_null(4)>(g, l, ntok, get, epi, extra);
         }
-        MK_PF_ARRIVE(prefetch_next<PhD>(g, l));
+        MK_PF_ARRIVE(if constexpr (TSB) ts_first<PhD, D_TT, D_KS>(g, l); else prefetch_next<PhD>(g, l));
         bar_wait(bar_cnt, bar_target);
 
         // ---- Phase 6: D GEMM (K = 3072), B = bf16(silu(rr2 * gate) * (rr2 * up)), red.add -> x ----
@@ -665,7 +786,22 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                     if (c0 + i < ntok) red_add(x + (size_t)(c0 + i) * HID + row, __uint_as_float(v[i]));
             };
             auto extra = [&]() {};
-            if constexpr (TS) {
+            if constexpr (TSB) {
+                // P5b: D on the tile stream (A = wd, B = act by TMA, KS = D_KS); each tile's CTA adds 1 to its D ticket after the join, the idle CTAs convert x -> xb for the next QKV
+                ts_phase<PhD, D_TT, D_KS, 11, mk_null(5)>(g, l, ntok, epi);   // epi: the v0 D red.add into x; joined by a __syncthreads inside
+                if constexpr (!mk_null(5)) {
+                    if (l + 1 < NLAY) {   // block-uniform; the last layer has no next QKV: no tickets, no conversion
+                        if (tid == 0) {
+                            const TsGeom ge = ts_geom<PhD, D_TT, D_KS>();
+                            if (ge.nt > 0) {
+                                __threadfence();   // release: this CTA's red.adds (ordered before tid 0 by the join barrier) precede the ticket adds
+                                for (int ti = 0; ti < ge.nt; ++ti) atomicAdd(tk + TK_D + (ge.t0 + ti) / D_KS, 1u);
+                            }
+                        }
+                        idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE>(x, ln1 + (size_t)(l + 1) * HID, xb, ss2, tk, ntok);
+                    }
+                }
+            } else if constexpr (TS) {
                 // MK_TS: after a CTA's flush of row block rb, the last of the 24 flushing units' CTAs (ticket) writes xb[t][rb*128 ..] = bf16(x * ln1[l+1]) for the next QKV
                 auto fin = [&](int rb, int nk) {
                     if constexpr (TS) {

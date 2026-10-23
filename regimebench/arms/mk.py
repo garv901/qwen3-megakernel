@@ -3,7 +3,8 @@ attention as a placeholder behind the A1 interface.
 
 Variants: ``auto`` (smallest token bucket NPAD in {16, 32, 64, 128, 256} >= total_q, CUDA graph) and ``auto-direct`` (same, no graph).
 One cooperative launch per step (total_q <= 256). Options (``load_arm("mk", **opts)``): ``stamps`` (MK_STAMPS), ``null`` (MK_NULL bitmask),
-``ku``, ``ring``, ``ts`` (MK_TS: tile-stream QKV with B = bf16 ``xb`` by TMA at NPAD >= ts (1 = 128); default 256, 0 = off), ``attn`` ("placeholder" | "splitkv"). The step clones the fixture KV into a packed cache with CTX zero padding rows
+``ku``, ``ring``, ``ts`` (MK_TS: tile-stream QKV with B = bf16 ``xb`` by TMA at NPAD >= ts (1 = 128); default 256, 0 = off), ``tsb`` (MK_TSB, default 0: P5b, GU and D on
+the tile stream with act / xb2 buffers, the interleaved wg|wu weights and the idle-CTA finalizers; needs MK_TS on at the bucket), ``attn`` ("placeholder" | "splitkv"). The step clones the fixture KV into a packed cache with CTX zero padding rows
 (as hv2g), encodes the 8 weight tensor maps once, and ``outputs()`` gathers k_new / v_new from the cache.
 """
 
@@ -36,7 +37,7 @@ class _Loaded:
         cubin, info, _ = B.compile_build(npad, self.nb, knobs, attn=attn)
         self.ptxas = info
         self.knobs = d
-        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"])
+        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"], tsb=d["MK_TSB"])
         self.kernel = CoopKernel(cubin, B.KERNEL, self.dyn)
         self.regs, self.static_smem = self.kernel.regs, self.kernel.static_smem
         self.local_bytes, self.dyn_smem = self.kernel.local_bytes, self.kernel.dyn_smem
@@ -80,7 +81,13 @@ class MkStep:
         self.gu = torch.zeros(M * 6144, **f32)
         self.rr = torch.zeros(2 * M, **f32)
         self.xb = torch.zeros(M * B.H, dtype=torch.bfloat16, device=dev)   # MK_TS: bf16(x * ln1) [MAXTOK][HID], rows >= ntok stay zero (B tiles of the tile-stream QKV)
-        self.tk = torch.zeros(8, dtype=torch.int32, device=dev)             # MK_TS: D-phase row-block tickets (the last user resets them)
+        self.tk = torch.zeros(B.TK_SIZE, dtype=torch.int32, device=dev)     # MK_TS: D-phase row-block tickets (the last user resets them); MK_TSB: O tickets [0, 16), D tickets [16, 32)
+        self.tsb = B.tsb_on(self.npad, ld.knobs)
+        if self.tsb:   # P5b: bf16(x * ln2) [MAXTOK][HID], sum x^2 per token, act = bf16(silu * up) [MAXTOK][INTER] (rows >= ntok stay zero), wgu (built once per weight set)
+            self.xb2 = torch.zeros(M * B.H, dtype=torch.bfloat16, device=dev)
+            self.ss2 = torch.zeros(M, **f32)
+            self.act = torch.zeros(M * B.INTER, dtype=torch.bfloat16, device=dev)
+            self.wgu = arm._wgu(inputs["wg"], inputs["wu"])
         self.sync = torch.zeros(B.SYNC_INTS, dtype=torch.int32, device=dev)
         self.pkey = torch.zeros(self.nb * M, dtype=torch.int32, device=dev)
         self.pidx = torch.zeros(self.nb * M, dtype=torch.int32, device=dev)
@@ -92,8 +99,10 @@ class MkStep:
         self.lm_seq = torch.tensor(c.lm_seq or [0], dtype=torch.int32, device=dev)
         self._weights = {k: inputs[k] for k in (*B.WEIGHT_MAPS, *VEC_WEIGHTS)}   # keep the fixture tensors referenced
         ts = bool(ld.knobs["MK_TS"])
-        blob = B.encode_maps(self._weights, {k: self._weights[k].data_ptr() for k in B.WEIGHT_MAPS},
-                             workspace={"xb": self.xb.data_ptr()} if ts else None)   # map 8 = xb (128 B more) only for MK_TS builds
+        ws = {"xb": self.xb.data_ptr()} if ts else None   # map 8 = xb (128 B more) only for MK_TS builds
+        if self.tsb:   # maps 9, 10, 11 = xb2, wgu, act
+            ws.update({"xb2": self.xb2.data_ptr(), "wgu": self.wgu.data_ptr(), "act": self.act.data_ptr()})
+        blob = B.encode_maps(self._weights, {k: self._weights[k].data_ptr() for k in B.WEIGHT_MAPS}, workspace=ws, npad=self.npad)
         self.maps = torch.frombuffer(bytearray(blob), dtype=torch.uint8).to(dev)
         assert self.maps.data_ptr() % 128 == 0
         wp = [self._weights[k].data_ptr() for k in VEC_WEIGHTS]
@@ -102,7 +111,8 @@ class MkStep:
                           self.qb.data_ptr(), self.ao.data_ptr(), self.gu.data_ptr(), self.rr.data_ptr(), self.sync.data_ptr(),
                           self.pkey.data_ptr(), self.pidx.data_ptr(), self.rope.data_ptr(), self.t_base.data_ptr(),
                           self.t_vis.data_ptr(), self.lm_tok.data_ptr(), self.lm_seq.data_ptr(),
-                          i32(c.ntok), i32(len(c.lm_tok)), i32(self.rows), self.xb.data_ptr(), self.tk.data_ptr()])   # xb, tk: last kernel arguments
+                          i32(c.ntok), i32(len(c.lm_tok)), i32(self.rows), self.xb.data_ptr(), self.tk.data_ptr(),
+                          *((self.xb2.data_ptr(), self.ss2.data_ptr(), self.act.data_ptr()) if self.tsb else (0, 0, 0))])   # xb, tk, xb2, ss2, act: last kernel arguments
         self.config: dict[str, Any] = {
             "kernel": B.KERNEL, "npad": self.npad, "graph": not direct, "proxy": False, "launches_per_step": 1,
             "grid": self.nb, "block": 512, "dyn_smem": ld.dyn_smem, "regs": ld.regs, "static_smem": ld.static_smem,
@@ -164,7 +174,7 @@ class MkStep:
     def close(self) -> None:
         self._graph = None
         self.args = None
-        for n in ("kc", "vc", "kview", "vview", "logits", "next_token", "x", "qkv", "qb", "ao", "gu", "rr", "xb", "tk", "sync", "pkey", "pidx",
+        for n in ("kc", "vc", "kview", "vview", "logits", "next_token", "x", "qkv", "qb", "ao", "gu", "rr", "xb", "tk", "xb2", "ss2", "act", "wgu", "sync", "pkey", "pidx",
                   "rope", "t_base", "t_vis", "lm_tok", "lm_seq", "maps"):
             if hasattr(self, n):
                 delattr(self, n)
@@ -174,10 +184,18 @@ class MkStep:
 class MkArm:
     name = "mk"
 
-    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 256, attn: str = "placeholder", **_: Any):
+    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 256, tsb: int = 0, attn: str = "placeholder", **_: Any):
         self.attn = attn
-        self.knobs = {"MK_STAMPS": int(stamps), "MK_NULL": int(null), "MK_KU": int(ku), "MK_RING": int(ring), "MK_TS": int(ts)}
+        self.knobs = {"MK_STAMPS": int(stamps), "MK_NULL": int(null), "MK_KU": int(ku), "MK_RING": int(ring), "MK_TS": int(ts), "MK_TSB": int(tsb)}
         self._loaded: dict[tuple, _Loaded] = {}
+        self._wgu_cache: dict[tuple, Any] = {}
+
+    def _wgu(self, wg, wu):
+        """wgu = B.interleave_gu(wg, wu), built once per (wg, wu) pair of the arm (MK_TSB; 352 MB at 28 layers)."""
+        key = (wg.data_ptr(), wu.data_ptr())
+        if key not in self._wgu_cache:
+            self._wgu_cache = {key: B.interleave_gu(wg, wu)}   # one entry: a new weight set replaces the old
+        return self._wgu_cache[key]
 
     def variants(self) -> tuple[str, ...]:
         return VARIANTS
