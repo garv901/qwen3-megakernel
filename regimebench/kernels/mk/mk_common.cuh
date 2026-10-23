@@ -32,7 +32,7 @@
 #define MK_NULL 0
 #endif
 #ifndef MK_PFA
-#define MK_PFA 0   // 1: next-phase weight prefetch after the barrier arrive (see MK_PF_ARRIVE in mk_step.cu)
+#define MK_PFA 1   // 0: v0 order (prefetch, then arrive); 1 (default, job 9582: -66 us at b1): next-phase weight prefetch after the barrier arrive (see MK_PF_ARRIVE in mk_step.cu)
 #endif
 #ifndef MK_DBG_EXIT
 #define MK_DBG_EXIT 0   // debug: return after prologue stage n (1: smem/TMEM/mbarrier init, 2: + embed copy and zeroing)

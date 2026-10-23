@@ -1,6 +1,7 @@
-"""Barrier latency vs arrival spread inside mk, from MK_STAMPS. Usage: stamps_spread.py WORKLOADS [NULL_MASK].
+"""Barrier latency vs arrival spread inside mk, from MK_STAMPS. Usage: stamps_spread.py WORKLOADS [NULL_MASK [JSON knobs]].
 Per phase (layers 4..23, median over layers): spread = last arrive - median arrive, lat = median exit - last arrive,
 and whether the last arriver is a CTA with the max unit count of that phase (unit imbalance)."""
+import json
 import sys
 
 import numpy as np
@@ -14,6 +15,8 @@ PH = ("QKV", "RoPE", "attn", "O", "GU", "D")
 UNITS = {0: 256, 3: 128, 4: 384, 5: 192}   # KU 128 split-K units per GEMM phase
 mask = int(sys.argv[2], 0) if len(sys.argv) > 2 else 0
 arm = load_arm("mk", stamps=1, null=mask)
+if len(sys.argv) > 3:
+    arm.knobs.update({k: int(v) for k, v in json.loads(sys.argv[3]).items()})
 for w in select(sys.argv[1].split(",")):
     inputs = make_inputs(w, 7401, "cuda")
     step = arm.prepare(w, inputs, "auto-direct", "cuda")
