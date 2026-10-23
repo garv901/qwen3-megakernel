@@ -90,3 +90,37 @@ Knob-off identity: `tests/test_mk.py::test_knob_off_sass_identical_to_stripped_s
 5. LM-head cost: 9 row blocks per CTA, each restages x (8 units x NPAD x 128 k) and the epilogue does a warp-wide reduce per slot; expected slow at NPAD 256.
 6. qkv/gu zeroing + red.add visibility relies on barrier release/acquire only (no extra fences), as hv2g scratch.
 7. Cooperative launch co-residency: 209168 B smem at NPAD 256 plus 128 regs x 512 threads; one CTA per SM.
+
+## LM head, pipelined (MK_LMP, SPEC-lm; CPU-verified only: compile, SASS, pytest)
+Knobs `MK_LMP` (default 0) and `MK_LMR` (LM ring slots, default 4). `LMP = MK_LMP && NPAD <= 32`; at NPAD >= 64 MK_LMP=1 keeps the v0 `gemm_phase<PhLm>` path
+(`if constexpr`). MK_LMP=0: SASS identical to HEAD for all 5 buckets (checked by building `git show HEAD:` sources; also `test_lmp_off_sass_identical`).
+Code: `lm_fill`, `lm_first`, `lm_phase` in `mk_step.cu`; constants `LM_RING_OFF`, `LMB_*`, `BARS_BYTES` in `mk_common.cuh`; `build.py:dyn_smem(..., lmp, lmr)`.
+- Smem (from the 1024-aligned base): `[XL: 8 x XS][LM ring: LMR x 32 KB]`, overlaying every other region; `OFF_BARS = max(v0 layout, LM layout)`; 384 B of barriers
+  (v0 bars at +0/+64, tmem slot +128, LM: full[LMR] +192, empty[LMR] +256, accfull[2] +320, accempty[2] +336). DYN_SMEM at NPAD 16 LMR 4: 165248; NPAD 32 LMR 4: 198016.
+  Static smem 11280 B + dynamic must be <= 227 KB (static_assert): NPAD 16 allows LMR <= 5, NPAD 32 LMR <= 4 (SPEC asked to compile LMR 6 at NPAD 16: 230784 B, does not fit).
+  MK_LMP needs MK_KU = 128.
+- TMEM: 2 accumulators of NPAD columns (buffer b at column b * NPAD) inside the existing 256-column allocation.
+- Roles: tid 0 producer (also issues the window prefetch), tid 32 MMA issuer, warps 4 .. 4 + 4 NPAD/16 - 1 epilogue (warp w: quadrant w & 3, column chunk (w >> 2) - 1;
+  one warp per (quadrant, chunk) keeps the single-writer property of s_bk / s_bi; row blocks ascend, so strict > keeps the lowest index). Other warps idle until the final
+  `__syncthreads`. accempty count = 4 * NPAD / 16 (the working epilogue warps only; idle warps must not arrive, an early arrival would pollute a later phase).
+- X: all 512 threads stage all 8 k-chunks once (get math of v0, same SW128 layout as `stage_tile`), s_ss accumulated once per element, `fence.proxy.async`, `__syncthreads`.
+- MK_NULL bit 6: tid 0 waits full[j % LMR] and refills (no staging / MMA / epilogue). Stamp: unchanged (after the join `__syncthreads`).
+Arguments:
+1. Parity. Every LM barrier is re-initialised in the prologue and used only in the LM phase. Convention as v0: use number u of a barrier is awaited with parity u & 1.
+   full[s] use u = j / LMR (j = unit, s = j % LMR): MMA waits (j / LMR) & 1. empty[s]: the MMA of unit j - LMR commits it, so unit j >= LMR waits use (j / LMR - 1), parity
+   ((j / LMR) - 1) & 1. accfull[b]: row block i (b = i & 1) is use i / 2, epilogue waits (i / 2) & 1. accempty[b]: the MMA waits at kc == 0 of row block i >= 2 for use i / 2 - 1.
+2. First use. empty[]: no wait on first use (the producer starts at j = LMR; the first LMR units are filled by the window prefetch, whose slots have no previous LM use).
+   accempty[b]: no wait for row blocks 0 and 1 (`i >= 2`). full[] / accfull[]: the wait is on the first phase (parity 0), nothing to skip. Counts: full 1 (arrive.expect_tx; TMA
+   adds the tx bytes), empty 1 and accfull 1 (tcgen05.commit), accempty 4 NPAD / 16 (lane 0 of each epilogue warp after `tcgen05.wait::ld`, `fence::before_thread_sync`, `__syncwarp`).
+3. Overlap with in-flight TMA. The window prefetch writes the LM ring, which overlays the GEMM ring, B tiles and attention scratch. Nothing of those can be in flight: every earlier
+   phase's last unit ends with the MMA-commit wait (all earlier MMAs done; MMA completion is in order), every TMA of the D phase was waited by its MMA, the epilogue TMEM reads and
+   the B-tile reads (generic and async) are finished by the last `__syncthreads` of `gemm_phase`, which both tid 0 (MK_PFA 0) and the `bar_arrive` `__syncthreads` (MK_PFA 1) follow.
+   The v0 window prefetch is replaced, so no other TMA exists then. Generic-proxy writes into that smem (B tile, attention scratch) were fenced with `fence.proxy.async` and
+   consumed before. XL staging (generic writes, XL = [0, 8 XS)) is disjoint from the ring ([8 XS, ..)) that the prefetch is filling; the staging's earlier readers/writers are covered by the
+   same argument. The producer reuses a slot only after its empty barrier (MMA done with the slot). XL is never rewritten after the `fence.proxy.async` + `__syncthreads`.
+4. TMEM lane quadrant. Epilogue warp w reads TMEM lanes 32 (w & 3) .. +31 only (`mk_tmem_read16(..., q = warp & 3, ...)`), as v0; every quadrant has 1 (NPAD 16) or 2 (NPAD 32) working warps.
+   TMEM alloc / dealloc by warp 0 (all lanes) as before; the dealloc follows the join `__syncthreads`, after the last accfull wait (all MMAs and loads finished).
+5. Buffer reuse: the MMA of row block i + 2 (same buffer) starts only after accempty[b] = all epilogue warps read buffer b of block i (first MMA overwrites: `kc == 0` -> accumulate flag off).
+SASS (NPAD 16, MK_LMP 0 | 1; NPAD 32 identical to 16): UTCHMMA 40 | 40 (4 GEMM phases x 8 + LM 8 K16 steps), UTCBAR 5 | 6 (LM: empty + accfull commit), LDTM 5 | 5, UTMALDG 22 | 22,
+UTCATOMSWS 3 | 3, SYNCS (mbarrier ops) 45 | 60 (ARRIVE 11 | 12, PHASECHK 30 | 32, EXCH (init) 4 | 16).
+Build (regs / spill / dyn smem): see the report; all 5 buckets 0 spill for MK_LMP 0 and 1.

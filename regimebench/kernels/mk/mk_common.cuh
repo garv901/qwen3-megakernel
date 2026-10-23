@@ -8,6 +8,7 @@
 //   MK_RING   weight ring slots (units in flight), 2..4.
 //   MK_XTMA   0 only (reserved: O-phase B tile by TMA from ao; not implemented in v0).
 //   MK_STAMPS 1: thread 0 stores %globaltimer at every bar_arrive and bar_wait exit into smem, one dump to mk_stamps at the end.
+//   MK_LMP    1: pipelined LM head (NPAD <= 32; NOTES.md "LM head, pipelined"); MK_LMR LM ring slots.
 //   MK_NULL   bitmask, bit p-1 = phase p (1..6), bit 6 = LM head: the phase keeps its barrier(s), weight TMAs and ring waits and skips
 //             staging, MMA, TMEM read and output (wrong outputs by design; null-work oracle).
 #ifndef NPAD
@@ -40,12 +41,20 @@
 #ifndef MK_EPI2
 #define MK_EPI2 0   // TMEM read: 2 chunks of 16 columns per warp iteration (1) or one (0, default: 1 spills at NPAD 16..256)
 #endif
+#ifndef MK_LMP
+#define MK_LMP 0   // 1: pipelined LM head (SPEC-lm): X staged once, LM ring of MK_LMR units, 2 TMEM accumulators, warp-specialized (NPAD <= 32 only; larger NPAD keeps the v0 LM path)
+#endif
+#ifndef MK_LMR
+#define MK_LMR 4   // LM ring slots (32 KB each) of the MK_LMP path
+#endif
 #ifndef MK_STG
 #define MK_STG 4   // staging chunks (16 B) in flight per thread
 #endif
 static_assert(NPAD == 16 || NPAD == 32 || NPAD == 64 || NPAD == 128 || NPAD == 256, "NPAD bucket");
 static_assert(MK_KU == 128 || MK_KU == 64, "MK_KU");
 static_assert(MK_RING >= 2 && MK_RING <= 4, "MK_RING");
+static_assert(MK_LMP == 0 || MK_LMP == 1, "MK_LMP");
+static_assert(MK_LMR >= 2 && MK_LMR <= 8, "MK_LMR");
 static_assert(MK_XTMA == 0, "MK_XTMA = 1 (O-phase B tile by TMA) is not implemented in v0");
 
 typedef unsigned int u32;
@@ -65,8 +74,18 @@ constexpr int XS = NBOX * NPAD * 128;         // bytes of one B-tile slot (NBOX 
 constexpr int ATTN_BYTES = SKV_SMEM_BYTES;    // attention scratch, overlaid on the B-tile slots (idle in phases 2 and 3)
 constexpr int XREG = (2 * XS > ATTN_BYTES) ? 2 * XS : ATTN_BYTES;
 constexpr int OFF_X = RING * UB;              // B-tile slots (offset from the 1024-aligned smem base)
-constexpr int OFF_BARS = OFF_X + XREG;        // tma bars [0, RING), mma bars at +64, tmem slot at +128
-constexpr int DYN_SMEM = 1024 + OFF_BARS + 256;
+// LM head, pipelined path (SPEC-lm), NPAD <= 32: smem from the base = [XL: 8 k-chunks x XS][LM ring: LMR x UB]; overlays every other region
+// (no other phase runs after the LM phase); the barriers stay behind the larger of the two layouts.
+constexpr bool LMP = MK_LMP && NPAD <= 32;
+static_assert(!LMP || MK_KU == 128, "MK_LMP needs MK_KU = 128 (8 k-chunks of 128)");
+constexpr int LMR = MK_LMR;
+constexpr int LM_RING_OFF = 8 * XS;
+constexpr int LM_BYTES = LMP ? 8 * XS + LMR * UB : 0;
+constexpr int OFF_BARS = (OFF_X + XREG > LM_BYTES) ? OFF_X + XREG : LM_BYTES;   // tma bars [0, RING), mma bars at +64, tmem slot at +128
+// LM mbarriers (LMP only): full[LMR] at +LMB_FULL, empty[LMR] at +LMB_EMPTY, accfull[2] at +LMB_ACCF, accempty[2] at +LMB_ACCE
+constexpr int LMB_FULL = 192, LMB_EMPTY = 256, LMB_ACCF = 320, LMB_ACCE = 336;
+constexpr int BARS_BYTES = LMP ? 384 : 256;
+constexpr int DYN_SMEM = 1024 + OFF_BARS + BARS_BYTES;
 constexpr int N_BARRIERS = 1 + 6 * NLAY;      // grid barriers per launch
 #if MK_STAMPS
 constexpr int MK_NSTAMP = 2 * N_BARRIERS + 8; // arrive + wait-exit per barrier, then the end of the LM phase
@@ -110,6 +129,7 @@ __device__ __forceinline__ void mbar_wait(u32 a, u32 parity) {
         if (ok) break;
     }
 }
+__device__ __forceinline__ void mbar_arrive(u32 a) { asm volatile("mbarrier.arrive.release.cta.shared::cta.b64 _, [%0];" :: "r"(a) : "memory"); }
 __device__ __forceinline__ void mbar_expect_tx(u32 a, u32 bytes) { asm volatile("mbarrier.arrive.expect_tx.release.cta.shared::cta.b64 _, [%0], %1;" :: "r"(a), "r"(bytes) : "memory"); }
 __device__ __forceinline__ void tma2(u32 dst, const void* map, int c0, int c1, u32 mbar) {
     asm volatile("cp.async.bulk.tensor.2d.shared::cluster.global.mbarrier::complete_tx::bytes [%0], [%1, {%3, %4}], [%2];" :: "r"(dst), "l"(map), "r"(mbar), "r"(c0), "r"(c1) : "memory");

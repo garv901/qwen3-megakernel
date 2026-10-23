@@ -26,7 +26,7 @@ KERNEL = "mk_step"
 ATTN_PLACEHOLDER = HERE / "attn_placeholder.cuh"
 ATTN_SPLITKV = COMMON / "splitkv" / "splitkv.cuh"
 OWN_SOURCES = ("mk_common.cuh", "mk_step.cu")
-DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1}
+DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 0, "MK_LMR": 4}
 WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map order (kernel: maps 0..7)
 
 
@@ -78,11 +78,15 @@ def knob_defines(knobs: dict | None) -> list[str]:
 ATTN_SMEM_PLACEHOLDER = CTX * 128 * 2 + 16 * 128 * 4 + 2 * 16 * 4
 
 
-def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER) -> int:
-    """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM; the kernel traps if the launch gives less)."""
+def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 0, lmr: int = 4) -> int:
+    """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM; the kernel traps if the launch gives less).
+    lmp: MK_LMP (the pipelined LM head only applies at npad <= 32: smem = [8 X chunks][lmr x 32 KB ring], 384 B of barriers)."""
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
-    return 1024 + ring * ub + max(2 * xs, attn_bytes) + 256
+    off_bars = ring * ub + max(2 * xs, attn_bytes)
+    if lmp and npad <= 32:
+        return 1024 + max(off_bars, 8 * xs + lmr * ub) + 384
+    return 1024 + off_bars + 256
 
 
 @lru_cache(maxsize=None)
@@ -95,7 +99,7 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     if stripped:
         src = strip_knobs(src)
     k = {**DEFAULT_KNOBS, **dict(knobs)}
-    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"]) if attn == "placeholder" and attn_path is None else 0
+    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"]) if attn == "placeholder" and attn_path is None else 0
     defs = [f"NPAD={npad}", f"NB={nb}", f"MK_EXPECT_DYN={exp}", *knob_defines(dict(knobs))]
     cubin, log = nvrtc_compile(src, defs, arch=arch, ptxas_verbose=True, name="mk.cu")
     return cubin, parse_ptxas(log), log

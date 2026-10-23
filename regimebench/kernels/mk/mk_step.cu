@@ -45,6 +45,7 @@ struct PhLm {
 static_assert(VOCAB % 128 == 0, "LM row blocks");
 static_assert(NW == SKV_NW, "attention header assumes 16 warps");
 static_assert(XREG >= ATTN_BYTES, "attention smem overlay");
+static_assert(DYN_SMEM + 11280 <= 227 * 1024, "dynamic + static smem (11280 B: LM tables) exceed 227 KB (MK_LMR too large for this NPAD)");
 #if defined(MK_EXPECT_DYN) && MK_EXPECT_DYN
 static_assert(MK_EXPECT_DYN == DYN_SMEM, "host dyn_smem (build.py) != kernel DYN_SMEM");
 #endif
@@ -198,6 +199,102 @@ __device__ __forceinline__ void gemm_phase(GS& g, int l, int nrows, GetF get, Ep
     }
 }
 
+// ---------------------------------------------------------------- pipelined LM head (MK_LMP, NPAD <= 32; see NOTES.md "LM head, pipelined")
+// LM unit j of this CTA (rb = r0 + j / 8, kc = j % 8) lives in LM ring slot j % LMR, full barrier full[j % LMR].
+__device__ __forceinline__ void lm_fill(const GS& g, int r0, int j) {   // one thread
+    constexpr int KCL = HID / KU;
+    const int s = j % LMR;
+    int m, row;
+    PhLm::src(0, r0 + j / KCL, m, row);
+    const u32 bar = g.bars + LMB_FULL + 8 * s;
+    mbar_expect_tx(bar, UB);
+    mk_tma_unit(g.base + LM_RING_OFF + s * UB, g.maps + m * 128, (j % KCL) * KU, row, bar);
+}
+// barrier window after the last D phase: first LM units (LMP) or the v0 ring prefetch
+__device__ __forceinline__ void lm_first(const GS& g) {
+    if constexpr (LMP) {
+        if (threadIdx.x == 0) {
+            const Geom<PhLm> ge = geom<PhLm>();
+            for (int i = 0; i < LMR && i < ge.n; ++i) lm_fill(g, ge.u0 / (HID / KU), i);
+        }
+    } else {
+        prefetch_next<PhLm>(g, 0);
+    }
+}
+// All threads. Precondition: lm_first() ran in the barrier window and the grid barrier has been passed. Returns with the roles still
+// divergent (the caller's __syncthreads joins them).
+template <bool NUL, class GetF, class EpiF>
+__device__ __forceinline__ void lm_phase(GS& g, GetF get, EpiF epi) {
+    constexpr int KCL = HID / KU, NCH = NPAD / 16;
+    const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, q = warp & 3;
+    const Geom<PhLm> ge = geom<PhLm>();
+    const int n = ge.n, r0 = ge.u0 / KCL, nrb = n / KCL;
+    const u32 fullb = g.bars + LMB_FULL, emptyb = g.bars + LMB_EMPTY, accf = g.bars + LMB_ACCF, acce = g.bars + LMB_ACCE;
+    if (NUL) {   // producer + full waits only (nothing reads the slot: refill at once)
+        if (tid == 0)
+            for (int j = 0; j < n; ++j) {
+                mbar_wait(fullb + 8 * (j % LMR), (j / LMR) & 1);
+                if (j + LMR < n) lm_fill(g, r0, j + LMR);
+            }
+        return;
+    }
+    // X (all 8 k-chunks of B) staged once: chunk c -> (kc, row r, 16-byte chunk ch), same SW128 K-major layout as stage_tile
+    {
+        constexpr int PER = NPAD * 16, ITER = 8 * PER / NT;
+#pragma unroll
+        for (int g0 = 0; g0 < ITER; g0 += MK_STG) {
+            uint4 v[MK_STG];
+#pragma unroll
+            for (int jj = 0; jj < MK_STG; ++jj) {
+                const int i = g0 + jj, c = tid + NT * i;
+                if (i < ITER) v[jj] = get((c % PER) >> 4, (c / PER) * KU + (c & 15) * 8, 0);
+            }
+#pragma unroll
+            for (int jj = 0; jj < MK_STG; ++jj) {
+                const int i = g0 + jj, c = tid + NT * i;
+                if (i < ITER) {
+                    const int kc = c / PER, r = (c % PER) >> 4, ch = c & 15;
+                    *reinterpret_cast<uint4*>(g.sm + kc * XS + (ch >> 3) * (NPAD * 128) + r * 128 + (((ch & 7) ^ (r & 7)) << 4)) = v[jj];
+                }
+            }
+        }
+        fence_proxy_async();
+    }
+    __syncthreads();
+    if (tid == 0) {   // producer: units LMR.. (the first min(LMR, n) were issued in the barrier window)
+        for (int j = LMR; j < n; ++j) {
+            const int s = j % LMR;
+            mbar_wait(emptyb + 8 * s, ((j / LMR) - 1) & 1);   // previous use of the slot (use number j / LMR - 1) finished
+            lm_fill(g, r0, j);
+        }
+    } else if (tid == 32) {   // MMA issuer
+        const u32 idesc = tc_idesc(128, NPAD);
+        for (int j = 0; j < n; ++j) {
+            const int i = j / KCL, kc = j % KCL, b = i & 1, s = j % LMR;
+            if (kc == 0 && i >= 2) mbar_wait(acce + 8 * b, ((i / 2) - 1) & 1);   // epilogue done with buffer b (use i / 2 - 1)
+            mbar_wait(fullb + 8 * s, (j / LMR) & 1);
+            tc_fence_after();
+            mk_mma_unit(g.tb + b * NPAD, g.base + LM_RING_OFF + s * UB, g.base + kc * XS, idesc, kc == 0);
+            mk_commit(emptyb + 8 * s);
+            if (kc == KCL - 1) mk_commit(accf + 8 * b);
+        }
+    } else if (warp >= 4 && (warp >> 2) - 1 < NCH) {   // epilogue: warp w = 4 .. 4 + 4 NCH - 1, quadrant q = w & 3, column chunk (w >> 2) - 1
+        const int c = (warp >> 2) - 1;
+        for (int i = 0; i < nrb; ++i) {
+            const int b = i & 1;
+            mbar_wait(accf + 8 * b, (i / 2) & 1);
+            tc_fence_after();
+            u32 v[16];
+            mk_tmem_read16(v, g.tb + b * NPAD, q, c * 16);
+            tc_wait_ld();
+            epi((r0 + i) * 128 + mk_row_of(q, lane), c * 16, v, r0 + i);
+            tc_fence_before();
+            __syncwarp();
+            if (lane == 0) mbar_arrive(acce + 8 * b);
+        }
+    }
+}
+
 __device__ __forceinline__ void zero_f32(float* p, int total) {   // total floats (multiple of 4), whole grid
     for (int i = (blockIdx.x * NT + threadIdx.x) * 4; i < total; i += gridDim.x * NT * 4)
         __stcg(reinterpret_cast<float4*>(p + i), make_float4(0.f, 0.f, 0.f, 0.f));
@@ -264,6 +361,10 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     if (warp == 0) mk_tmem_alloc(smem_u32((void*)tslot));
     if (tid == 0) {
         for (int i = 0; i < RING; ++i) { mbar_init(base + OFF_BARS + 8 * i, 1); mbar_init(base + OFF_BARS + 64 + 8 * i, 1); }
+        if constexpr (LMP) {
+            for (int i = 0; i < LMR; ++i) { mbar_init(base + OFF_BARS + LMB_FULL + 8 * i, 1); mbar_init(base + OFF_BARS + LMB_EMPTY + 8 * i, 1); }
+            for (int b = 0; b < 2; ++b) { mbar_init(base + OFF_BARS + LMB_ACCF + 8 * b, 1); mbar_init(base + OFF_BARS + LMB_ACCE + 8 * b, 4 * (NPAD / 16)); }
+        }
         mbar_fence_init();
         for (int m = 0; m < NMAP; ++m) map_acquire(maps + 128 * m);
 #if MK_STAMPS
@@ -421,7 +522,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             auto extra = [&]() {};
             gemm_phase<PhD, mk_null(5)>(g, l, ntok, get, epi, extra);
         }
-        MK_PF_ARRIVE(if (l + 1 < NLAY) prefetch_next<PhQkv>(g, l + 1); else prefetch_next<PhLm>(g, 0));
+        MK_PF_ARRIVE(if (l + 1 < NLAY) prefetch_next<PhQkv>(g, l + 1); else lm_first(g));
         bar_wait(bar_cnt, bar_target);
     }
 
@@ -467,7 +568,8 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             }
         };
         auto extra = [&]() {};
-        gemm_phase<PhLm, mk_null(6)>(g, 0, n_lm, get, epi, extra);
+        if constexpr (LMP) lm_phase<mk_null(6)>(g, get, epi);
+        else gemm_phase<PhLm, mk_null(6)>(g, 0, n_lm, get, epi, extra);
     }
     __syncthreads();
     tc_fence_after();
