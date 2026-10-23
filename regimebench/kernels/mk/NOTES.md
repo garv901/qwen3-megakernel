@@ -124,3 +124,70 @@ Arguments:
 SASS (NPAD 16, MK_LMP 0 | 1; NPAD 32 identical to 16): UTCHMMA 40 | 40 (4 GEMM phases x 8 + LM 8 K16 steps), UTCBAR 5 | 6 (LM: empty + accfull commit), LDTM 5 | 5, UTMALDG 22 | 22,
 UTCATOMSWS 3 | 3, SYNCS (mbarrier ops) 45 | 60 (ARRIVE 11 | 12, PHASECHK 30 | 32, EXCH (init) 4 | 16).
 Build (regs / spill / dyn smem): see the report; all 5 buckets 0 spill for MK_LMP 0 and 1.
+
+## Tile-stream QKV (MK_TS, SPEC-P5a; CPU-verified only: compile, SASS, pytest; NOTHING has run on a GPU)
+Knob `MK_TS` (default 0). `TS = MK_TS && NPAD >= 128 && MK_KU == 128` (constexpr, `mk_common.cuh`). With TS the QKV GEMM runs on the tile-stream engine ported from
+`probe/mk_core/xover3/xover3.cu k_ts` (SB = 0, GPU-verified in jobs 9592 / 9595) with B = bf16 `xb` loaded by TMA; O, GU, D and the LM head are unchanged (P5b).
+MK_TS = 0: SASS identical to commit 6f1e1cc (the last one before this work) at all 5 buckets; MK_TS = 1 at NPAD <= 64 (and with MK_KU = 64): identical to MK_TS = 0
+(`test_ts0_sass_identical_to_head`, `test_ts_off_sass_identical`). Keeping TS = 0 identical needed the TS code in `if constexpr` branches that DEFINE the hook lambda inside the branch
+(a `fin` lambda defined outside the branch changed register allocation in the prologue).
+- Data. `xb` bf16 [MAXTOK][HID] (arm: torch.zeros) = bf16(x * ln1[l]) (the value the v0 QKV `get` stages, before rr1); rows >= ntok keep their allocation zeros. `tk` u32 [8] tickets (zero at
+  allocation; the last user of a row block resets its ticket). Both are the LAST two kernel arguments (after `cache_rows`), see Deviations. Tensor map 8 = xb: dims {HID, MAXTOK}, stride 2048 B, box {64, 128}, SW128
+  (`build.py: workspace_map_specs`, `encode_maps(..., workspace={"xb": ptr})`; the arm appends the 128 B only for MK_TS builds; kernel `NMAP = TS ? 9 : 8`). QKV still red.adds UNSCALED sums into qkv; RoPE phase applies rr1.
+- Writers of xb. (1) Prologue (TS only): each thread writes xb[i] = bf16(embed-x * ln1[0]) for its own i (same strided loop as x), `fence.proxy.async.global`, then the grid barrier arrive.
+  (2) D phase of layer l (`gemm_phase<PhD>` gets a `fin(rb, nk)` hook after the epilogue of every row-block segment; nk = units of rb flushed by this CTA, tracked as `j - jseg + 1`): `__syncthreads`; tid 0
+  `__threadfence`, `old = atomicAdd(&tk[rb], nk)`, last = (old + nk == 24); broadcast through the static `s_flag`; if last (and l + 1 < NLAY): `__threadfence`, all 512 threads `__ldcg` x[t][rb*128..+127] for t < ntok, write
+  xb = pack_xw(x, ln1[l+1]) (16 B stores, 16 per row, 8 fp32 per item); `fence.proxy.async.global` by every writer thread; tid 0 `atomicExch(&tk[rb], 0)`. For l + 1 == NLAY the hook does nothing (tk stays 0).
+- Geometry. Tile t = (rb * NTT + tt) * KS + ks, NRB = 32 (PhQkv), NTT = NPAD / 128, (TT, KS) = (128, 2) at NPAD 256 and (128, 4) at NPAD 128 (`TS_TT`, `TS_KS`), CTA b owns [b NTILE / 148, (b + 1) NTILE / 148)
+  (NTILE = 128 in both buckets: 128 CTAs get one tile (4 or 2 k-steps), 20 get none). A = `PhQkv::src` rows, k = ks * 1024 / KS + j * 128; B = map 8 box (k, tt * TT), 2 boxes per step.
+- Smem. Ring of `TS_R` slots [A 32 KB | B TT * 256 B = 32 KB] = 64 KB from the base, `TS_R = min(8, (227 KB - 11280 - 1024 - 384) / 64 KB)` = 3. `OFF_BARS = max(v0 layout, LM layout, TS ring)`; `BARS_BYTES = 384` for LMP or TS.
+  DYN_SMEM with TS: 198016 at NPAD 128 (was 132352) and 256 (was 197888); `build.py: dyn_smem(..., ts)` / `ts_ring` mirror it (MK_EXPECT_DYN static_assert), plus static_asserts `DYN_SMEM + 11280 <= 227 KB` (TS), `2 TS_TT <= 256` (TMEM),
+  `TS_R >= 2`. Barriers reuse the LM block (LMP is NPAD <= 64, TS is NPAD >= 128, never both): full[R] +192 (count 2), empty[R] +256 (1), accfull[2] +320 (1), accempty[2] +336 (12 = the epilogue warps).
+  TMEM: the existing 256-column allocation = 2 accumulators x 128 columns (buffer b at column b * TT). Max column 255.
+- Roles (`ts_phase`; after the grid barrier). tid 0 producer: `fence.proxy.async.global`, B boxes of the window-prefetched steps, then for j >= R: wait empty[j % R] (parity ((j / R) - 1) & 1), A + B of step j; finally a drain wait of
+  empty for the last min(R, nst) steps. tid 32 MMA issuer (8 x K16 per step, N = 128, commit empty[s] per step and accfull[b] per tile). Warps 4..15 epilogue (quadrant w & 3, chunks (w >> 2) - 1 + 3m of 8; chunk
+  skipped when its first column >= ntok; `epi(row, tt * 128 + 16 c, v)` = the v0 QKV red.add into qkv). Warps 2, 3 idle. Join: `__syncthreads`, `tc_fence_after`; then `extra()` (rr_of_x, zero gu) by all threads, as v0.
+  MK_NULL bit 0 with TS: producer + full waits only (no MMA, no epilogue, `extra()` skipped as in the v0 NUL path).
+- ts_first (replaces `prefetch_next<PhQkv>` in both MK_PF_ARRIVE uses): tid 0 re-inits the TS barriers, `fence.mbarrier_init`, issues A boxes of the first min(R, nst) steps (steps 0..R-1 in slots 0..R-1).
+  The GEMM-ring barriers / `g.F` are not touched by the TS phase (no counter drift: QKV no longer advances `g.F`; fills and waits of the GEMM ring stay consistent with each other).
+Arguments:
+1. Parity. Every TS barrier is re-initialised in `ts_first` and used only in the following ts_phase, so counters are phase-local: step j (slot j % R, use j / R), tile ti (accumulator b = ti & 1, use ti >> 1).
+   full[s]: the MMA waits (j / R) & 1 (count 2: A expect_tx arrival in the window, B expect_tx arrival after the grid barrier; tx bytes may go transiently positive, never negative, and a phase only completes with both arrivals + all bytes;
+   an early A completion cannot flip the phase). empty[s]: the MMA commit of step j - R is use j / R - 1; the producer waits ((j / R) - 1) & 1 for j >= R (never for j < R: first use). accfull[b]: the epilogue waits (ti >> 1) & 1. accempty[b]:
+   the MMA waits ((ti >> 1) - 1) & 1 for ti >= 2 (never fires today: nt <= 1; kept for generality). accempty count 12 = warps 4..15 (each lane 0 after `wait::ld` + `fence::before_thread_sync` + `__syncwarp`).
+2. Re-init is legal. At `ts_first` (window after the D phase of layer l - 1, or the prologue) the previous TS phase finished a whole layer ago: it ended with the join `__syncthreads`, after (a) the epilogue warps' last accfull wait (all MMAs and
+   TMEM loads done), (b) the producer's drain wait on the last use of every empty[] (the last commit arrivals have landed; the final accempty arrivals were executed by the epilogue warps before the join), (c) every TMA of the phase was consumed by an MMA
+   that waited its full barrier, so no complete_tx is pending. Between, the GEMM phases wait only their own barriers (+0 / +64), never the TS block, and no thread waits on a TS barrier outside ts_phase. So nothing waits on, arrives at or completes
+   bytes on a TS barrier when tid 0 re-inits it. The prologue init is the first init. `fence.mbarrier_init.release.cluster` precedes the first TMA expect_tx on the new barriers (same thread); the other threads first touch them after the grid barrier's `__syncthreads`.
+3. Overlap with in-flight TMA (first fill of the ring, as "LM head, pipelined" argument 3). The window fill writes slots 0..R-1 = [0, 192 KB), which overlays the GEMM ring, B-tile slots and attention scratch of the previous phases. In the D-window nothing
+   can be in flight there: every unit filled in D (and in its window prefetch) was consumed by an MMA that waited its full barrier; the last unit's segment-end waits the MMA commit (all earlier MMAs complete: in-order); epilogue TMEM reads and generic
+   B-tile reads/writes finished before the last `__syncthreads` of `gemm_phase` (also before the `bar_arrive` `__syncthreads` of MK_PFA = 1; with MK_PFA = 0 the loop-end `__syncthreads`). The B tile's generic writes were released with `fence.proxy.async`
+   in `stage_tile`. The D-phase finalize (`fin`) uses no dynamic smem (only static `s_flag`). In the prologue nothing exists yet. Inside the phase a slot is refilled only after empty[s] (all 8 MMAs of its previous step read it). After the phase,
+   the O-phase window prefetch (`prefetch_next<PhO>`) comes after the join and the drain wait: no TS TMA is in flight. The barrier block (OFF_BARS..) is not overlaid.
+4. TMEM lane quadrant. Epilogue warp w reads lanes 32 (w & 3) .. +31 via `mk_tmem_read16(v, tb + b * TT, q = warp & 3, c0)`; warps 4..15 cover each quadrant 3 times with disjoint chunk sets {g, g+3} + 6m, so each accumulator element has one reader
+   (and one red.add issuer). MMA writes column range [b * 128, b * 128 + 128) of both accumulators; the first MMA of a tile has accumulate = 0. TMEM alloc / dealloc by warp 0 unchanged (256 columns).
+5. Generic-to-async proxy for xb. Generic stores to xb (prologue per-thread, D-hook in the last CTA) are followed by `fence.proxy.async.global` in every writing thread, then the grid barrier arrive (`__syncthreads` + `red.release.gpu` by tid 0). The TMA
+   reader (tid 0 of each CTA) runs `fence.proxy.async.global` after the barrier's acquire and before the first B box. Rows >= ntok are never written (allocation zeros). A later overwrite of xb (D hook of layer l + 1) cannot race with a TMA of layer l + 1's QKV:
+   at least 4 grid barriers lie in between and each CTA's QKV loads are all complete before it arrives (the drain wait + the MMAs consumed every load).
+6. Ticket memory ordering. Producer side (every CTA): red.adds of all 512 threads for row block rb, `__syncthreads` (CTA-scope barrier orders them before tid 0), tid 0 `__threadfence` (fence.sc.gpu: release, cumulative over what tid 0 has observed), then
+   `atomicAdd(&tk[rb], nk)`. The ticket value reaches 24 only after all 24 units' atomics; an RMW chain, so each CTA's release fence synchronizes with the atomic of the last CTA (release sequence). Consumer side (last CTA): tid 0 `__threadfence` (acquire
+   side) after the atomic, `__syncthreads` broadcasting `s_flag`, then the other threads' `ld.global.cg` of x see every other CTA's red.adds (red.add is performed at L2; `.cg` bypasses L1, so no stale line). This CTA's own red.adds are ordered by the same
+   `__syncthreads` + fence. Then the xb stores + proxy fence + (grid barrier release). The ticket is reset by `atomicExch` after the last CTA's loads/stores; all 24 atomics of this layer are done by then, and the next use is in the next layer's D phase (grid barriers in between).
+   The `fin` hook is block-uniform (the segment-end condition depends only on j / u), so its `__syncthreads` are legal.
+
+### Build (ptxas, NVRTC 13.0 sm_100a, default knobs; MK_TS 0 | 1)
+| NPAD | regs 0 | regs 1 | spill | dyn smem 0 | dyn smem 1 | total 1 (limit 232448) | ring R |
+|---|---|---|---|---|---|---|---|
+| 16 | 86 | 86 | 0 | 165248 | 165248 | 176528 | - |
+| 32 | 80 | 80 | 0 | 165248 | 165248 | 176528 | - |
+| 64 | 113 | 113 | 0 | 198016 | 198016 | 209296 | - |
+| 128 | 115 | 122 | 0 | 132352 | 198016 | 209296 | 3 |
+| 256 | 113 | 123 | 0 | 197888 | 198016 | 209296 | 3 |
+MK_TS = 1 with MK_NULL 1 / 0x7f / MK_STAMPS 1 compile with 0 spill (tests).
+SASS (NPAD 256, `cuobjdump -sass`; HEAD 6f1e1cc | MK_TS 1): UTCHMMA 40 | 40 (NPAD 128: 40 | 48: the k loop of SPT = 2 steps is unrolled), UTMALDG.2D 22 | 26, UTCBAR 5 | 6, LDTM 5 | 6, REDG.E.ADD.F32 64 | 80,
+UTCATOMSWS 3 | 3, `SYNCS` (mbarrier ops) 45 | 72, `FENCE.VIEW.ASYNC.S` (fence.proxy.async.shared::cta) 11 | 11, `FENCE.VIEW.ASYNC.G` (fence.proxy.async.global) 0 | 3 (prologue, producer, D hook), MEMBAR.SC.GPU 2 | 4 (ticket
+release + acquire), ATOMG.ADD 1 | 2.
+Deviations from SPEC-P5a: (1) `xb` and `tk` are the LAST two kernel arguments (after `cache_rows`), not "after gu": inserting arguments in the middle moves the constant-bank offsets of every later argument and breaks the required
+0-line SASS diff at MK_TS = 0 (and at NPAD <= 64 with MK_TS = 1). (2) `NMAP = TS ? 9 : 8` (a 9-map acquire loop would change MK_TS = 0 SASS). (3) `ts_phase` takes `ntok` and does the join + `tc_fence_after` itself; the QKV `extra()` is called by the
+caller after it. (4) `fin` is defined inside the `if constexpr (TS)` branch and the TS = 0 branch calls `gemm_phase` exactly as before (register-allocation identity). (5) Epilogue chunks with first column >= ntok are skipped (no TMEM read, no red.add; they would have been masked).
+(6) The producer drains the last min(R, nst) empty barriers before the join (needed for the re-init argument; k_ts never re-inits).

@@ -665,35 +665,39 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                     if (c0 + i < ntok) red_add(x + (size_t)(c0 + i) * HID + row, __uint_as_float(v[i]));
             };
             auto extra = [&]() {};
-            // MK_TS: after a CTA's flush of row block rb, the last of the 24 flushing units' CTAs (ticket) writes xb[t][rb*128 ..] = bf16(x * ln1[l+1]) for the next QKV
-            auto fin = [&](int rb, int nk) {
-                if constexpr (TS) {
-                    if (l + 1 < NLAY) {   // block-uniform
-                        __syncthreads();   // every thread's red.adds of this row block are issued
-                        if (tid == 0) {
-                            __threadfence();   // release: the CTA's red.adds (ordered before this by the barrier) precede the ticket
-                            const unsigned old = atomicAdd(tk + rb, (unsigned)nk);
-                            s_flag = (old + (unsigned)nk == (unsigned)(PhD::K / KU));
-                        }
-                        __syncthreads();
-                        if (s_flag) {   // last CTA of this row block: all 24 units have been flushed
-                            __threadfence();   // acquire side of the ticket
-                            const bf16_t* lnw = ln1 + (size_t)(l + 1) * HID + rb * 128;
-                            for (int i = tid; i < ntok * 16; i += NT) {
-                                const int t = i >> 4, cg = i & 15;
-                                const float* xp = x + (size_t)t * HID + rb * 128 + cg * 8;
-                                const float4 a = __ldcg(reinterpret_cast<const float4*>(xp)), b = __ldcg(reinterpret_cast<const float4*>(xp + 4));
-                                *reinterpret_cast<uint4*>(xb + (size_t)t * HID + rb * 128 + cg * 8) = pack_xw(a, b, __ldg(reinterpret_cast<const uint4*>(lnw + cg * 8)));
+            if constexpr (TS) {
+                // MK_TS: after a CTA's flush of row block rb, the last of the 24 flushing units' CTAs (ticket) writes xb[t][rb*128 ..] = bf16(x * ln1[l+1]) for the next QKV
+                auto fin = [&](int rb, int nk) {
+                    if constexpr (TS) {
+                        if (l + 1 < NLAY) {   // block-uniform
+                            __syncthreads();   // every thread's red.adds of this row block are issued
+                            if (tid == 0) {
+                                __threadfence();   // release: the CTA's red.adds (ordered before this by the barrier) precede the ticket
+                                const unsigned old = atomicAdd(tk + rb, (unsigned)nk);
+                                s_flag = (old + (unsigned)nk == (unsigned)(PhD::K / KU));
                             }
-                            fence_proxy_async_global();   // generic writes -> TMA reads in other CTAs (after the grid barrier release / acquire)
-                            if (tid == 0) atomicExch(tk + rb, 0u);
+                            __syncthreads();
+                            if (s_flag) {   // last CTA of this row block: all 24 units have been flushed
+                                __threadfence();   // acquire side of the ticket
+                                const bf16_t* lnw = ln1 + (size_t)(l + 1) * HID + rb * 128;
+                                for (int i = tid; i < ntok * 16; i += NT) {
+                                    const int t = i >> 4, cg = i & 15;
+                                    const float* xp = x + (size_t)t * HID + rb * 128 + cg * 8;
+                                    const float4 a = __ldcg(reinterpret_cast<const float4*>(xp)), b = __ldcg(reinterpret_cast<const float4*>(xp + 4));
+                                    *reinterpret_cast<uint4*>(xb + (size_t)t * HID + rb * 128 + cg * 8) = pack_xw(a, b, __ldg(reinterpret_cast<const uint4*>(lnw + cg * 8)));
+                                }
+                                fence_proxy_async_global();   // generic writes -> TMA reads in other CTAs (after the grid barrier release / acquire)
+                                if (tid == 0) atomicExch(tk + rb, 0u);
+                            }
                         }
+                    } else {
+                        (void)rb; (void)nk;
                     }
-                } else {
-                    (void)rb; (void)nk;
-                }
-            };
-            gemm_phase<PhD, mk_null(5)>(g, l, ntok, get, epi, extra, fin);
+                };
+                gemm_phase<PhD, mk_null(5)>(g, l, ntok, get, epi, extra, fin);
+            } else {
+                gemm_phase<PhD, mk_null(5)>(g, l, ntok, get, epi, extra);
+            }
         }
         MK_PF_ARRIVE(if (l + 1 < NLAY) { if constexpr (TS) ts_first<PhQkv, TS_TT, TS_KS>(g, l + 1); else prefetch_next<PhQkv>(g, l + 1); } else lm_first(g));
         bar_wait(bar_cnt, bar_target);

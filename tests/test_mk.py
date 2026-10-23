@@ -132,3 +132,74 @@ def test_map_specs():
     assert sp[3] == ([2048, 28 * 1024], [4096], [64, 128])
     assert sp[6] == ([3072, 28 * 1024], [6144], [64, 128])
     assert sp[7] == ([1024, 151936], [2048], [64, 128])
+
+
+# ---------------------------------------------------------------- MK_TS: tile-stream QKV (SPEC-P5a)
+HEAD_P5A = "6f1e1cc"   # the last commit before the tile-stream engine (SPEC-P5a); MK_TS=0 must be SASS-identical to it
+
+
+@pytest.mark.parametrize("npad", (128, 256))
+@pytest.mark.parametrize("knobs", ((), (("MK_NULL", 1),), (("MK_NULL", 0x7F),), (("MK_STAMPS", 1),)))
+def test_ts_builds_compile(npad, knobs):
+    """MK_TS=1 at NPAD >= 128: no spill, <= 128 regs; MK_EXPECT_DYN == DYN_SMEM (static_assert) checks B.dyn_smem(ts=1) and the 227 KB limit."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    _, info, _ = B.compile_build(npad, knobs=(("MK_TS", 1), *knobs))
+    assert info["regs"] <= 128 and info["spill_stores"] == 0 and info["spill_loads"] == 0 and info["stack"] == 0, info
+    assert info["static_smem"] + B.dyn_smem(npad, ts=1) <= 227 * 1024
+
+
+def test_ts_dyn_smem_and_ring():
+    assert B.ts_ring(1) == 3 and B.ts_ring(0) == 1
+    assert B.dyn_smem(128, ts=1) == B.dyn_smem(256, ts=1) == 1024 + 3 * (32768 + 128 * 256) + 384 == 198016
+    assert B.dyn_smem(128, ts=1) + 11280 <= 227 * 1024
+    for npad in (16, 32, 64):   # TS does not apply below NPAD 128
+        assert B.dyn_smem(npad, ts=1) == B.dyn_smem(npad)
+    assert B.dyn_smem(256, ku=64, ts=1) == B.dyn_smem(256, ku=64)   # MK_KU 64 keeps the v0 QKV
+    assert B.dyn_smem(128) == 132352 and B.dyn_smem(256) == 197888   # MK_TS=0 layouts unchanged
+
+
+def test_ts_off_sass_identical():
+    """MK_TS=1 at NPAD <= 64 (and with MK_KU=64) is the MK_TS=0 build; MK_TS=1 at NPAD >= 128 differs."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
+        pytest.skip("no cuobjdump")
+    for npad in (16, 32, 64):
+        assert _sass(B.compile_build(npad, knobs=(("MK_TS", 1),))[0]) == _sass(B.compile_build(npad)[0])
+    assert _sass(B.compile_build(128, knobs=(("MK_TS", 1), ("MK_KU", 64)))[0]) == _sass(B.compile_build(128, knobs=(("MK_KU", 64),))[0])
+    assert _sass(B.compile_build(128, knobs=(("MK_TS", 0),))[0]) == _sass(B.compile_build(128)[0])
+    assert _sass(B.compile_build(256, knobs=(("MK_TS", 1),))[0]) != _sass(B.compile_build(256)[0])
+
+
+@pytest.mark.parametrize("npad", (32, 256))
+def test_ts0_sass_identical_to_head(npad, tmp_path):
+    """MK_TS=0 (default) == the sources of HEAD_P5A (built from `git show`), `cuobjdump -sass` with addresses removed. Skipped when the commit is not in the repo."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
+        pytest.skip("no cuobjdump")
+    root = Path(__file__).resolve().parents[1]
+    arc = subprocess.run(["git", "-C", str(root), "archive", HEAD_P5A, "regimebench"], capture_output=True)
+    if arc.returncode != 0:
+        pytest.skip(f"commit {HEAD_P5A} not available")
+    subprocess.run(["tar", "-x", "-C", str(tmp_path)], input=arc.stdout, check=True)
+    code = ("import sys,re,subprocess,tempfile,pathlib;from regimebench.kernels.mk import build as B;"
+            "c=B.compile_build(%d)[0];p=pathlib.Path(tempfile.mkdtemp())/'k.cubin';p.write_bytes(c);"
+            "o=subprocess.run(['/usr/local/cuda/bin/cuobjdump','-sass',str(p)],capture_output=True,text=True,check=True).stdout;"
+            "print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))" % npad)
+    env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
+    head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
+    assert head.strip() == _sass(B.compile_build(npad)[0]).strip() and len(head) > 10000
+
+
+def test_ts_workspace_map_specs():
+    """Map 8 = xb: bf16 [MAXTOK][HID] -> dims {HID, MAXTOK}, stride HID * 2 B, box {64 k, 128 tokens} (CPU: dims only; encoding needs a GPU)."""
+    assert B.WORKSPACE_MAPS == ("xb",) and len(B.WEIGHT_MAPS) == 8
+    assert B.workspace_map_specs() == [([1024, 256], [2048], [64, 128])]
+    assert B.workspace_map_specs()[0][2] == B.map_specs({n: type("T", (), {"shape": (28, 128, 1024)})() for n in B.WEIGHT_MAPS if n != "embed"} | {"embed": type("T", (), {"shape": (151936, 1024)})()})[0][2]
+    pytest.importorskip("cuda.bindings.driver")
+    pytest.skip("cuTensorMapEncodeTiled needs a GPU (cuInit)")
+
+
+def test_ts_knob_default_and_arm():
+    assert B.DEFAULT_KNOBS["MK_TS"] == 0
+    assert dict(B.knob_defines({"MK_TS": 1}) and [d.split("=") for d in B.knob_defines({"MK_TS": 1})])["MK_TS"] == "1"
+    assert MkArm(ts=1).knobs["MK_TS"] == 1 and MkArm().knobs["MK_TS"] == 0
