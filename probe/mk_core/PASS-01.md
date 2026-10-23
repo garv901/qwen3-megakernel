@@ -30,7 +30,7 @@
 - Ring depth (job 9583, PFA on): ring 3 / 4 vs 2: R0-b1 -21.8 / -24.7, R1-b16 -30.7 / -27.2, R3-b8-kv4096 +0.7 / +16.0,
   R2-b1-kv8192 +29.5 / +66.7 [M]. The long-KV loss is the placeholder attention [H: smaller L1 carve-out]; ring stays 2 until A1
   lands, then re-measure.
-- e2e: v0 (job 9578, tag mk-core-v0) beats fi at 6 / 28 (results/2026-10-23-mk/v0). v1 e2e job 9584.
+- e2e: v0 (job 9578, tag mk-core-v0) beats fi at 6 / 28; v1 (job 9584, tag mk-core-v1) at 11 / 28 vs P0 fi (results/2026-10-23-mk/v1).
 
 ## Next (not this pass)
 - D unit imbalance (max 2 units vs mean 1.3): per-phase KU (D at KU 192: 128 units, max 1.5) -> P6.
