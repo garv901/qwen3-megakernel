@@ -264,6 +264,17 @@ Deviations from SPEC-P5b: (1) no last-arriver fallback when there are no idle CT
 - NULL bit 2 skips attend and combine (no hang). KU 64 is placeholder-only.
 - Open: with the 128-register cap the splitkv build spills at NPAD >= 32 (stack 48..248 B; NPAD 16: 0). The spill is in attend/combine/non-TS staging paths; see the P2 report for the numbers. Check the GPU A/B before enabling by default.
 
+## splitkv-v2 integration (SPEC-P2b; CPU-verified only: compile, SASS, pytest; NOTHING has run on a GPU)
+- Header: tag splitkv-v2 (1f027ac). K / V tensor maps are SWIZZLE_128B, box {64, 1, rows} (SKV_TMA_MMA 1, header default; encoding = a1bench.py `tensor_maps` with mma = True). Map count and rows follow the build:
+  `build.skv_geometry(defines)` (header defaults + defines) -> 16 maps (128 rows) default, 14 maps (64 rows, 4 stages) for the R6 build. The kernel's map_acquire loop and the arm's blob follow `skv::kNumMaps` / `skv_num_maps(qmax)`.
+  attend_smem_bytes / kBarOff = 148,032 / 147,968 in both builds (MK_EXPECT_DYN static_assert).
+- O phase without combine: kernel argument `skv_comb` (last, after `skv_engine`) = `plan.s_max > 1`. 1: `combine_head` into the B slot as before. 0: every ao row was written by attend (S == 1 everywhere), and `stage_any(SkvB)` stages the B tile from `ao`
+  inside gemm_phase with the placeholder O `get` (`__ldcg` uint4, zero rows >= ntok, then stage_tile + fence.proxy.async). Block-uniform run-time branch. Fences: attend writes `ao` with generic stores, the grid barrier (bar_arrive / bar_wait) orders them,
+  and the staging reads with ld.global.cg (generic): no proxy fence is needed for this LDG staging (a TMA read of ao would need `fence.proxy.async.global` after attend's stores; not used).
+- R6 build: `attn = splitkv` with any q_len > 1 compiles with `-DSKV_QMAX=16` (`compile_build(..., skv_qmax=16)`, in the lru key; the arm's `_kernel` key is (npad, device, attn, qmax)). q_len == 1 workloads keep the default build.
+  Contract check vs CHANGELOG P5: hv2g packs kv_len + q_len rows per sequence (= plan.row_base, asserted in the arm), phase 2 writes the q_len new rows at t_base + (t_vis - 1) before attend, token t sees t_vis = kv_len + t + 1 positions, q is [total_q, 16, 128] (row of token t) in `qb`:
+  all match. S may be > 1 in R6 (combine_head reads pair_info per token row). `auto_attn` is unchanged (q_len == 1 only).
+
 ## LM head on the tile stream (MK_LMTS, SPEC-P3c; CPU-verified only: compile, SASS, pytest; NOTHING has run on a GPU)
 Knob `MK_LMTS` (default 0; arm option `lmts`). `LMTS = TSB && MK_LMTS` (NPAD >= 128 with the defaults); at run time also `lm_ident`. MK_LMTS 0: 0-line SASS diff vs commit 737b8ef at the 5 buckets (default knobs) and NPAD 256 with MK_TS 256 / MK_TSB 0
 (`test_lmts_off_sass_identical_to_head`); MK_LMTS 1 at NPAD <= 64 = MK_LMTS 0 (TSB off).

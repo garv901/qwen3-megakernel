@@ -172,8 +172,8 @@ def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SME
 
 @lru_cache(maxsize=None)
 def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_100a", attn: str = "placeholder",
-                  attn_path: str | None = None, stripped: bool = False) -> tuple[bytes, dict, str]:
-    """-> (cubin, ptxas info, log). ``knobs``: sorted tuple of (name, value)."""
+                  attn_path: str | None = None, stripped: bool = False, skv_qmax: int = 1) -> tuple[bytes, dict, str]:
+    """-> (cubin, ptxas info, log). ``knobs``: sorted tuple of (name, value). ``skv_qmax``: attn = splitkv only, 1 = default build, 2..16 = the R6 build (-DSKV_QMAX, SPEC-P2b)."""
     if npad not in BUCKETS:
         raise ValueError(f"NPAD {npad} not in {BUCKETS}")
     src = source(attn, Path(attn_path) if attn_path else None)
@@ -185,34 +185,71 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     defs += os.environ.get("MK_EXTRA_DEFINES", "").split()   # debug only (e.g. SKV_DEBUG_WAIT=1); not part of the knob set
     if attn == "splitkv":
         defs.append("MK_SKV=1")
+        defs += skv_defines(skv_qmax)
+    elif skv_qmax != 1:
+        raise ValueError("skv_qmax needs attn = splitkv")
     cubin, log = nvrtc_compile(src, defs, arch=arch, ptxas_verbose=True, name="mk.cu")
     return cubin, parse_ptxas(log), log
 
 
-# ---- A1 (attn = splitkv) KV tensor maps: 2 * kNumMaps 3D bf16 maps (K then V), box rows 128, 64, .., 1, 128 B each ----
+# ---- A1 (attn = splitkv) KV tensor maps: 2 * kNumMaps 3D bf16 SW128 maps (K then V), box {64, 1, rows}, rows = stage rows, /2, .., 1, 128 B each ----
 SKV_STAGE_ROWS = 128
-SKV_NUM_MAPS = SKV_STAGE_ROWS.bit_length()   # log2(128) + 1 = 8 (skv::kNumMaps)
+SKV_NUM_MAPS = SKV_STAGE_ROWS.bit_length()   # log2(128) + 1 = 8 (skv::kNumMaps) of the default build
+SKV_QMAX_R6 = 16                             # the R6 build (q_len 2..16): -DSKV_QMAX=16
 
 
-def skv_map_specs(rows: int, n_layers: int = NL) -> list[tuple[list[int], list[int], list[int]]]:
-    """(dims, strides_bytes, box) of the 16 A1 maps in kernel order (K: box rows 128..1, then V): dims {128, 8, n_layers * rows}, strides {256, 2048} B,
-    box {128, 1, r}, no swizzle (a1bench.py tensor_maps). ``rows`` = cache rows per layer (mk: the fixture's packed rows; the CTX padding rows lie behind the last layer)."""
+def skv_defines(qmax: int = 1) -> list[str]:
+    """Extra NVRTC defines of a splitkv build: -DSKV_QMAX=16 for the R6 build (q_len > 1), none for the default build. The cache name / build key is (npad, knobs, attn, qmax)."""
+    if qmax not in (1, SKV_QMAX_R6):
+        raise ValueError(f"skv_qmax {qmax}: 1 (default build) or {SKV_QMAX_R6} (R6 build)")
+    return [f"SKV_QMAX={qmax}"] if qmax > 1 else []
+
+
+def skv_qmax_of(seqs) -> int:
+    """Build of a splitkv workload: SKV_QMAX 16 iff some sequence has q_len > 1 (R6), else 1 (the default build: QMAX 16 is slower at q_len 1, b8 kv1K 18.6 vs 11.5 us). ``seqs``: (kv_len, q_len)."""
+    return SKV_QMAX_R6 if any(int(q) > 1 for _, q in seqs) else 1
+
+
+def skv_geometry(defines=()) -> tuple[int, int]:
+    """(stage_rows, stages) of a splitkv build = the header defaults overridden by its defines (a1bench.py geometry): the first #define of SKV_STAGE_ROWS / SKV_STAGES
+    in splitkv.cuh is the SKV_QMAX > 1 default, the last the q_len 1 default. kNumMaps = log2(stage_rows) + 1 maps per K / V."""
+    d = {k: (v or "1") for k, _, v in (x.partition("=") for x in [*defines, *os.environ.get("MK_EXTRA_DEFINES", "").split()])}
+    qmax = int(d.get("SKV_QMAX", 1))
+    txt = ATTN_SPLITKV.read_text()
+
+    def dflt(name):
+        found = re.findall(rf"#define {name}\s+(\d+)", txt)
+        return int(found[0] if qmax > 1 else found[-1])
+    return int(d.get("SKV_STAGE_ROWS", dflt("SKV_STAGE_ROWS"))), int(d.get("SKV_STAGES", dflt("SKV_STAGES")))
+
+
+def skv_num_maps(qmax: int = 1) -> int:
+    """skv::kNumMaps of the build: 8 (default, 128 rows), 7 (R6, 64 rows)."""
+    return skv_geometry(skv_defines(qmax))[0].bit_length()
+
+
+def skv_map_specs(rows: int, n_layers: int = NL, qmax: int = 1) -> list[tuple[list[int], list[int], list[int]]]:
+    """(dims, strides_bytes, box) of the 2 * kNumMaps A1 maps in kernel order (K: box rows stage_rows .. 1, then V): dims {128, 8, n_layers * rows}, strides {256, 2048} B,
+    box {64, 1, r}, CU_TENSOR_MAP_SWIZZLE_128B (SKV_TMA_MMA 1, the header default; a1bench.py tensor_maps with mma = True; the kernel issues each box at dim 0 and 64).
+    ``rows`` = cache rows per layer (mk: the fixture's packed rows; the CTX padding rows lie behind the last layer). ``qmax``: the build (skv_defines)."""
+    stage_rows = skv_geometry(skv_defines(qmax))[0]
     out = []
     for _kv in range(2):
-        for rs in range(SKV_NUM_MAPS):
-            out.append(([HD, KVH, n_layers * rows], [HD * 2, KVH * HD * 2], [HD, 1, SKV_STAGE_ROWS >> rs]))
+        for rs in range(stage_rows.bit_length()):
+            out.append(([HD, KVH, n_layers * rows], [HD * 2, KVH * HD * 2], [64, 1, stage_rows >> rs]))
     return out
 
 
-def encode_skv_maps(kc_ptr: int, vc_ptr: int, rows: int, n_layers: int = NL) -> bytes:
-    """16 x 128 B tensor maps over the K / V caches (device pointers); needs cuInit (a GPU host)."""
+def encode_skv_maps(kc_ptr: int, vc_ptr: int, rows: int, n_layers: int = NL, qmax: int = 1) -> bytes:
+    """2 * kNumMaps x 128 B tensor maps over the K / V caches (device pointers), SWIZZLE_128B, L2 promotion none, as a1bench.py tensor_maps (mma); needs cuInit (a GPU host)."""
     from cuda.bindings import driver as d
     blob = b""
-    for i, (dims, strides, box) in enumerate(skv_map_specs(rows, n_layers)):
+    specs = skv_map_specs(rows, n_layers, qmax)
+    for i, (dims, strides, box) in enumerate(specs):
         res = d.cuTensorMapEncodeTiled(
-            d.CUtensorMapDataType.CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, 3, int(kc_ptr if i < SKV_NUM_MAPS else vc_ptr),
+            d.CUtensorMapDataType.CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, 3, int(kc_ptr if i < len(specs) // 2 else vc_ptr),
             [d.cuuint64_t(v) for v in dims], [d.cuuint64_t(v) for v in strides], [d.cuuint32_t(v) for v in box],
-            [d.cuuint32_t(1)] * 3, d.CUtensorMapInterleave.CU_TENSOR_MAP_INTERLEAVE_NONE, d.CUtensorMapSwizzle.CU_TENSOR_MAP_SWIZZLE_NONE,
+            [d.cuuint32_t(1)] * 3, d.CUtensorMapInterleave.CU_TENSOR_MAP_INTERLEAVE_NONE, d.CUtensorMapSwizzle.CU_TENSOR_MAP_SWIZZLE_128B,
             d.CUtensorMapL2promotion.CU_TENSOR_MAP_L2_PROMOTION_NONE, d.CUtensorMapFloatOOBfill.CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE)
         if int(res[0]) != 0:
             raise RuntimeError(f"cuTensorMapEncodeTiled(skv map {i}): {res[0]}")

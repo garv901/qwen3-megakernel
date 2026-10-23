@@ -317,8 +317,8 @@ HEAD_P2 = "57f8fdc"   # the last commit before SPEC-P2 (P5b); attn = placeholder
 def _skv_consts() -> dict:
     """kStageRows, kStages of the imported header (defaults) -> kBarOff, kBarBytes, kSmemBytes (the formulas of splitkv.cuh)."""
     txt = B.ATTN_SPLITKV.read_text()
-    rows = int(re.search(r"#define SKV_STAGE_ROWS (\d+)", txt).group(1))
-    stages = int(re.search(r"#define SKV_STAGES (\d+)", txt).group(1))
+    rows = int(re.findall(r"#define SKV_STAGE_ROWS (\d+)", txt)[-1])   # the last #define is the q_len 1 default (the first: SKV_QMAX > 1)
+    stages = int(re.findall(r"#define SKV_STAGES (\d+)", txt)[-1])
     bar_off = stages * 2 * rows * 256 + 16 * 2 * 132 * 4
     bar_bytes = max(64, 16 * stages)
     return {"rows": rows, "stages": stages, "bar_off": bar_off, "bar_bytes": bar_bytes, "smem": bar_off + bar_bytes}
@@ -414,17 +414,55 @@ def test_skv_attn_option_and_supports():
     assert MkArm(attn="auto").resolve_attn(Workload("t3", "R1", tuple(Seq(128, 1) for _ in range(8)))) == "placeholder"   # kv < SKV_AUTO_MIN_KV
     assert MkArm(attn="auto", ku=64).resolve_attn(w1) == "placeholder"
     assert MkArm(attn="splitkv").supports(w1, "auto") is None
-    assert "q_len == 1" in MkArm(attn="splitkv").supports(wq, "auto")
+    assert MkArm(attn="splitkv").supports(wq, "auto") is None   # SPEC-P2b: q_len <= 16 on the R6 build
+    assert "q_len <= 16" in MkArm(attn="splitkv").supports(Workload("t4", "R6", (Seq(128, 17),)), "auto")
     assert "MK_KU" in MkArm(attn="splitkv", ku=64).supports(w1, "auto")
     assert MkArm(attn="placeholder").supports(wq, "auto") is None and B.auto_attn([(1024, 1), (5, 1)]) == "splitkv" and B.auto_attn([(128, 1), (5, 1)]) == "placeholder" and B.auto_attn([(128, 1), (5, 2)]) == "placeholder"
 
 
 def test_skv_map_specs():
-    """16 maps: K then V, box rows 128, 64, .., 1; dims {128, 8, 28 * rows}, strides {256, 2048} B (a1bench.py tensor_maps)."""
+    """SPEC-P2b: K then V, SW128 boxes {64, 1, rows}; 16 maps (rows 128 .. 1, default build) / 14 maps (rows 64 .. 1, R6 build SKV_QMAX 16); dims {128, 8, 28 * rows},
+    strides {256, 2048} B (a1bench.py tensor_maps, mma = True)."""
     sp = B.skv_map_specs(1000)
-    assert len(sp) == 16
+    assert len(sp) == 16 == 2 * B.skv_num_maps(1)
     assert [s[2][2] for s in sp[:8]] == [128, 64, 32, 16, 8, 4, 2, 1] and [s[2][2] for s in sp[8:]] == [128, 64, 32, 16, 8, 4, 2, 1]
-    assert all(s[0] == [128, 8, 28 * 1000] and s[1] == [256, 2048] and s[2][:2] == [128, 1] for s in sp)
+    assert all(s[0] == [128, 8, 28 * 1000] and s[1] == [256, 2048] and s[2][:2] == [64, 1] for s in sp)
+    r6 = B.skv_map_specs(1000, qmax=16)
+    assert len(r6) == 14 == 2 * B.skv_num_maps(16) and B.skv_geometry(B.skv_defines(16)) == (64, 4) and B.skv_geometry() == (128, 2)
+    assert [s[2][2] for s in r6[:7]] == [64, 32, 16, 8, 4, 2, 1] and [s[2][2] for s in r6[7:]] == [64, 32, 16, 8, 4, 2, 1]
+    assert all(s[0] == [128, 8, 28 * 1000] and s[1] == [256, 2048] and s[2][:2] == [64, 1] for s in r6)
+    assert B.skv_defines(1) == [] and B.skv_defines(16) == ["SKV_QMAX=16"] and B.skv_qmax_of([(128, 1)]) == 1 and B.skv_qmax_of([(128, 1), (64, 2)]) == 16
+    with pytest.raises(ValueError):
+        B.skv_defines(4)
+
+
+def test_skv_comb_of_plan():
+    """SPEC-P2b: skv_comb = plan.s_max > 1: 0 for R1-b256-kv128 and R1-b64-kv128 (no_split auto), 1 for R0-b1-kv128."""
+    from regimebench.kernels.common.splitkv import plan as P
+    comb = lambda n, kv: int(P.plan([(kv, 1)] * n, n_cta=B.GRID).s_max > 1)
+    assert comb(256, 128) == 0 and comb(64, 128) == 0 and comb(1, 128) == 1
+
+
+@pytest.mark.parametrize("npad", (16, 32))
+def test_skv_r6_build_compiles(npad):
+    """R6 build (-DSKV_QMAX=16): the static_assert MK_EXPECT_DYN == DYN_SMEM holds, i.e. attend_smem_bytes / kBarOff are the default build's 148,032 / 147,968."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    _, info, log = B.compile_build(npad, attn="splitkv", skv_qmax=16)
+    assert info["regs"] <= 128 and info["spill_stores"] <= 1024, info
+    assert info["static_smem"] + B.dyn_smem(npad, attn="splitkv") <= 227 * 1024
+    with pytest.raises(ValueError):
+        B.compile_build(npad, attn="placeholder", skv_qmax=16)
+
+
+def test_skv_r6_contract_matches_descriptors():
+    """CHANGELOG P5 vs mk: rows row_base .. + kv_len + q_len - 1 per sequence (= hv2g packing, t_base), token t sees kv_len + t + 1 positions (= t_vis, mk's phase 2 writes pos = t_vis - 1)."""
+    from regimebench.kernels.common.splitkv import plan as P
+    seqs = [(128, 4), (1000, 1), (37, 16)]
+    pl = P.plan(seqs, n_cta=B.GRID)
+    d = B.build_descriptors(seqs, B.MAXTOK)
+    assert list(pl.row_base) == [0, 132, 1133] and pl.total_q == 21 and pl.cache_rows == d.cache_rows == sum(k + q for k, q in seqs)
+    assert d.t_base == [0] * 4 + [132] + [1133] * 16 and d.t_vis == [129, 130, 131, 132, 1001] + [38 + j for j in range(16)]
+    assert pl.engine == 1
 
 
 def test_skv_placeholder_sass_identical_to_head(tmp_path):
@@ -448,6 +486,31 @@ def test_skv_placeholder_sass_identical_to_head(tmp_path):
     head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
     mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b)))[0]) + "\n" for n, t, b in cfgs)
     assert head.strip() == mine.strip() and len(head) > 30000
+
+
+HEAD_P2B = "f614b3a"   # the last commit before SPEC-P2b; attn = placeholder must be SASS-identical to it at all 5 buckets
+
+
+def test_placeholder_sass_identical_to_head_p2b(tmp_path):
+    """SPEC-P2b: the placeholder build (MK_SKV off) == the sources of HEAD_P2B at all 5 buckets, (MK_TS, MK_TSB) in ((0, 0), (128, 1)). Skipped when the commit is not in the repo."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
+        pytest.skip("no cuobjdump")
+    root = Path(__file__).resolve().parents[1]
+    arc = subprocess.run(["git", "-C", str(root), "archive", HEAD_P2B, "regimebench"], capture_output=True)
+    if arc.returncode != 0:
+        pytest.skip(f"commit {HEAD_P2B} not available")
+    subprocess.run(["tar", "-x", "-C", str(tmp_path)], input=arc.stdout, check=True)
+    cfgs = tuple((n, t, b) for n in B.BUCKETS for t, b in ((0, 0), (128, 1)))
+    code = ("import sys,re,subprocess,tempfile,pathlib;from regimebench.kernels.mk import build as B\n"
+            "for npad,ts,tsb in %r:\n"
+            " c=B.compile_build(npad,knobs=(('MK_TS',ts),('MK_TSB',tsb)))[0];p=pathlib.Path(tempfile.mkdtemp())/'k.cubin';p.write_bytes(c)\n"
+            " o=subprocess.run(['/usr/local/cuda/bin/cuobjdump','-sass',str(p)],capture_output=True,text=True,check=True).stdout\n"
+            " print('@@',npad,ts,tsb);print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))\n" % (cfgs,))
+    env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
+    head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
+    mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b)))[0]) + "\n" for n, t, b in cfgs)
+    assert head.strip() == mine.strip() and len(head) > 100000
 
 
 # ---------------------------------------------------------------- LM head on the tile stream (MK_LMTS, SPEC-P3c)

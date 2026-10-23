@@ -155,10 +155,17 @@ __device__ __forceinline__ void stage_tile(unsigned char* xs, int kcol, int j, G
 template <class GetF>
 __device__ __forceinline__ void stage_any(unsigned char* xs, int kcol, int j, GetF& get) { stage_tile(xs, kcol, j, get); }
 #ifdef MK_SKV
-struct SkvB { int unused; };
+struct SkvB { int comb; const bf16_t* ao; int ntok; };   // comb == 0 (plan.s_max == 1): attend wrote every ao row, stage_any stages the B tile from ao like the placeholder build
 // Opaque pointer: the A1 calls' smem addresses are not loop-invariant for the compiler, so the invariants derived from them are not hoisted out of the layer loop (kept live across every phase)
 __device__ __forceinline__ unsigned char* mk_opaque(unsigned char* p) { asm volatile("" : "+l"(p)); return p; }
-__device__ __forceinline__ void stage_any(unsigned char*, int, int, SkvB&) {}
+__device__ __forceinline__ void stage_any(unsigned char* xs, int kcol, int j, SkvB& b) {
+    if (b.comb) return;   // block-uniform kernel argument: the combine_head of the unit's head staged the slot
+    auto get = [&](int t, int k, int) -> uint4 {   // = the placeholder O-phase get (ld.global.cg of ao after the grid barrier)
+        if (t >= b.ntok) return make_uint4(0u, 0u, 0u, 0u);
+        return __ldcg(reinterpret_cast<const uint4*>(b.ao + (size_t)t * QDIM + k));
+    };
+    stage_tile(xs, kcol, j, get);
+}
 static_assert(NB >= PhO::NRB * (PhO::K / KU), "MK_ATTN=splitkv: at most one O unit per CTA (grid >= 128): the combine is done once, before gemm_phase");
 #endif
 
@@ -578,7 +585,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     bf16_t* xb, unsigned* tk,   // MK_TS: xb = bf16(x * ln1) [MAXTOK][HID] (TMA B of QKV), tk = tickets [64] (P5b; [8] in P5a); last, so that the other argument offsets do not change
     bf16_t* xb2, float* ss2, bf16_t* act   // MK_TSB: xb2 = bf16(x * ln2) [MAXTOK][HID] (B of GU), ss2 = sum x^2 per token [MAXTOK], act = bf16(silu * up) [MAXTOK][INTER] (B of D); tk is [64]
 #ifdef MK_SKV
-    , const int4* skv_items, int skv_items_stride, const int* skv_pair_info, float* skv_part, const void* skv_maps, int skv_engine   // A1 (plan.py): item records, pair_info, partials, 2 * kNumMaps tensor maps (null: LDG engine), engine
+    , const int4* skv_items, int skv_items_stride, const int* skv_pair_info, float* skv_part, const void* skv_maps, int skv_engine, int skv_comb   // A1 (plan.py): item records, pair_info, partials, 2 * kNumMaps tensor maps (null: LDG engine), engine, skv_comb = plan.s_max > 1 (0: ao complete after attend, no combine)
 #endif
     )
 {
@@ -752,11 +759,11 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
         // ---- Phase 4: O GEMM (K = 2048), B = ao, red.add -> x (residual); zero qkv ----
         {
 #ifdef MK_SKV
-            SkvB get{};   // the B tile of unit (rb, kc) is q-head kc: staged here by combine_head (writes the SW128 K-major slot at OFF_X, ends with fence.proxy.async); gemm_phase's __syncthreads precedes the MMA
+            SkvB get{skv_comb, ao, ntok};   // the B tile of unit (rb, kc) is q-head kc: staged here by combine_head (writes the SW128 K-major slot at OFF_X, ends with fence.proxy.async), or (skv_comb 0) by stage_any from ao inside gemm_phase; its __syncthreads precedes the MMA
             if constexpr (!mk_null(2) && !mk_null(3)) {   // MK_NULL bit 2: attention (and so the combine) skipped; bit 3: the O phase has no staging
                 const Geom<PhO> ge = geom<PhO>();
                 MK_SKV_PARAMS(SP);
-                if (ge.n > 0) skv::combine_head<NPAD, NT>(SP, l, ge.u0 % (PhO::K / KU), mk_opaque(sm + OFF_X), ntok);
+                if (skv_comb && ge.n > 0) skv::combine_head<NPAD, NT>(SP, l, ge.u0 % (PhO::K / KU), mk_opaque(sm + OFF_X), ntok);
             }
 #else
             skv_combine(l, ntok, reinterpret_cast<unsigned short*>(ao), blockIdx.x, gridDim.x);   // placeholder: no splits

@@ -5,8 +5,8 @@ Variants: ``auto`` (smallest token bucket NPAD in {16, 32, 64, 128, 256} >= tota
 One cooperative launch per step (total_q <= 256). Options (``load_arm("mk", **opts)``): ``stamps`` (MK_STAMPS), ``null`` (MK_NULL bitmask),
 ``ku``, ``ring``, ``ts`` (MK_TS: tile-stream QKV with B = bf16 ``xb`` by TMA at NPAD >= ts (1 = 128); default 256, 0 = off), ``tsb`` (MK_TSB, default 0: P5b, GU and D on
 the tile stream with act / xb2 buffers, the interleaved wg|wu weights and the idle-CTA finalizers; needs MK_TS on at the bucket), ``lmts`` (MK_LMTS, default 0: SPEC-P3c, the LM head on the tile stream
-at TSB buckets when n_lm == ntok and lm_tok[s] == s; else the v0 LM path), ``attn`` ("placeholder" | "splitkv" | "auto"; default "placeholder"; SPEC-P2: splitkv = A1 v1 split-KV attention
-+ combine_head in the O phase, q_len == 1 workloads only; auto = splitkv when every seq has q_len == 1, else the placeholder, chosen per workload at prepare()). The step clones the fixture KV into a packed cache with CTX zero padding rows
+at TSB buckets when n_lm == ntok and lm_tok[s] == s; else the v0 LM path), ``attn`` ("placeholder" | "splitkv" | "auto"; default "placeholder"; SPEC-P2: splitkv = A1 split-KV attention v2 (splitkv-v2)
++ combine_head in the O phase when plan.s_max > 1 (else ao is staged, no combine); q_len > 1 (<= 16) builds with -DSKV_QMAX=16; auto = splitkv when every seq has q_len == 1 and max kv >= 512, else the placeholder, chosen per workload at prepare()). The step clones the fixture KV into a packed cache with CTX zero padding rows
 (as hv2g), encodes the 8 weight tensor maps once, and ``outputs()`` gathers k_new / v_new from the cache.
 """
 
@@ -31,14 +31,15 @@ def _parse(variant: str) -> tuple[str, bool]:
 
 
 class _Loaded:
-    def __init__(self, npad: int, knobs: tuple, attn: str, device):
+    def __init__(self, npad: int, knobs: tuple, attn: str, device, qmax: int = 1):
         self.attn = attn
+        self.qmax = qmax
         import torch
         torch.cuda.init()
         torch.zeros(1, device=device)
         self.nb = torch.cuda.get_device_properties(device).multi_processor_count
         d = {**B.DEFAULT_KNOBS, **dict(knobs)}
-        cubin, info, _ = B.compile_build(npad, self.nb, knobs, attn=attn)
+        cubin, info, _ = B.compile_build(npad, self.nb, knobs, attn=attn, skv_qmax=qmax)
         self.ptxas = info
         self.knobs = d
         self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"], tsb=d["MK_TSB"], attn=attn)
@@ -59,7 +60,8 @@ class MkStep:
         g = w.model
         dev = torch.device(device)
         self.attn = arm.resolve_attn(w)   # "placeholder" | "splitkv" (auto resolved per workload)
-        ld = arm._kernel(self.npad, dev, self.attn)
+        self.qmax = B.skv_qmax_of([(s.kv_len, s.q_len) for s in w.seqs]) if self.attn == "splitkv" else 1   # R6 build (-DSKV_QMAX=16) iff some q_len > 1
+        ld = arm._kernel(self.npad, dev, self.attn, self.qmax)
         self.kern = ld
         self.nb = ld.nb
         self.desc = d = B.build_descriptors([(s.kv_len, s.q_len) for s in w.seqs], B.MAXTOK)
@@ -106,12 +108,12 @@ class MkStep:
             self.skv_items, self.skv_pair = t["items"], t["pair_info"]
             self.skv_part = torch.empty(max(pl.part_floats, 4), dtype=torch.float32, device=dev)
             self.skv_maps = None
-            if pl.engine == 1:   # TMA engine: 16 KV maps (K, V x box rows 128 .. 1) in a separate 64 B aligned device buffer
-                blob = B.encode_skv_maps(self.kc.data_ptr(), self.vc.data_ptr(), rows, g.layers)
+            if pl.engine == 1:   # TMA engine: 2 * kNumMaps KV maps (16 default build, 14 R6; K, V x SW128 box {64, 1, rows}) in a separate 64 B aligned device buffer
+                blob = B.encode_skv_maps(self.kc.data_ptr(), self.vc.data_ptr(), rows, g.layers, self.qmax)
                 self.skv_maps = torch.frombuffer(bytearray(blob), dtype=torch.uint8).to(dev)
                 assert self.skv_maps.data_ptr() % 64 == 0
             skv_args = (self.skv_items.data_ptr(), i32(pl.stride), self.skv_pair.data_ptr(), self.skv_part.data_ptr(),
-                        self.skv_maps.data_ptr() if self.skv_maps is not None else 0, i32(pl.engine))
+                        self.skv_maps.data_ptr() if self.skv_maps is not None else 0, i32(pl.engine), i32(int(pl.s_max > 1)))
         self.pkey = torch.zeros(self.nb * M, dtype=torch.int32, device=dev)
         self.pidx = torch.zeros(self.nb * M, dtype=torch.int32, device=dev)
         self.rope = B.rope_table(d.max_pos).to(dev)
@@ -136,7 +138,7 @@ class MkStep:
                           self.t_vis.data_ptr(), self.lm_tok.data_ptr(), self.lm_seq.data_ptr(),
                           i32(c.ntok), i32(len(c.lm_tok)), i32(self.rows), self.xb.data_ptr(), self.tk.data_ptr(),
                           *((self.xb2.data_ptr(), self.ss2.data_ptr(), self.act.data_ptr()) if self.tsb else (0, 0, 0)),
-                          *skv_args])   # xb, tk, xb2, ss2, act, then (attn=splitkv) items, items_stride, pair_info, part, skv_maps, engine: last kernel arguments
+                          *skv_args])   # xb, tk, xb2, ss2, act, then (attn=splitkv) items, items_stride, pair_info, part, skv_maps, engine, skv_comb: last kernel arguments
         self.config: dict[str, Any] = {
             "kernel": B.KERNEL, "npad": self.npad, "graph": not direct, "proxy": False, "launches_per_step": 1,
             "grid": self.nb, "block": 512, "dyn_smem": ld.dyn_smem, "regs": ld.regs, "static_smem": ld.static_smem,
@@ -237,8 +239,8 @@ class MkArm:
         if w.total_q > B.BUCKETS[-1]:
             return f"mk handles 1..{B.BUCKETS[-1]} tokens per step (total_q {w.total_q})"
         if self.attn == "splitkv":
-            if any(s.q_len != 1 for s in w.seqs):
-                return "attn=splitkv (A1 v1) supports q_len == 1 only"
+            if any(s.q_len > 16 for s in w.seqs):
+                return "attn=splitkv supports q_len <= 16 (R6 build, SKV_QMAX 16)"
             if self.knobs["MK_KU"] != 128:
                 return "attn=splitkv needs MK_KU 128"
         return None
@@ -250,11 +252,11 @@ class MkArm:
             return B.auto_attn([(s.kv_len, s.q_len) for s in w.seqs]) if self.knobs["MK_KU"] == 128 else "placeholder"
         return self.attn
 
-    def _kernel(self, npad: int, device, attn: str | None = None) -> _Loaded:
+    def _kernel(self, npad: int, device, attn: str | None = None, qmax: int = 1) -> _Loaded:
         attn = attn or self.attn
-        key = (npad, str(device), attn)
+        key = (npad, str(device), attn, qmax)
         if key not in self._loaded:
-            self._loaded[key] = _Loaded(npad, tuple(sorted(self.knobs.items())), attn, device)
+            self._loaded[key] = _Loaded(npad, tuple(sorted(self.knobs.items())), attn, device, qmax)
         return self._loaded[key]
 
     def prepare(self, w: Workload, inputs: dict, variant: str, device: str) -> MkStep:
