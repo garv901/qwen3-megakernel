@@ -7,6 +7,8 @@
 | P0b | GEMM | xover2: 5 shapes x T 1..256 x {KU, X path, ring depth, cta_group} (SPEC-xover2.md) | - | 120/120 PASS. XTMA -0.3..-1.1 us/GEMM; ring max GU -0.7, LM -25; KU64 worse; CG2 = CG1 at T<=128, wins T=256 (LM -44 us). Best mk sum +6.4 us/layer vs fi at T=1 (fixed per-phase cost). PASS-00b.md | 9566 | 0.01 | KU128, ring max, CG2 only NPAD 256 | [M] |
 | v0 | all | first GPU data: hv2g MTN skeleton + xover tcgen05 phases + placeholder attention (SPEC-v0.md); dyn-smem fix 86a16ba | b1-b8 ~830, b64 ~900 | check: accuracy pass (ratio <= 0.54) at 11 points; 872 (b1) / 1030 (b16) / 1700 (b64) / 5813 (b256) vs fi 787 / 1019 / 1407 / 2235. Band missed at b64 (attention 25 us/layer). V0.md. e2e 9578 pending | 9568, 9569, 9572, 9576 | 0.06 | yes (baseline) | mk-core-v0 after 9578 |
 
+| P1 | barrier | bench: v0 barrier is the cheapest of 7 (1.095 us); MK_PFA: prefetch after arrive | b1 -60..-100 | -66 (b1), -74 (b16), -26 (b64), -30 (b256), -48 (R2-kv8192); latency 1.02 us/barrier after | 9579, 9580, 9582, 9583 | 0.05 | yes (MK_PFA=1) | mk-core-v1 after 9584 |
+
 ## Requests to MK-attn (2026-10-23, agreed by message)
 - A1 v1 output: bf16 `[total_q, 2048]` row-major (O-proj tcgen05 B operand). Input q: bf16 `[total_q, 16, 128]`
   after q-norm + RoPE.
