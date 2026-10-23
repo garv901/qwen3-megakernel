@@ -6,6 +6,7 @@ Compiling needs no GPU (``nvrtc_compile`` takes an explicit arch); loading and l
 from __future__ import annotations
 
 import ctypes
+import os
 from typing import Any, Sequence
 
 DEFAULT_ARCH = "sm_100a"
@@ -30,6 +31,8 @@ def nvrtc_compile(src: str, defines: Sequence[str] = (), arch: str = DEFAULT_ARC
     opts += [f"-D{d}".encode() for d in defines]
     if ptxas_verbose:
         opts.append(b"--ptxas-options=-v")
+    if os.environ.get("MK_LINEINFO"):   # debug: source lines in compute-sanitizer reports
+        opts.append(b"-lineinfo")
     (err,) = nvrtc.nvrtcCompileProgram(prog, len(opts), opts)
     _, n = nvrtc.nvrtcGetProgramLogSize(prog)
     log = b" " * n

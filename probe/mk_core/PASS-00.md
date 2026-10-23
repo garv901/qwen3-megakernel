@@ -21,4 +21,40 @@ on its own cost. Kernel names are truncated: the GEMM -> phase mapping below is 
 - At T >= 64 every fi GEMM is a 2-CTA (cta_group::2) kernel: weight for the cta_group::2 arm (a5) in Pass 0b.
 - b256 attention (917 us, fa2) is 40 % of fi's step: MK-attn's target, not this ledger's.
 
-## P0: e2e baseline (job 9562, background) - pending
+## P0: e2e baseline (job 9562, background, GPU-17dce9e8, mk-core bad611f, 2026-10-23) [M]
+`slurm/regime.sbatch --arms hv2g,fi-graph,vllm --workloads mk --tag mk-p0`, 20 rounds, run dir `runs/20261023T175548Z-mk-p0`,
+report `results/2026-10-23-mk/p0/` (REPORT.md, summary.csv). Steady us/step, best variant per arm:
+
+| workload | hv2g | fi-graph (best variant) | vllm (best variant) | target = best SOTA |
+|---|---|---|---|---|
+| R0-b1-kv128 | 379.9 | 786.9 (graph-pdl-best) | 2443.2 (nopdl) | 786.9 |
+| R1-b1-kv128 | 371.0 | 891.9 (graph-pdl-best) | 2404.9 (pdl) | 891.9 |
+| R1-b2-kv128 | 780.0 | 897.6 (graph-pdl-best) | 2410.8 (nopdl) | 897.6 |
+| R1-b4-kv128 | 998.8 | 926.8 (graph-pdl-best) | 2451.4 (nopdl) | 926.8 |
+| R1-b8-kv128 | 1481.5 | 972.1 (graph-pdl-best) | 2584.5 (pdl) | 972.1 |
+| R1-b16-kv128 | 2619.8 | 1018.7 (graph-pdl-best) | 2734.3 (nopdl) | 1018.7 |
+| R1-b32-kv128 | 4881.4 | 1175.9 (graph-pdl-best) | 2917.9 (pdl) | 1175.9 |
+| R1-b64-kv128 | 9310.8 | 1407.1 (graph-pdl-best) | 3343.1 (pdl) | 1407.1 |
+| R1-b128-kv128 | 18354.0 | 1768.7 (graph-pdl-cublas) | 4259.8 (nopdl) | 1768.7 |
+| R1-b256-kv128 | 37268.5 | 2235.3 (graph-pdl-best) | 6263.2 (pdl) | 2235.3 |
+| R2-b1-kv128 | 371.3 | 889.7 (graph-pdl-best) | 2331.0 (pdl) | 889.7 |
+| R2-b1-kv512 | 504.0 | 974.3 (graph-pdl-best) | 2502.7 (nopdl) | 974.3 |
+| R2-b1-kv1024 | 636.7 | 964.5 (graph-pdl-best) | 2495.1 (nopdl) | 964.5 |
+| R2-b1-kv2048 | 899.9 | 971.1 (graph-pdl-best) | 2525.7 (nopdl) | 971.1 |
+| R2-b1-kv4096 | 1431.8 | 1003.5 (graph-pdl-best) | 2498.7 (pdl) | 1003.5 |
+| R2-b1-kv8192 | 2471.9 | 1156.6 (graph-pdl-best) | 2706.8 (nopdl) | 1156.6 |
+| R2-b1-kv16384 | 4563.6 | 1308.2 (graph-pdl-best) | 2916.5 (nopdl) | 1308.2 |
+| R2-b1-kv32768 | 8706.4 | 1601.8 (graph-pdl-best) | 3313.3 (nopdl) | 1601.8 |
+| R3-b1-kv1024 | 637.0 | 963.4 (graph-pdl-best) | 2516.6 (nopdl) | 963.4 |
+| R3-b1-kv4096 | 1432.0 | 1001.6 (graph-pdl-best) | 2474.0 (nopdl) | 1001.6 |
+| R3-b1-kv16384 | 4564.1 | 1305.8 (graph-pdl-best) | 2944.5 (nopdl) | 1305.8 |
+| R3-b8-kv1024 | 1783.0 | 1154.8 (graph-pdl-best) | 2759.4 (pdl) | 1154.8 |
+| R3-b8-kv4096 | 2809.1 | 1597.5 (graph-pdl-best) | 3184.7 (nopdl) | 1597.5 |
+| R3-b32-kv1024 | 6186.5 | 1694.4 (graph-pdl-best) | 3481.8 (pdl) | 1694.4 |
+| R6-b1-kv1024-q2 | 1035.2 | 1078.5 (graph-pdl-best) | 3687.5 (nopdl) | 1078.5 |
+| R6-b1-kv1024-q4 | 1186.5 | 1103.3 (graph-pdl-best) | 6312.0 (pdl) | 1103.3 |
+| R6-b1-kv1024-q8 | 1559.4 | 1142.1 (graph-pdl-best) | 6333.1 (nopdl) | 1142.1 |
+| R6-b1-kv1024-q16 | 2674.6 | 1161.7 (graph-pdl-best) | 6472.6 (nopdl) | 1161.7 |
+
+Reading: fi-graph is the best SOTA arm at all 28 points (vLLM is 1.8-5.6x slower), so the target at every point is fi-graph.
+hv2g beats fi only at b1 short KV (R0/R1/R2-b1 up to kv2048, R3-b1-kv1024, R6-q2): its FFMA GEMMs lose from b4 up.
