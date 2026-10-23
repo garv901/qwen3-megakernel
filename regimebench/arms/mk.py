@@ -104,6 +104,8 @@ class MkStep:
             tok0 = [sum(x.q_len for x in w.seqs[:i]) for i in range(len(w.seqs))]   # t_base is per token, row_base per seq (equal lists only when every q_len is 1)
             assert list(pl.row_base) == [int(d.t_base[t]) for t in tok0], "A1 row_base != mk t_base of the seq's first token (fixture packs seq s at the sum of the previous kv_len + q_len)"
             assert pl.total_q == c.ntok == w.total_q and pl.cache_rows == rows
+            if self.qmax == 1 and self.npad >= B.SKV_TMA_ONLY_MIN:
+                assert pl.engine == 1, f"NPAD {self.npad}: the splitkv build is TMA-only (SKV_FORCE_ENGINE=1) but the plan chose LDG ({pl.summary()})"
             self.plan = pl
             t = pl.to_torch(dev)
             self.skv_items, self.skv_pair = t["items"], t["pair_info"]

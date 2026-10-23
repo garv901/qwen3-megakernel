@@ -185,7 +185,7 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     defs += os.environ.get("MK_EXTRA_DEFINES", "").split()   # debug only (e.g. SKV_DEBUG_WAIT=1); not part of the knob set
     if attn == "splitkv":
         defs.append("MK_SKV=1")
-        defs += skv_defines(skv_qmax)
+        defs += skv_defines(skv_qmax, npad)
     elif skv_qmax != 1:
         raise ValueError("skv_qmax needs attn = splitkv")
     cubin, log = nvrtc_compile(src, defs, arch=arch, ptxas_verbose=True, name="mk.cu")
@@ -198,11 +198,17 @@ SKV_NUM_MAPS = SKV_STAGE_ROWS.bit_length()   # log2(128) + 1 = 8 (skv::kNumMaps)
 SKV_QMAX_R6 = 16                             # the R6 build (q_len 2..16): -DSKV_QMAX=16
 
 
-def skv_defines(qmax: int = 1) -> list[str]:
-    """Extra NVRTC defines of a splitkv build: -DSKV_QMAX=16 for the R6 build (q_len > 1), none for the default build. The cache name / build key is (npad, knobs, attn, qmax)."""
+SKV_TMA_ONLY_MIN = 64   # default builds at NPAD >= 64 compile only the TMA engine (-DSKV_FORCE_ENGINE=1): every plan there is TMA (largest CTA share > 160 KB or no_split; MK-attn), and the both-engine build spills 200-232 B
+
+
+def skv_defines(qmax: int = 1, npad: int = 16) -> list[str]:
+    """Extra NVRTC defines of a splitkv build: -DSKV_QMAX=16 for the R6 build (q_len > 1); -DSKV_FORCE_ENGINE=1 for default builds at NPAD >= SKV_TMA_ONLY_MIN.
+    The cache name / build key is (npad, knobs, attn, qmax); the arm checks plan.engine == 1 at the TMA-only buckets."""
     if qmax not in (1, SKV_QMAX_R6):
         raise ValueError(f"skv_qmax {qmax}: 1 (default build) or {SKV_QMAX_R6} (R6 build)")
-    return [f"SKV_QMAX={qmax}"] if qmax > 1 else []
+    if qmax > 1:
+        return [f"SKV_QMAX={qmax}"]
+    return ["SKV_FORCE_ENGINE=1"] if npad >= SKV_TMA_ONLY_MIN else []
 
 
 def skv_qmax_of(seqs) -> int:
