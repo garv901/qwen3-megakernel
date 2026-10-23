@@ -1,8 +1,8 @@
 """Host planner for A1 (split-KV decode attention, interface v1). Pure Python + numpy; torch only in the helpers that take tensors.
 
-Model: Qwen3-0.6B decode, q_len == 1 per sequence, 16 q-heads, 8 kv-heads (GQA pair per item), head dim 128.
-Cache layout [L, cache_rows, 8, 128]; sequence s owns rows row_base[s] .. row_base[s] + kv_len[s] + 1 (the last row is the new token,
-written by the caller before attention), so visible positions are [0, kv_len + 1).
+Model: Qwen3-0.6B decode, q_len == 1 per sequence (q_len 2..16: see "q_len > 1" below), 16 q-heads, 8 kv-heads (GQA pair per item), head dim 128.
+Cache layout [L, cache_rows, 8, 128]; sequence s owns rows row_base[s] .. row_base[s] + kv_len[s] + q_len[s] - 1 (the last q_len rows are the new tokens,
+written by the caller before attention), so for q_len == 1 the visible positions are [0, kv_len + 1).
 
 Work item = (seq, kvh, p0, p1, split). Items are cut so every CTA streams ~equal bytes: either one item per CTA (`one_item`, when there are
 at most n_cta (seq, kvh) pairs and the cut is balanced to 1.10) or a greedy cut of the flat (seq, kvh) position axis.
@@ -13,10 +13,21 @@ Device encoding (matches splitkv.cuh):
       kvh < 16, split < 256, seq < 2^19; n_items is the same in every valid record of the CTA; unused records are zeros
   item_off[b] .. item_off[b+1] = CTA b's items in the compact `flat_items` order (not read by attend)
   pair_info[(seq * 8 + kvh) * 4 + {0..3}] = {part_base, S, tok0, vis_len}      (partial slot of (pair, split) = part_base + split; combine only)
+  q_len > 1 (R6, SKV_QMAX > 1 builds, interface v1 only): seqs = (kv_len, q_len), 1 <= q_len <= 16, sum q_len <= 256, seq < 4096. Sequence s owns rows
+      row_base .. row_base + kv_len + q_len - 1 (the q_len new rows are written by the caller before attention); token t (global token row tok0 + t) sees
+      positions p < vis_t = kv_len + t + 1; items cut [0, kv_len + q_len). y gets (q_len - 1) << 24. Partial slots are token-major:
+      slot(pair, split, t) = part_base + t * S + split (the record's part_slot stays part_base + split, attend adds t * S). pair_info has one row per
+      (token row, kvh) at index (tok0 + t) * 8 + kvh: {part_base + t * S, S, tok0, vis_t}; combine reads only words 0 and 1. engine is TMA if any q_len > 1.
+  iface=2 (SKV_IFACE 2) changes two words of the record: word 5 = S | n_items << 8 (S < 256) and word 7 = vis (= kv_len + 1 of the sequence); the piece
+      with p1 == vis owns the new row (position vis - 1). Everything else, pair_info and the partial layout are the same as iface 1.
+  no_split (plan(no_split=...)): every (seq, kvh) pair is ONE item (S = 1, attend writes ao directly, no combine), pairs packed whole onto CTAs by LPT
+      (longest first, to the least loaded CTA). "auto" (default): used iff n_pairs >= n_cta and the LPT max / mean CTA load <= LPT_MAX_IMB (1.20), else the cut above.
+      Plan.no_split / summary()["no_split"] tell which mode was used. SKV_TICKET builds (splitkv.cuh) use `Plan.n_pairs` (tickets[pair], pair = seq * 8 + kvh, zeroed once per plan).
   partial layout (floats): part[((part_base + split) * 2 + hq) * 132 + {0..127 o, 128 m, 129 l, 130..131 pad}]
 """
 from __future__ import annotations
 
+import heapq
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -24,7 +35,7 @@ import numpy as np
 QH, KVH, D = 16, 8, 128
 PSTRIDE = 132                      # floats per partial (o[128], m, l, pad): 528 B, 16 B aligned
 POS_BYTES = 2 * D * 2              # K + V bytes of one position of one kv-head = 512 B
-Y_KVH_BITS, Y_SPLIT_SHIFT, Y_SEQ_SHIFT = 4, 4, 12
+Y_KVH_BITS, Y_SPLIT_SHIFT, Y_SEQ_SHIFT, Y_QLEN_SHIFT = 4, 4, 12, 24
 
 
 @dataclass
@@ -33,16 +44,19 @@ class Plan:
     gran: int
     seqs: list
     row_base: list                 # per seq
-    cache_rows: int                # sum(kv_len + 1)
+    cache_rows: int                # sum(kv_len + q_len)
     items: np.ndarray              # int32 [n_cta, stride, 8] item records (see module docstring)
     item_off: np.ndarray           # int32 [n_cta + 1]
-    pair_info: np.ndarray          # int32 [nseq * 8, 4]
+    pair_info: np.ndarray          # int32 [total_q * 8, 4], row (token row) * 8 + kvh
     part_floats: int
     engine: int                    # 0 LDG, 1 TMA
     total_q: int
     cta_positions: list = field(default_factory=list)   # positions per CTA (bytes = * POS_BYTES)
     one_item: bool = False                               # True: one item per CTA (S_i-proportional cut)
     balance: dict = field(default_factory=dict)          # {"one_item": max/mean CTA positions or None (not applicable), "greedy": ..., "chosen": ...}
+    iface: int = 1                                       # record format: 1 = n_items in word 7; 2 = S | n_items << 8 in word 5, vis in word 7
+    tok0s: list = field(default_factory=list)            # first token row of each sequence
+    no_split: bool = False                               # True: every pair is one item (S = 1), pairs packed whole by LPT
 
     @property
     def stride(self) -> int:
@@ -51,8 +65,29 @@ class Plan:
     @property
     def flat_items(self) -> np.ndarray:
         """Valid records only, CTA order: int32 [n_items, 8]."""
-        n = self.items[:, 0, 7]
+        n = self.n_items_per_cta
         return np.concatenate([self.items[b, :int(n[b])] for b in range(self.n_cta)]) if self.n_cta else self.items.reshape(0, 8)
+
+    @property
+    def n_items_per_cta(self) -> np.ndarray:
+        """int32 [n_cta]: items of each CTA as stored in the records (word 7 in iface 1, word 5 >> 8 in iface 2)."""
+        return (self.items[:, 0, 5] >> 8) if self.iface == 2 else self.items[:, 0, 7]
+
+    @property
+    def n_pairs(self) -> int:
+        """SKV_TICKET: size of the u32 ticket array (tickets[pair], pair = seq * 8 + kvh); zero it once per plan."""
+        return KVH * len(self.seqs)
+
+    def cta_ticket_items(self, b: int) -> list:
+        """SKV_TICKET host model of the device's end-of-CTA re-read: [(record index, pair = seq * 8 + kvh, S)] of CTA b's items with S > 1, in record order."""
+        out = []
+        for k in range(int(self.n_items_per_cta[b])):
+            r = self.items[b, k]
+            y, S = int(r[1]), int(r[5]) & 255 if self.iface == 2 else int(r[5])
+            seq = (y >> Y_SEQ_SHIFT) & (0xFFF if any(q != 1 for _, q in self.seqs) else 0x7FFFF)
+            if S > 1:
+                out.append((k, seq * KVH + (y & 15), S))
+        return out
 
     @property
     def s_max(self) -> int:
@@ -75,7 +110,7 @@ class Plan:
         return "tma" if self.engine else "ldg"
 
     def tok0(self, seq: int) -> int:
-        return int(self.pair_info[seq * KVH, 2])
+        return int(self.tok0s[seq]) if self.tok0s else int(self.pair_info[seq * KVH, 2])
 
     def to_torch(self, device="cuda"):
         """-> dict of int32 device tensors: items (flat int32 [n_cta * stride * 8]), item_off, pair_info (flat)."""
@@ -87,7 +122,8 @@ class Plan:
     def summary(self) -> dict:
         return {"engine": self.engine_name, "s_max": self.s_max, "items_per_cta_max": self.max_items, "part_bytes": self.part_bytes,
                 "cta_bytes_max": max(self.cta_bytes), "cta_bytes_min": min(self.cta_bytes), "n_items": int(self.item_off[-1]),
-                "one_item": self.one_item, "balance_one_item": self.balance.get("one_item"), "balance_greedy": self.balance.get("greedy")}
+                "one_item": self.one_item, "balance_one_item": self.balance.get("one_item"), "balance_greedy": self.balance.get("greedy"),
+                "no_split": self.no_split, "balance_lpt": self.balance.get("lpt")}
 
 
 def _cut(vis: list, n_cta: int, gran: int, min_target: int):
@@ -162,53 +198,100 @@ def _one_item_cut(vis: list, n_cta: int, smax: int):
     return out
 
 
+def _lpt_cut(vis: list, n_cta: int):
+    """no_split: every pair whole (one piece [0, vis)), longest pair first onto the least loaded CTA (ties: lowest CTA index). -> per-CTA [(pair, 0, len)]"""
+    pair_len = [vis[s] for s in range(len(vis)) for _ in range(KVH)]
+    heap = [(0, b) for b in range(n_cta)]
+    out = [[] for _ in range(n_cta)]
+    for i in sorted(range(len(pair_len)), key=lambda i: -pair_len[i]):
+        load, b = heapq.heappop(heap)
+        out[b].append((i, 0, pair_len[i]))
+        heapq.heappush(heap, (load + pair_len[i], b))
+    return out
+
+
 def _imbalance(cut) -> float:
     pos = [sum(p1 - p0 for _, p0, p1 in pieces) for pieces in cut]
     mean = sum(pos) / max(len(pos), 1)
     return max(pos) / mean if mean else 1.0
 
 
-def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 512 * 1024, smax: int = 32, one_item: bool = True) -> Plan:
-    """seqs: list of (kv_len, q_len). v1: q_len must be 1. Raises if a pair would need more than smax splits that cannot be avoided.
+# P6 job 9692 [M]: no_split (A only) beats split (A + C) at b32kv1K (29.15 vs 32.35 us), b64kv128 (17.06 vs 24.0), b256kv128 (60.2 vs 74.5);
+# their LPT imbalance is 1.156, so the auto limit is 1.20 (not 1.10). b8kv1K (64 pairs < n_cta) keeps the cut (14.0 vs 13.5).
+LPT_MAX_IMB = 1.20
+
+def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024, smax: int = 32, one_item: bool = True, iface: int = 1, no_split="auto") -> Plan:
+    """seqs: list of (kv_len, q_len). q_len must be 1 unless iface == 1 and (1 <= q_len <= 16, sum q_len <= 256, nseq < 4096): R6, see the module docstring. Raises if a pair would need more than smax splits that cannot be avoided.
     one_item: when n_pairs <= n_cta, cut every pair into S_i ~ n_cta * len_i / total pieces, one item per CTA; used only if max/mean CTA positions <= 1.10,
-    otherwise (and for one_item=False) the greedy cut. ldg_max_bytes: LDG engine iff the largest CTA share is <= this many KV bytes."""
+    otherwise (and for one_item=False) the greedy cut. ldg_max_bytes: LDG engine iff the largest CTA share is <= this many KV bytes (160 KB: with the mma TMA consumer, job 9661, TMA wins at 226 KB/CTA, ties at 113 KB).
+    iface: 1 or 2, only the item record differs (see the module docstring); the cut is the same.
+    no_split: "auto" | True | False (ints 0 / 1 accepted). True: every pair is one item (S = 1), LPT-packed whole onto the CTAs (raises if a CTA's item count does not fit the record
+    word). "auto": True iff n_pairs >= n_cta and LPT max / mean CTA load <= LPT_MAX_IMB (1.20), else the cut above."""
+    assert iface in (1, 2), iface
+    assert isinstance(no_split, str) and no_split == "auto" or not isinstance(no_split, str), f"no_split must be 'auto', True or False, got {no_split!r}"
+    if not isinstance(no_split, str):
+        no_split = bool(no_split)
     seqs = [(int(k), int(q)) for k, q in seqs]
+    multi = any(q != 1 for _, q in seqs)
     for s, (k, q) in enumerate(seqs):
-        assert q == 1, f"splitkv v1 supports q_len == 1 only (seq {s} has q_len {q})"
+        assert 1 <= q <= (16 if multi else 1), f"splitkv supports q_len 1..16 (seq {s} has q_len {q}); q_len > 1 needs q_len <= 16"
         assert k >= 0
+    if multi:
+        assert iface == 1, "q_len > 1 (R6) is interface v1 only"
+        assert len(seqs) < 4096 and sum(q for _, q in seqs) <= 256, "q_len > 1: seq < 4096 (y bits 24..27 hold q_len - 1) and sum q_len <= 256"
     assert len(seqs) < (1 << 19)
-    vis = [k + 1 for k, _ in seqs]
+    vis = [k + q for k, q in seqs]                           # rows of each sequence (items cut [0, kv_len + q_len))
     row_base = [int(x) for x in np.concatenate([[0], np.cumsum(vis)[:-1]])] if seqs else []
+    tok0s = [int(x) for x in np.concatenate([[0], np.cumsum([q for _, q in seqs])[:-1]])] if seqs else []
     balance = {"one_item": None, "greedy": None}
     cut = None
     oi = _one_item_cut(vis, n_cta, smax) if one_item else None
     if oi is not None:
         balance["one_item"] = _imbalance(oi)
-    min_target = 1
-    while True:
-        gcut = _cut(vis, n_cta, gran, min_target)
-        cnt = {}
-        for pieces in gcut:
-            for pr, _, _ in pieces:
-                cnt[pr] = cnt.get(pr, 0) + 1
-        if not cnt or max(cnt.values()) <= smax:
-            break
-        min_target = int(min_target * 1.25) + 1                # raise the per-CTA target until S <= smax
-        assert min_target <= 1 << 22
-    balance["greedy"] = _imbalance(gcut)
-    used_one = oi is not None and balance["one_item"] <= 1.10
-    cut = oi if used_one else gcut
-    balance["chosen"] = balance["one_item"] if used_one else balance["greedy"]
+    n_pairs = len(vis) * KVH
+    lcut = _lpt_cut(vis, n_cta) if (no_split is True or (no_split == "auto" and n_pairs >= n_cta and n_cta > 0)) and n_pairs else None
+    balance["lpt"] = _imbalance(lcut) if lcut is not None else None
+    used_lpt = lcut is not None and (no_split is True or balance["lpt"] <= LPT_MAX_IMB)
+    if used_lpt:
+        nmax = max(len(p) for p in lcut)
+        assert nmax < ((1 << 23) if iface == 2 else (1 << 31)), f"no_split: a CTA would hold {nmax} items, more than the record's n_items field"
+        cut, used_one, gcut = lcut, False, None
+        balance["greedy"] = None
+        balance["chosen"] = balance["lpt"]
+    else:
+        min_target = 1
+        while True:
+            gcut = _cut(vis, n_cta, gran, min_target)
+            cnt = {}
+            for pieces in gcut:
+                for pr, _, _ in pieces:
+                    cnt[pr] = cnt.get(pr, 0) + 1
+            if not cnt or max(cnt.values()) <= smax:
+                break
+            min_target = int(min_target * 1.25) + 1                # raise the per-CTA target until S <= smax
+            assert min_target <= 1 << 22
+        balance["greedy"] = _imbalance(gcut)
+        used_one = oi is not None and balance["one_item"] <= 1.10
+        cut = oi if used_one else gcut
+        balance["chosen"] = balance["one_item"] if used_one else balance["greedy"]
     cnt = {}
     for pieces in cut:
         for pr, _, _ in pieces:
             cnt[pr] = cnt.get(pr, 0) + 1
     nseq = len(seqs)
-    pair_info = np.zeros((nseq * KVH, 4), np.int32)
+    total_q = sum(q for _, q in seqs)
+    pair_info = np.zeros((total_q * KVH, 4), np.int32)
     base = 0
     for pr in range(nseq * KVH):
-        pair_info[pr] = (base, cnt[pr], pr // KVH, vis[pr // KVH])
-        base += cnt[pr]
+        s, kvh = divmod(pr, KVH)
+        kv_len, ql = seqs[s]
+        for t in range(ql):                                   # token-major slots: part_base + t * S + split
+            pair_info[(tok0s[s] + t) * KVH + kvh] = (base + t * cnt[pr], cnt[pr], tok0s[s], kv_len + t + 1)
+        base += cnt[pr] * ql
+    pbase = {}
+    for pr in range(nseq * KVH):
+        s, kvh = divmod(pr, KVH)
+        pbase[pr] = int(pair_info[tok0s[s] * KVH + kvh, 0])
     stride = max([len(p) for p in cut] + [1])
     recs = np.zeros((n_cta, stride, 8), np.int32)
     seen = {}
@@ -219,36 +302,51 @@ def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 512 * 1024
             sp = seen.get(pr, 0)
             seen[pr] = sp + 1
             s, kvh = divmod(pr, KVH)
-            recs[b, k] = (row_base[s], kvh | (sp << Y_SPLIT_SHIFT) | (s << Y_SEQ_SHIFT), p0, p1, int(pair_info[pr, 0]) + sp, cnt[pr], s, len(pieces))
+            y = kvh | (sp << Y_SPLIT_SHIFT) | (s << Y_SEQ_SHIFT) | ((seqs[s][1] - 1) << Y_QLEN_SHIFT)
+            if iface == 2:
+                assert cnt[pr] < 256
+                recs[b, k] = (row_base[s], y, p0, p1, pbase[pr] + sp, cnt[pr] | (len(pieces) << 8), s, vis[s])
+            else:
+                recs[b, k] = (row_base[s], y, p0, p1, pbase[pr] + sp, cnt[pr], tok0s[s], len(pieces))
             npos += p1 - p0
         n_items += len(pieces)
         item_off.append(n_items)
         cta_pos.append(npos)
-    engine = int(max(cta_pos, default=0) * POS_BYTES > ldg_max_bytes)
+    engine = int(max(cta_pos, default=0) * POS_BYTES > ldg_max_bytes) or int(multi)   # q_len > 1: no LDG path
     return Plan(n_cta, gran, seqs, row_base, int(sum(vis)), recs, np.array(item_off, np.int32), pair_info,
-                base * 2 * PSTRIDE, engine, nseq, cta_pos, used_one, balance)
+                base * 2 * PSTRIDE, engine, total_q, cta_pos, used_one, balance, iface, tok0s, used_lpt)
 
 
 def decode_item(y: int):
-    return y & ((1 << Y_KVH_BITS) - 1), (y >> Y_SPLIT_SHIFT) & 0xFF, y >> Y_SEQ_SHIFT   # kvh, split, seq
+    return y & ((1 << Y_KVH_BITS) - 1), (y >> Y_SPLIT_SHIFT) & 0xFF, y >> Y_SEQ_SHIFT   # kvh, split, seq (q_len > 1 plans: use decode_item_q)
+
+
+def decode_item_q(y: int):
+    """(kvh, split, seq, q_len) of a record's y word of a plan with q_len > 1 (seq in bits 12..23, q_len - 1 in bits 24..27)."""
+    return y & 15, (y >> Y_SPLIT_SHIFT) & 0xFF, (y >> Y_SEQ_SHIFT) & 0xFFF, ((y >> Y_QLEN_SHIFT) & 15) + 1
 
 
 def torch_reference(q, kc, vc, layer, seqs, row_base=None):
-    """Plain softmax attention in fp32. q [total_q, 16, 128] bf16, kc/vc [L, rows, 8, 128] bf16, seqs [(kv_len, 1)] -> ao fp32 [total_q, 2048]."""
+    """Plain causal softmax attention in fp32. q [total_q, 16, 128] bf16, kc/vc [L, rows, 8, 128] bf16, seqs [(kv_len, q_len)] -> ao fp32 [total_q, 2048].
+    Token t of a sequence sees positions p < kv_len + t + 1 (q_len == 1: kv_len + 1)."""
     import torch
-    vis = [k + 1 for k, _ in seqs]
+    ext = [k + ql for k, ql in seqs]
     if row_base is None:
         row_base = [0]
-        for v in vis[:-1]:
+        for v in ext[:-1]:
             row_base.append(row_base[-1] + v)
-    out = torch.zeros(len(seqs), QH * D, dtype=torch.float32, device=q.device)
-    for s, v in enumerate(vis):
-        k = kc[layer, row_base[s]:row_base[s] + v].float()           # [v, 8, 128]
-        val = vc[layer, row_base[s]:row_base[s] + v].float()
-        qs = q[s].float().view(KVH, 2, D)                            # [kvh, hq, d]
-        sc = torch.einsum("hqd,vhd->hqv", qs, k) * (D ** -0.5)
+    out = torch.zeros(sum(ql for _, ql in seqs), QH * D, dtype=torch.float32, device=q.device)
+    tok = 0
+    for s, (kv, ql) in enumerate(seqs):
+        k = kc[layer, row_base[s]:row_base[s] + ext[s]].float()      # [kv + ql, 8, 128]
+        val = vc[layer, row_base[s]:row_base[s] + ext[s]].float()
+        qs = q[tok:tok + ql].float().view(ql, KVH, 2, D)             # [t, kvh, hq, d]
+        sc = torch.einsum("thqd,vhd->thqv", qs, k) * (D ** -0.5)
+        vis = (torch.arange(ql, device=q.device) + kv + 1).view(ql, 1, 1, 1)
+        sc = sc.masked_fill(torch.arange(ext[s], device=q.device).view(1, 1, 1, -1) >= vis, float("-inf"))
         pr = torch.softmax(sc, dim=-1)
-        out[s] = torch.einsum("hqv,vhd->hqd", pr, val).reshape(QH * D)
+        out[tok:tok + ql] = torch.einsum("thqv,vhd->thqd", pr, val).reshape(ql, QH * D)
+        tok += ql
     return out
 
 

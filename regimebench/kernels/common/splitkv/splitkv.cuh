@@ -1,7 +1,7 @@
 // A1 v1: split-KV decode attention (q_len == 1 per sequence) + one-pass combine, for the bespoke megakernel `mk` (MK-attn owns this file).
 // Packaging: the consumer prepends this text to its NVRTC source. No includes, no global macro dependencies: model sizes are constexpr in
 // namespace skv (named kXxx so they cannot collide with a global macro H/NL/QH/KVH/HD/NT/...), every macro starts with SKV_.
-// Contract: regimebench/kernels/common/README.md + splitkv/CHANGELOG.md (interface v1). Planner: splitkv/plan.py (item encoding documented there).
+// Contract: regimebench/kernels/common/README.md + splitkv/CHANGELOG.md (interface v1; v2 = -DSKV_IFACE=2, attend does q/k norm + RoPE + the new-row KV write). Planner: splitkv/plan.py (item encoding documented there).
 //
 // Math domain: q is pre-scaled by (1/sqrt(128)) * log2(e), so scores live in log2 units and every exp is a bare ex2.approx.
 // Partial slots hold (o unnormalised w.r.t. m, m, l) in that domain; only combine_head / combine_all_to_ao read them.
@@ -10,6 +10,14 @@
 // q / ao / partials are read with ld.global.cg (L1 bypass).
 #ifndef SKV_CUH_
 #define SKV_CUH_
+
+#define SKV_IFACE_MAX 2   // highest interface version this header implements (consumers static_assert it)
+#ifndef SKV_IFACE
+#define SKV_IFACE 1       // 1 = q is bf16 post-norm / RoPE (default); 2 = attend does q/k RMS-norm + RoPE + the new-row KV write from the fp32 QKV sums (SPEC-A1v2)
+#endif
+#if SKV_IFACE != 1 && SKV_IFACE != 2
+#error "SKV_IFACE must be 1 or 2"
+#endif
 
 #ifndef SKV_LDG_DB
 #define SKV_LDG_DB 2   // LDG engine: 1 = register double buffer (step i+1's loads before step i), 2 = half buffer (after step i's scores), 0 = single
@@ -23,17 +31,44 @@
 #define SKV_FORCE_ENGINE (-1)   // -1: runtime Params::engine; 0 / 1: compile only the LDG / TMA engine (smaller code)
 #endif
 
+#ifndef SKV_QMAX
+#define SKV_QMAX 1          // max q_len per sequence. 1 = the q_len == 1 consumers (default build, unchanged). 2..16 = R6 multi-token causal decode: the two-phase mma.sync consumer
+                            // (TMA engine only, interface v1, SKV_TMA_MMA 1, 64-position stages; the planner puts q_len > 1 on the TMA engine). mk's R6 bucket builds with -DSKV_QMAX=16
+#endif
+#if SKV_QMAX < 1 || SKV_QMAX > 16
+#error "SKV_QMAX must be 1..16"
+#endif
 #ifndef SKV_STAGE_ROWS
+#if SKV_QMAX > 1
+#define SKV_STAGE_ROWS 64   // R6 consumer: 4 position tiles of 16 per stage
+#else
 #define SKV_STAGE_ROWS 128  // TMA engine: positions per ring stage (32 / 64 / 128; K and V are rows * 256 B each). v1 = 32; 128 x 2 best in P2b (job 9610)
 #endif
+#endif
 #ifndef SKV_STAGES
+#if SKV_QMAX > 1
+#define SKV_STAGES 4        // R6: 4 x 64 rows = the bytes of the default 2 x 128 ring (same attend_smem_bytes), finer-grained refills
+#else
 #define SKV_STAGES 2        // TMA engine: ring stages (2..8). Ring bytes = stages * rows * 512. v1 = 4
+#endif
 #endif
 #ifndef SKV_TMA_RELEASE
 #define SKV_TMA_RELEASE 1   // 0 = v1 (__syncthreads after every stage, then thread 0 refills); 1 = per-slot "empty" mbarrier (16 warp arrivals), no CTA barrier in the stage loop
 #endif
 #ifndef SKV_PROF_NOCOMP
 #define SKV_PROF_NOCOMP 0   // 1 = profiling only: no dots / softmax / PV, loaded K/V words are xored into st.o0[0]; results are wrong by design
+#endif
+#ifndef SKV_TMA_MMA
+#define SKV_TMA_MMA 1       // (default 1: faster than FFMA at every point, jobs 9657, 9658) 0 = FFMA consumer; 1 = TMA engine consumer on mma.sync (bf16 m16n8k16, ldmatrix from 128B-swizzled TMA boxes, movmatrix); host maps must be SWIZZLE_128B, box 64 x 1 x rows (CHANGELOG)
+#endif
+#ifndef SKV_MERGE_CHUNK
+#define SKV_MERGE_CHUNK 18  // (default 18: 20 spills with both engines + SKV_TMA_MMA) combine: partial float4 loads in flight per lane (80 registers at 20). 18 frees 8 registers for builds that spill with both engines + SKV_TMA_MMA (S > 18 then needs a second round)
+#endif
+#ifndef SKV_COMBINE_HALF
+#define SKV_COMBINE_HALF 0  // (default 0: job 9673, +0.13..0.29 us C at b1 S 19 but -0.35 at b1kv128 S 16, -0.06..0.11 at b8) 1 = combine_head with ntok <= 4: rows with S > SKV_MERGE_CHUNK use two warps (merge_th2, float2: one load round for S <= 20); 0 = one warp per row
+#endif
+#ifndef SKV_TICKET
+#define SKV_TICKET 0        // (default 0) 1 = deferred last-arriver merge inside attend: ao is complete after attend + the caller's grid barrier (no combine_head / merge_th call). Needs Params::tickets (CHANGELOG)
 #endif
 #ifndef SKV_ITEM_PREFETCH
 #define SKV_ITEM_PREFETCH 0 // (default 0: no gain, job 9610) 1 = item k+1's record + q are loaded during item k, and the LDG engine issues its first K/V loads before item k's merge
@@ -52,11 +87,19 @@ static_assert(kStages >= 2 && kStages <= 8, "SKV_STAGES must be 2..8");
 constexpr int kU = kStageRows / 32;               // positions per row slot per stage (one online-softmax rescale per kU positions)
 constexpr int kStageBytes = 2 * kStageRows * 256; // K half then V half
 constexpr int kNumMaps = (kStageRows == 32 ? 6 : kStageRows == 64 ? 7 : 8);   // box rows kStageRows, /2, .., 1 per K / V: tmaps[kv * kNumMaps + log2(kStageRows / rows)]
-constexpr int kMergeChunk = 20;                   // combine: partial float4 loads in flight per lane
+constexpr int kMergeChunk = SKV_MERGE_CHUNK;                   // combine: partial float4 loads in flight per lane
 constexpr float kQScale = 0.08838834764831845f * 1.4426950408889634f;   // 1/sqrt(128) * log2(e)
 constexpr int kRingOff = 0, kMrgOff = kStages * kStageBytes, kMrgBytes = 16 * 2 * kPartStride * 4;
 constexpr int kBarBytes = (16 * kStages > 64 ? 16 * kStages : 64);   // mbarriers: full[s] at +8 s, empty[s] at +8 (kStages + s)
 constexpr int kBarOff = kMrgOff + kMrgBytes, kSmemBytes = kBarOff + kBarBytes;
+
+constexpr bool kMmaOn = (SKV_TMA_MMA != 0);
+// mma consumer geometry: warp w takes 16-position tile (w % kMmaT) of the stage and the dim slice dh = w / kMmaT (kMmaDW dims = kMmaMt m-tiles of 16)
+constexpr int kMmaT = kStageRows / 16, kMmaWPT = 16 / kMmaT, kMmaDW = 128 / kMmaWPT, kMmaMt = kMmaDW / 16, kMmaMS = kMmaDW + 4;   // kMmaMS: floats of one (warp, q-head) merge slot: O[kMmaDW], m, l, pad
+constexpr int kMmaNew = 32 * kMmaMS, kMmaQs = kMmaNew + 132;   // merge buffer (float offsets): 32 slots | new-row state (v[128], m[2], pad) | per-item q scratch (2 x 128 bf16 = 128 floats)
+constexpr int kMmaG = 1;                        // V m-tiles loaded / multiplied together
+constexpr int kHalfBytes = kStageRows * 128;                   // one 64-dim half of K or V in a stage (SKV_TMA_MMA: [rows][64] bf16, 128 B swizzled rows)
+static_assert(!kMmaOn || (kStageRows >= 32 && kMmaDW % 16 == 0 && (kMmaQs + 128) * 4 <= kMrgBytes), "SKV_TMA_MMA geometry");
 
 struct Params {                    // filled by the host planner (plan.py) + caller pointers; plain device pointers
   const bf16* q;                   // [total_q, 16, 128] bf16, post q-norm + RoPE
@@ -70,6 +113,15 @@ struct Params {                    // filled by the host planner (plan.py) + cal
   const void* tmaps;               // 2 * kNumMaps CUtensorMap (128 B each, 64 B aligned): [K|V][box rows kStageRows..1]; null if engine LDG
   int engine;                      // 0 LDG, 1 TMA (planner decides per launch)
   int total_q;
+#if SKV_TICKET
+  unsigned* tickets;               // [n_pairs = 8 * n_seq] u32, zeroed once per plan, never reset: tickets[seq * 8 + kvh] gains S per layer (SKV_TICKET)
+#endif
+#if SKV_IFACE == 2
+  const float* qkv;                // [256][4096] fp32 row t = token t: q head h at h*128, k head g at 2048 + g*128, v head g at 3072 + g*128; NOT rms-scaled
+  const float* rr1;                // [256] fp32 per-token rms scale (q, k, v = rr1[t] * qkv)
+  const bf16* qn; const bf16* kn;  // [n_layers][128] bf16 q-norm / k-norm weights (layer l at l * 128)
+  const float* rope;               // [max_pos][128] fp32: row p = cos(p f_j) j < 64, then sin(p f_j)
+#endif
 };
 
 // ------------------------------------------------------------------------------------------------ helpers
@@ -145,6 +197,34 @@ __device__ __forceinline__ void unpack8(const uint4& x, float (&f)[8]) {
   f[0] = bflo(x.x); f[1] = bfhi(x.x); f[2] = bflo(x.y); f[3] = bfhi(x.y);
   f[4] = bflo(x.z); f[5] = bfhi(x.z); f[6] = bflo(x.w); f[7] = bfhi(x.w);
 }
+#if SKV_IFACE == 2
+__device__ __forceinline__ float bfround(float x) { return __uint_as_float((unsigned)f2bf(x) << 16); }
+__device__ __forceinline__ uint4 pack8(const float (&f)[8]) { return make_uint4(pack2(f[0], f[1]), pack2(f[2], f[3]), pack2(f[4], f[5]), pack2(f[6], f[7])); }
+__device__ __forceinline__ void ldg_f8(const float* p, float (&f)[8]) {   // 2 x 16 B, L1 bypass (qkv is written earlier in the same kernel by other CTAs)
+  const float4 a = __ldcg(reinterpret_cast<const float4*>(p)), b = __ldcg(reinterpret_cast<const float4*>(p) + 1);
+  f[0] = a.x; f[1] = a.y; f[2] = a.z; f[3] = a.w; f[4] = b.x; f[5] = b.y; f[6] = b.z; f[7] = b.w;
+}
+// RMS-norm + weights + RoPE rotate-half of one head, 8 dims per lane (lane16 holds d = 8 lane16 .. +7; the RoPE partner d ^ 64 sits in lane16 ^ 8).
+// Norm sum order: e_j = x_j * rr; ss = fma chain over j = 0..7 (per lane), then xor-butterfly 8, 4, 2, 1 over the half-warp. Full-warp mask: all 32 lanes call it.
+__device__ __forceinline__ void norm_rope8(const float (&x)[8], float rr, const uint4& wb, const float (&cs)[8], const float (&sn)[8], bool lo, float (&o)[8]) {
+  float e[8], ss = 0.f;
+#pragma unroll
+  for (int j = 0; j < 8; ++j) { e[j] = x[j] * rr; ss = fmaf(e[j], e[j], ss); }
+#pragma unroll
+  for (int d = 8; d; d >>= 1) ss += __shfl_xor_sync(0xffffffffu, ss, d);
+  const float rn = rsqrtf(ss * 0.0078125f + 1e-6f);
+  float w[8];
+  unpack8(wb, w);                                              // bf16 weights stay packed (4 regs) until the norm sum is done
+#pragma unroll
+  for (int j = 0; j < 8; ++j) e[j] = e[j] * rn * w[j];
+#pragma unroll
+  for (int j = 0; j < 8; ++j) {
+    const float pj = __shfl_xor_sync(0xffffffffu, e[j], 8);
+    o[j] = e[j] * cs[j] + (lo ? -pj : pj) * sn[j];
+  }
+}
+#endif
+
 // score of one position for both heads: 16 FFMA over this lane's 8 dims (two chains per head), then xor 8,4,2,1 over the half-warp
 __device__ __forceinline__ void score2(const uint4& k, const float (&q0)[8], const float (&q1)[8], float& s0, float& s1) {
   float kf[8];
@@ -225,6 +305,90 @@ __device__ __forceinline__ void merge_state(float& m, float& l, float (&o)[8], f
   m = n;
 }
 
+// ---- mma consumer helpers (SKV_TMA_MMA). Shared-memory layout of a stage: K lo | K hi | V lo | V hi, each [rows][64] bf16 = rows * 128 B, 1024 B aligned;
+// 16 B chunk c (8 dims) of row r of a half sits at r * 128 + ((c ^ (r & 7)) << 4) (TMA SWIZZLE_128B). The offset functions are __host__ __device__ constexpr so
+// tests/test_splitkv_plan.py can evaluate the real address math on the CPU and check it against a numpy model of ldmatrix / movmatrix / mma.
+__host__ __device__ constexpr unsigned sw128_off(unsigned row, unsigned chunk) { return row * 128u + ((chunk ^ (row & 7u)) << 4); }
+// ldmatrix.x4 (non-trans) row address of `lane` for the K A fragment (16 positions x 16 dims) of k-step ks: matrix mi = lane / 8: a0 = (rows 0-7, dims 0-7), a1 = (rows 8-15, dims 0-7),
+// a2 = (rows 0-7, dims 8-15), a3 = (rows 8-15, dims 8-15); lane % 8 selects the row inside the matrix. row0 = first position of the tile (multiple of 16).
+__host__ __device__ constexpr unsigned mma_k_off(unsigned lane, unsigned row0, unsigned ks, unsigned half_bytes) {
+  return (((ks * 2u + (lane >> 4)) >> 3) * half_bytes) + sw128_off(row0 + ((lane >> 3) & 1u) * 8u + (lane & 7u), (ks * 2u + (lane >> 4)) & 7u);
+}
+// ldmatrix.x4.trans row address of `lane` for the V^T A fragment (16 dims dim0.. x 16 positions): a0 = (dims 0-7, pos 0-7), a1 = (dims 8-15, pos 0-7), a2 = (dims 0-7, pos 8-15),
+// a3 = (dims 8-15, pos 8-15); the stored matrices are [pos][8 dims] rows. Offset includes the 2 * half_bytes of V.
+__host__ __device__ constexpr unsigned mma_v_off(unsigned lane, unsigned row0, unsigned dim0, unsigned half_bytes) {
+  return (2u + ((dim0 / 8u + ((lane >> 3) & 1u)) >> 3)) * half_bytes + sw128_off(row0 + (lane >> 4) * 8u + (lane & 7u), (dim0 / 8u + ((lane >> 3) & 1u)) & 7u);
+}
+// Cheap forms of the same addresses (what the stage loop uses: 2 per-lane base registers + immediates / one LOP per k-step; written out in the CPU test against the plain forms above).
+// With i = lane % 8, j32 = (i / 2) << 5: (c ^ i) << 4 for c = 2 u + v is ((u ^ i / 2) << 5) + ((v ^ i % 2) << 4).
+__host__ __device__ constexpr unsigned mma_j32(unsigned lane) { return ((lane & 7u) >> 1) << 5; }
+__host__ __device__ constexpr unsigned mma_k_base(unsigned lane, unsigned row0) { return (row0 + ((lane >> 3) & 1u) * 8u + (lane & 7u)) * 128u + (((lane >> 4) ^ (lane & 1u)) << 4); }
+__host__ __device__ constexpr unsigned mma_k_term(unsigned ks, unsigned j32, unsigned half_bytes) { return (((ks & 3u) << 5) ^ j32) + (ks >> 2) * half_bytes; }
+__host__ __device__ constexpr unsigned mma_v_base(unsigned lane, unsigned row0) { return (row0 + (lane >> 4) * 8u + (lane & 7u)) * 128u + ((((lane >> 3) & 1u) ^ (lane & 1u)) << 4); }
+__host__ __device__ constexpr unsigned mma_v_term(unsigned y, unsigned j32, unsigned half_bytes) { return (2u + (y >> 2)) * half_bytes + (((y & 3u) << 5) ^ j32); }   // y = dim0 / 16
+// Q^T B fragment in the per-item q scratch (head g at g * 256 B): thread (g = lane / 4, c = lane % 4), k-step ks reads one 8 B pair {b0, b1} = bf16 pairs of dims ks * 16 + 2c, +1 and
+// ks * 16 + 8 + 2c, +1. Scratch word index inside a head = ks * 8 + c * 2 + h; the word of 16 B chunk j = 2 ks + h (dims 8 j .. 8 j + 7), pair c, is stored at that index (mma_q_word).
+__host__ __device__ constexpr unsigned mma_q_off(unsigned lane, unsigned ks) { return (lane >> 2) * 256u + ks * 32u + (lane & 3u) * 8u; }
+__host__ __device__ constexpr unsigned mma_q_word(unsigned chunk, unsigned c) { return (chunk >> 1) * 8u + c * 2u + (chunk & 1u); }
+// ---- R6 (SKV_QMAX > 1) address functions (always defined; used by the R6 consumer and evaluated by tests/test_splitkv_plan.py).
+// q staging [N8][128] bf16: row n = 256 B, 16 B chunk c (8 dims) of row n at n * 256 + (((c & 8) | ((c & 7) ^ (n & 7))) << 4): the 8 rows of an ldmatrix matrix hit 8 distinct bank groups.
+// P^T staging [N8][64] bf16: row n = 128 B, 16 B chunk c (8 positions) at n * 128 + ((c ^ (n & 7)) << 4) (the TMA 128B swizzle pattern).
+__host__ __device__ constexpr unsigned r6_q_off(unsigned n, unsigned c) { return n * 256u + (((c & 8u) | ((c & 7u) ^ (n & 7u))) << 4); }
+__host__ __device__ constexpr unsigned r6_p_off(unsigned n, unsigned c) { return n * 128u + ((c ^ (n & 7u)) << 4); }
+// ldmatrix.x4 (non-trans) row address of `lane` for the q B fragments of n-tile nt, k-step pair jj (matrix mi = lane / 8 = chunk 4 jj + mi; regs 0, 1 = k-step 2 jj {b0, b1}, regs 2, 3 = k-step 2 jj + 1)
+__host__ __device__ constexpr unsigned r6_q_ld(unsigned lane, unsigned nt, unsigned jj) { return r6_q_off(nt * 8u + (lane & 7u), 4u * jj + (lane >> 3)); }
+__host__ __device__ constexpr unsigned r6_q_base(unsigned lane, unsigned nt) { return (nt * 8u + (lane & 7u)) * 256u; }
+__host__ __device__ constexpr unsigned r6_q_xv(unsigned lane) { return (((lane >> 3) ^ (lane & 7u)) << 4); }
+__host__ __device__ constexpr unsigned r6_q_term(unsigned jj, unsigned xv) { return (jj >> 1) * 128u + (xv ^ ((jj & 1u) * 64u)); }
+// ldmatrix row address of `lane` for the P^T B fragment of k-step ks (positions 16 ks .. +15 = chunks 2 ks, 2 ks + 1): matrix mi = lane / 8 = (n-tile nb0 + (ntb == 2 ? mi / 2 : 0), chunk 2 ks + (mi & 1)); regs (b0, b1) per n-tile
+__host__ __device__ constexpr unsigned r6_p_ld(unsigned lane, unsigned nb0, unsigned ntb, unsigned ks) { return r6_p_off((nb0 + (ntb == 2u ? (lane >> 4) : 0u)) * 8u + (lane & 7u), 2u * ks + ((lane >> 3) & 1u)); }
+__host__ __device__ constexpr unsigned r6_p_base(unsigned lane, unsigned nb0, unsigned ntb) { return ((nb0 + (ntb == 2u ? (lane >> 4) : 0u)) * 8u + (lane & 7u)) * 128u; }
+__host__ __device__ constexpr unsigned r6_p_xp(unsigned lane) { return ((((lane >> 3) & 1u) ^ (lane & 7u)) << 4); }
+__host__ __device__ constexpr unsigned r6_p_term(unsigned ks, unsigned xp) { return xp ^ (ks * 32u); }
+
+__device__ __forceinline__ void ldsm4(unsigned (&r)[4], unsigned a) {
+  asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];" : "=r"(r[0]), "=r"(r[1]), "=r"(r[2]), "=r"(r[3]) : "r"(a) : "memory");
+}
+__device__ __forceinline__ void ldsm4t(unsigned (&r)[4], unsigned a) {
+  asm volatile("ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 {%0,%1,%2,%3}, [%4];" : "=r"(r[0]), "=r"(r[1]), "=r"(r[2]), "=r"(r[3]) : "r"(a) : "memory");
+}
+__device__ __forceinline__ uint2 lds64(unsigned a) {
+  uint2 v;
+  asm volatile("ld.shared.v2.u32 {%0,%1}, [%2];" : "=r"(v.x), "=r"(v.y) : "r"(a) : "memory");
+  return v;
+}
+__device__ __forceinline__ unsigned movm_t(unsigned x) {   // 8x8 b16 transpose across the warp (SASS MOVM.16.MT88)
+  unsigned y;
+  asm("movmatrix.sync.aligned.m8n8.trans.b16 %0, %1;" : "=r"(y) : "r"(x));
+  return y;
+}
+__device__ __forceinline__ unsigned pack_bf16x2(float lo, float hi) {   // RNE, lo in the low half
+  unsigned d;
+  asm("cvt.rn.bf16x2.f32 %0, %1, %2;" : "=r"(d) : "f"(hi), "f"(lo));
+  return d;
+}
+__device__ __forceinline__ void hmma16816(float (&c)[4], const unsigned (&a)[4], unsigned b0, unsigned b1) {
+  asm("mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};"
+      : "+f"(c[0]), "+f"(c[1]), "+f"(c[2]), "+f"(c[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b0), "r"(b1));
+}
+
+__device__ __forceinline__ void ldsm2(unsigned& r0, unsigned& r1, unsigned a) {   // x2: matrices 0, 1 (row addresses of lanes 0..15; the other lanes' addresses are ignored)
+  asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0,%1}, [%2];" : "=r"(r0), "=r"(r1) : "r"(a) : "memory");
+}
+__device__ __forceinline__ void sts32(unsigned a, unsigned v) { asm volatile("st.shared.b32 [%0], %1;" ::"r"(a), "r"(v) : "memory"); }
+
+#if SKV_TICKET
+__device__ __forceinline__ unsigned ld_acquire_gpu(const unsigned* a) {
+  unsigned v;
+  asm volatile("ld.acquire.gpu.global.u32 %0, [%1];" : "=r"(v) : "l"(a) : "memory");
+  return v;
+}
+__device__ __forceinline__ void red_release_gpu(unsigned* a) { asm volatile("red.release.gpu.global.add.u32 [%0], 1;" ::"l"(a) : "memory"); }
+// pair = seq * 8 + kvh of a record's y word (q_len > 1 plans keep q_len - 1 in y bits 24..27)
+__device__ __forceinline__ int ticket_pair(int y) { return (SKV_QMAX > 1 ? ((y >> 12) & 0xFFF) : (y >> 12)) * kKvHeads + (y & 15); }
+__device__ __forceinline__ int rec_splits(const int4& rv) { return SKV_IFACE == 2 ? (rv.y & 255) : rv.y; }
+#endif
+
 constexpr size_t attend_smem_bytes() { return (size_t)kSmemBytes; }   // dynamic smem attend needs: TMA ring + merge buffer 16.5 KB + mbarriers
 
 // ------------------------------------------------------------------------------------------------ attend
@@ -239,18 +403,29 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
   float* mrg = reinterpret_cast<float*>(smem + kMrgOff);
   const size_t layer_row = (size_t)layer * p.cache_rows;
   const int4 zero4 = make_int4(0, 0, 0, 0);
+  constexpr bool kMma = TMA && kMmaOn;
+#if SKV_TMA_MMA && (defined(SKV_DEBUG_WAIT) || defined(SKV_DEBUG_ALIGN))
+  if (TMA && threadIdx.x == 0 && (sbase & 1023u)) { printf("SKV_TMA_MMA: smem base %u is not 1024 B aligned\n", sbase); __trap(); }
+#endif
 
   // ---- TMA producer state (thread 0 only)
   int pk = -1, pp = 0, pend = 0, pkvh = 0;
   size_t prow = 0;
   int4 pnxt = zero4;
   auto produce = [&](int slot) {                               // issue the next stage of the CTA's flat stage sequence into `slot`
+#if SKV_IFACE == 2
+    while (pp >= pend) {                                       // (an empty range, only the owner of a 1-position piece, is skipped)
+#else
     if (pp >= pend) {
+#endif
       if (pk + 1 >= ni) return;
       ++pk;
       const int4 it = pnxt;
       pnxt = (pk + 1 < ni) ? rec[2 * (pk + 1)] : zero4;
       pp = it.z; pend = it.w; pkvh = it.y & 15; prow = layer_row + (size_t)it.x;
+#if SKV_IFACE == 2
+      if (it.w == rec[2 * pk + 1].w) --pend;                   // the piece ending at vis owns the new row: not written yet, the stream stops at vis - 1
+#endif
     }
     const int n = min(kStageRows, pend - pp);
     const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
@@ -260,8 +435,17 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
     for (int rs = 0; rs < kNumMaps; ++rs) {
       const int rows = kStageRows >> rs;
       if (n & rows) {
+#if SKV_TMA_MMA
+        const char* mk = (const char*)p.tmaps + (0 * kNumMaps + rs) * 128;   // swizzled maps, box 64 dims x 1 x rows: lo half (dims 0-63), hi half (64-127)
+        const char* mv = (const char*)p.tmaps + (1 * kNumMaps + rs) * 128;
+        tma3d(dst + off * 128, mk, 0, pkvh, rc, bar);
+        tma3d(dst + kHalfBytes + off * 128, mk, 64, pkvh, rc, bar);
+        tma3d(dst + 2 * kHalfBytes + off * 128, mv, 0, pkvh, rc, bar);
+        tma3d(dst + 3 * kHalfBytes + off * 128, mv, 64, pkvh, rc, bar);
+#else
         tma3d(dst + off * 256, (const char*)p.tmaps + (0 * kNumMaps + rs) * 128, 0, pkvh, rc, bar);
         tma3d(dst + kStageRows * 256 + off * 256, (const char*)p.tmaps + (1 * kNumMaps + rs) * 128, 0, pkvh, rc, bar);
+#endif
         off += rows; rc += rows;
       }
     }
@@ -301,28 +485,115 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
   // second record half (part_slot, S) is re-read from the record (L1 hit, issued before the merge) when the merge needs it.
   int4 ra = rec[0];
   uint4 qa, qb;
+#if SKV_IFACE == 2
+  static_assert(SKV_ITEM_PREFETCH == 0, "SKV_IFACE 2 does not support SKV_ITEM_PREFETCH");
+#endif
   if (SKV_ITEM_PREFETCH) {                                     // (prefetch 0: every item loads its own record, q and first K / V at the top of its iteration)
     load_q(ra, rec[1].z, qa, qb);
     if (!TMA && kPre) ldg_first(ra);
   }
 
   for (int k = 0; k < ni; ++k) {
+#if SKV_IFACE == 2
+    bool own;                                                  // this item ends at vis: it computes, uses and writes the new row (position vis - 1)
+    int tok, pos_new;
+    {
+      ra = rec[2 * k];
+      const int4 rv = rec[2 * k + 1];                           // {part_slot, S | n_items << 8, tok0, vis}
+      tok = rv.z; pos_new = rv.w - 1;
+      own = ra.w == rv.w;
+      if (own) --ra.w;                                         // stream range [p0, vis - 1)
+      if (!TMA && kPre) ldg_first(ra);
+    }
+#else
     if (!SKV_ITEM_PREFETCH) {
       ra = rec[2 * k];
       load_q(ra, rec[2 * k + 1].z, qa, qb);
       if (!TMA && kPre) ldg_first(ra);
     }
+#endif
     const int kvh = ra.y & 15, p0 = ra.z, p1 = ra.w;
     int4 na = zero4;
     int ntok = 0;
     uint4 nqa = make_uint4(0, 0, 0, 0), nqb = nqa;
     if (SKV_ITEM_PREFETCH && k + 1 < ni) { na = rec[2 * k + 2]; ntok = rec[2 * k + 3].z; }
     float q0[8], q1[8];
+    uint4 qpa = make_uint4(0, 0, 0, 0), qpb = qpa;                // mma consumer: raw bf16 q (dims l16 * 8 .. +7) of both heads, scale not applied
+#if SKV_IFACE == 2
+    uint4 vn1 = make_uint4(0, 0, 0, 0);                        // the new row's bf16 v and its two scores, in row slot 0's 16 lanes (warp 0), unused elsewhere
+    float sn0 = 0.f, sn1 = 0.f;
+    {
+      // q prep: all loads first, then both heads; q = bf16(norm + RoPE) * kQScale. cs / sn = rope row pos_new, dims (lane16 & 7) * 8 .. +7 (the partner dims share them)
+      const bool lo = l16 < 8;
+      const float* qrow = p.qkv + (size_t)tok * 4096 + (2 * kvh) * kDim + l16 * 8;
+      const float* rrow = p.rope + (size_t)pos_new * 128 + (l16 & 7) * 8;
+      float x0[8], x1[8], cs[8], sn[8];
+      ldg_f8(qrow, x0); ldg_f8(qrow + kDim, x1); ldg_f8(rrow, cs); ldg_f8(rrow + 64, sn);
+      const uint4 w = __ldcg(reinterpret_cast<const uint4*>(p.qn + layer * kDim + l16 * 8));
+      const float rr = __ldcg(p.rr1 + tok);
+      norm_rope8(x0, rr, w, cs, sn, lo, q0);
+      norm_rope8(x1, rr, w, cs, sn, lo, q1);
+      if (kMma) { qpa = pack8(q0); qpb = pack8(q1); }              // == bf16 bits of bfround(q) (pack8 rounds RNE like bfround)
+#pragma unroll
+      for (int j = 0; j < 8; ++j) { q0[j] = bfround(q0[j]) * kQScale; q1[j] = bfround(q1[j]) * kQScale; }
+      if (own && warp == 0) {                                  // new row (warp-uniform branch): lanes 0..15 = k (norm + RoPE), lanes 16..31 = v; each writes its 16 B of the cache row
+        const bool kl = lane < 16;
+        float xx[8], ko[8];
+        ldg_f8(p.qkv + (size_t)tok * 4096 + (kl ? 2048 : 3072) + kvh * kDim + l16 * 8, xx);
+        const uint4 kw = __ldcg(reinterpret_cast<const uint4*>(p.kn + layer * kDim + l16 * 8));
+        norm_rope8(xx, rr, kw, cs, sn, lo, ko);                 // (the v lanes' norm result is ignored)
+#pragma unroll
+        for (int j = 0; j < 8; ++j) xx[j] = kl ? ko[j] : xx[j] * rr;
+        const uint4 row = pack8(xx);
+        const size_t o = (((layer_row + (size_t)ra.x + pos_new) * kKvHeads + kvh) * kDim + l16 * 8) * 2;
+        *reinterpret_cast<uint4*>(const_cast<char*>(reinterpret_cast<const char*>(kl ? p.kc : p.vc)) + o) = row;
+        vn1.x = __shfl_xor_sync(0xffffffffu, row.x, 16); vn1.y = __shfl_xor_sync(0xffffffffu, row.y, 16);   // slot 0 (lanes 0..15) gets v from lane + 16
+        vn1.z = __shfl_xor_sync(0xffffffffu, row.z, 16); vn1.w = __shfl_xor_sync(0xffffffffu, row.w, 16);
+        score2(kl ? row : make_uint4(0, 0, 0, 0), q0, q1, sn0, sn1);   // all 32 lanes shuffle; lanes >= 16 are ignored
+        if (kMma && lane < 16) {                                 // mma consumer: park the new row's state (v, m = score per head, l = 1) for the end-of-item merge
+          float vf[8];
+          unpack8(vn1, vf);
+          float* nb = mrg + kMmaNew;
+          *reinterpret_cast<float4*>(nb + l16 * 8) = make_float4(vf[0], vf[1], vf[2], vf[3]);
+          *reinterpret_cast<float4*>(nb + l16 * 8 + 4) = make_float4(vf[4], vf[5], vf[6], vf[7]);
+          if (lane == 0) { nb[128] = sn0; nb[129] = sn1; }
+        }
+      }
+    }
+#else
+    qpa = qa; qpb = qb;
     unpack8(qa, q0); unpack8(qb, q1);
 #pragma unroll
     for (int j = 0; j < 8; ++j) { q0[j] *= kQScale; q1[j] *= kQScale; }
+#endif
     St st;
     st_init(st);
+    // ---- mma consumer state: S^T = K Q^T (positions x q-rows n = 2 * tok_local + hq; q_len == 1: n = 0, 1 real, rest zero), O^T = V^T P^T
+    float mr0 = neg_inf(), mr1 = neg_inf(), lp0 = 0.f, lp1 = 0.f;   // running max (cols 2c, 2c+1 of this thread) and per-thread partial column sums of p
+    float oacc[kMmaMt][4];
+    if (kMma) {
+#pragma unroll
+      for (int i = 0; i < kMmaMt; ++i) oacc[i][0] = oacc[i][1] = oacc[i][2] = oacc[i][3] = 0.f;
+      // q -> per-item scratch (all warps store identical bytes; each warp reads back after its own __syncwarp), then B fragments: thread (g, c), g < 2 = q-head g
+      const unsigned qsa = smaddr(mrg + kMmaQs);
+      if (lane < 16) {
+        unsigned* qw = reinterpret_cast<unsigned*>(mrg + kMmaQs);
+        qw[mma_q_word(l16, 0)] = qpa.x; qw[mma_q_word(l16, 1)] = qpa.y; qw[mma_q_word(l16, 2)] = qpa.z; qw[mma_q_word(l16, 3)] = qpa.w;
+        qw[64 + mma_q_word(l16, 0)] = qpb.x; qw[64 + mma_q_word(l16, 1)] = qpb.y; qw[64 + mma_q_word(l16, 2)] = qpb.z; qw[64 + mma_q_word(l16, 3)] = qpb.w;
+      }
+      __syncwarp();
+    }
+#if SKV_IFACE == 2
+    if (own && !kMma) {                                                  // the new position first (online softmax is order-free): row slot 0 starts from that single position
+      float vf[8];                                              // (= one step<1> from the empty state: m = score, l = 1, o = v; slot 0 keeps the result)
+      unpack8(vn1, vf);
+      if (r == 0) {
+        st.m0 = sn0; st.m1 = sn1; st.l0 = st.l1 = 1.f;
+#pragma unroll
+        for (int j = 0; j < 8; ++j) st.o0[j] = st.o1[j] = vf[j];
+      }
+    }
+#endif
     const int len = p1 - p0;
     if (!TMA) {
       // ---- LDG engine: slot r takes positions p0 + r + 32 j; 4 positions per step -> 8 LDG.128 in flight
@@ -392,6 +663,76 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
         mb_wait(bar0 + 8 * slot, par);
 #endif
         const int n = min(kStageRows, len - j * kStageRows);
+        if (kMma) {
+          // warp: tile (warp % kMmaT) = positions tb .. tb + 15 of the stage, dim slice dh. K loads + QK^T, softmax, V loads (slot released after the last), PV.
+          const int tb = (warp % kMmaT) * 16, dh = warp / kMmaT;
+          const unsigned sb = sbase + kRingOff + slot * kStageBytes;
+          const bool live = tb < n, partial = tb + 16 > n;       // warp-uniform: tile has >= 1 valid position / has invalid tail positions
+          unsigned kdep = 0, pb0 = 0, pb1 = 0;
+          const unsigned qsa = smaddr(mrg + kMmaQs) + mma_q_off(lane, 0);
+          const unsigned j32 = mma_j32(lane), kb = sb + mma_k_base(lane, tb), vb = sb + mma_v_base(lane, tb);
+          if (live) {
+            float sa[4] = {0.f, 0.f, 0.f, 0.f}, sb2[4] = {0.f, 0.f, 0.f, 0.f};   // QK^T: two accumulation chains (even / odd k-steps)
+#pragma unroll
+            for (int ks = 0; ks < 8; ++ks) {                     // K fragments just in time (register pressure: 128-reg cap)
+              unsigned k0[4];
+              ldsm4(k0, kb + mma_k_term(ks, j32, kHalfBytes));
+              uint2 qb0 = make_uint2(0u, 0u);                    // Q^T B fragment re-read from the scratch every stage (16 fewer live registers); q-rows >= 2 are zero
+              if ((lane >> 2) < 2) qb0 = lds64(qsa + ks * 32);
+              hmma16816((ks & 1) ? sb2 : sa, k0, qb0.x, qb0.y);  // two accumulation chains (even / odd k-steps)
+              kdep ^= k0[0];
+            }
+            float s0 = sa[0] + sb2[0], s1 = sa[1] + sb2[1], s2 = sa[2] + sb2[2], s3 = sa[3] + sb2[3];   // (row g: s0, s1; row g + 8: s2, s3) x (cols 2c, 2c + 1)
+            if (partial) {
+              // TODO(R6, P5): causal mask per q column (pos > vis_t - 1 -> -inf, column n = 2 * tok + hq) goes here as well; q_len == 1 has only the tail mask.
+              const int pos = tb + (lane >> 2);
+              if (pos >= n) { s0 = neg_inf(); s1 = neg_inf(); }
+              if (pos + 8 >= n) { s2 = neg_inf(); s3 = neg_inf(); }
+            }
+            // online softmax per column (q-row): max over the tile = own 2 rows, then xor 4, 8, 16 (lanes sharing c); kQScale (> 0) is applied to the fp32 scores
+            float c0 = fmaxf(s0, s2), c1 = fmaxf(s1, s3);
+#pragma unroll
+            for (int o = 4; o <= 16; o <<= 1) { c0 = fmaxf(c0, __shfl_xor_sync(0xffffffffu, c0, o)); c1 = fmaxf(c1, __shfl_xor_sync(0xffffffffu, c1, o)); }
+            const float n0 = fmaxf(mr0, c0 * kQScale), n1 = fmaxf(mr1, c1 * kQScale);   // finite: the tile has a valid position
+            const float a0 = ex2(mr0 - n0), a1 = ex2(mr1 - n1);
+            mr0 = n0; mr1 = n1;
+            const float p0 = ex2(fmaf(s0, kQScale, -n0)), p1 = ex2(fmaf(s1, kQScale, -n1)), p2 = ex2(fmaf(s2, kQScale, -n0)), p3 = ex2(fmaf(s3, kQScale, -n1));
+            // l: per-thread partial column sums of fp32 p (rescaled with the max), reduced over the 8 row groups once per item (cheaper than a ones-column HMMA or 6 shuffles per tile)
+            lp0 = fmaf(lp0, a0, p0 + p2); lp1 = fmaf(lp1, a1, p1 + p3);
+            // one O rescale per tile (each warp has exactly one tile per stage), skipped when no real column (c == 0 lanes: q-rows 0, 1) changed its max
+            if (__any_sync(0xffffffffu, (lane & 3) == 0 && (a0 != 1.f || a1 != 1.f))) {
+#pragma unroll
+              for (int mt = 0; mt < kMmaMt; ++mt) { oacc[mt][0] *= a0; oacc[mt][1] *= a1; oacc[mt][2] *= a0; oacc[mt][3] *= a1; }
+            }
+            pb0 = movm_t(pack_bf16x2(p0, p1)); pb1 = movm_t(pack_bf16x2(p2, p3));   // C (rows pos g / g + 8) -> B (k = pos 2c.., n = g)
+          }
+          // PV: V A-fragments in groups of kMmaG m-tiles (register pressure); the slot is released after the last group's loads
+#pragma unroll
+          for (int g0 = 0; g0 < kMmaMt; g0 += kMmaG) {
+            unsigned vf[kMmaG][4];
+            if (live) {
+#pragma unroll
+              for (int gi = 0; gi < kMmaG; ++gi) ldsm4t(vf[gi], vb + mma_v_term(dh * kMmaMt + g0 + gi, j32, kHalfBytes));
+              if (partial) {
+                // V rows beyond n are stale / uninitialised smem: p is exactly 0 there but 0 * NaN would not be: zero the A-fragment halves (k = positions 2c, 2c + 1 (+ 8))
+                const int k0 = tb + 2 * (lane & 3);
+                const unsigned m01 = (k0 < n ? 0xffffu : 0u) | (k0 + 1 < n ? 0xffff0000u : 0u), m23 = (k0 + 8 < n ? 0xffffu : 0u) | (k0 + 9 < n ? 0xffff0000u : 0u);
+#pragma unroll
+                for (int gi = 0; gi < kMmaG; ++gi) { vf[gi][0] &= m01; vf[gi][1] &= m01; vf[gi][2] &= m23; vf[gi][3] &= m23; }
+              }
+            }
+#if SKV_TMA_RELEASE
+            if (g0 + kMmaG >= kMmaMt) {
+              __syncwarp();                                      // all of this warp's ldmatrix are issued above (program order); the arrive's release orders them before the refill
+              if (lane == 0) mb_arrive_dep(bar0 + 8 * (kStages + slot), kdep ^ (live ? vf[0][0] : 0u));
+            }
+#endif
+            if (live) {
+#pragma unroll
+              for (int gi = 0; gi < kMmaG; ++gi) hmma16816(oacc[g0 + gi], vf[gi], pb0, pb1);
+            }
+          }
+        } else {
         uint4 kk[kU], vv[kU];
         bool valid[kU];
         const unsigned sa = sbase + kRingOff + slot * kStageBytes + r * 256 + l16 * 16;
@@ -410,6 +751,7 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
         if (lane == 0) mb_arrive_dep(bar0 + 8 * (kStages + slot), dep);
 #endif
         step<kU>(st, q0, q1, kk, vv, valid);
+        }
 #if SKV_TMA_RELEASE
         if (tid == 0) { mb_wait(bar0 + 8 * (kStages + slot), par); produce(slot); }   // all 16 warps have read stage g: slot is free for stage g + kStages
         __syncwarp();
@@ -420,9 +762,23 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
       }
     }
     if (TMA && SKV_ITEM_PREFETCH && k + 1 < ni) load_q(na, ntok, nqa, nqb);
-    const int4 rb = rec[2 * k + 1];                             // {part_slot, S, tok0, n_items}
+    const int4 rb = rec[2 * k + 1];                             // {part_slot, S [| n_items << 8 in iface 2], tok0, n_items | vis}
     // ---- end of item: xor-16 merge inside the warp, 16 warp states through smem, partial / normalised store
     {
+      if (kMma) {
+        float l0 = lp0, l1 = lp1;                                // column sums over the 8 row groups (lanes sharing c)
+#pragma unroll
+        for (int o = 4; o <= 16; o <<= 1) { l0 += __shfl_xor_sync(0xffffffffu, l0, o); l1 += __shfl_xor_sync(0xffffffffu, l1, o); }
+        float* ws = mrg + (warp * 2) * kMmaMS;                   // slot (warp, hq): O^T dims of this warp (local index), m, l
+        if ((lane & 3) == 0) {                                   // lanes holding q-rows 0 / 1 (cols 2c, 2c + 1 with c == 0)
+#pragma unroll
+          for (int mt = 0; mt < kMmaMt; ++mt) {
+            const int ld = mt * 16 + (lane >> 2);
+            ws[ld] = oacc[mt][0]; ws[kMmaMS + ld] = oacc[mt][1]; ws[ld + 8] = oacc[mt][2]; ws[kMmaMS + ld + 8] = oacc[mt][3];
+          }
+        }
+        if (lane == 0) { ws[kMmaDW] = mr0; ws[kMmaDW + 1] = l0; ws[kMmaMS + kMmaDW] = mr1; ws[kMmaMS + kMmaDW + 1] = l1; }
+      } else {
       float m, l, o[8], m2, l2, o2[8];
       m = st.m0; l = st.l0; m2 = __shfl_xor_sync(0xffffffffu, m, 16); l2 = __shfl_xor_sync(0xffffffffu, l, 16);
 #pragma unroll
@@ -444,23 +800,53 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
         *reinterpret_cast<float4*>(d1 + l16 * 8 + 4) = make_float4(o[4], o[5], o[6], o[7]);
         if (lane == 0) { d1[128] = m; d1[129] = l; }
       }
+      }
     }
     __syncthreads();
     if (tid < 256) {
       const int hq = tid >> 7, d = tid & 127;
+      float M, L, O;
+      if (kMma) {
+        // dims d are owned by the kMmaT warps dh * kMmaT + t (tiles t = disjoint position sets); their m / l / O slots are merged, plus the new row (iface 2 owner)
+        const int dh = d / kMmaDW;
+        const float* b = mrg + (dh * kMmaT * 2 + hq) * kMmaMS;
+        const float* nb = mrg + kMmaNew;
+        M = neg_inf();
+#if SKV_IFACE == 2
+        if (own) M = nb[128 + hq];
+#endif
+#pragma unroll
+        for (int t = 0; t < kMmaT; ++t) M = fmaxf(M, b[t * 2 * kMmaMS + kMmaDW]);
+        const float Mc = M == neg_inf() ? 0.f : M;
+        L = 0.f; O = 0.f;
+#pragma unroll
+        for (int t = 0; t < kMmaT; ++t) {
+          const float a = ex2(b[t * 2 * kMmaMS + kMmaDW] - Mc);
+          L = fmaf(a, b[t * 2 * kMmaMS + kMmaDW + 1], L);
+          O = fmaf(a, b[t * 2 * kMmaMS + (d - dh * kMmaDW)], O);
+        }
+#if SKV_IFACE == 2
+        if (own) { const float a = ex2(nb[128 + hq] - Mc); L += a; O = fmaf(a, nb[d], O); }
+#endif
+      } else {
       const float* b = mrg + hq * kPartStride;
-      float M = neg_inf();
+      M = neg_inf();
 #pragma unroll
       for (int w = 0; w < 16; ++w) M = fmaxf(M, b[w * 2 * kPartStride + 128]);
       const float Mc = M == neg_inf() ? 0.f : M;
-      float L = 0.f, O = 0.f;
+      L = 0.f; O = 0.f;
 #pragma unroll
       for (int w = 0; w < 16; ++w) {
         const float a = ex2(b[w * 2 * kPartStride + 128] - Mc);
         L = fmaf(a, b[w * 2 * kPartStride + 129], L);
         O = fmaf(a, b[w * 2 * kPartStride + d], O);
       }
+      }
+#if SKV_IFACE == 2
+      if ((rb.y & 255) == 1) {
+#else
       if (rb.y == 1) {
+#endif
         p.ao[(size_t)rb.z * (kQHeads * kDim) + (2 * kvh + hq) * kDim + d] = f2bf(O / L);
       } else {
         float* dst = p.part + ((size_t)rb.x * 2 + hq) * kPartStride;     // rb.x = part_base + split
@@ -469,9 +855,327 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
       }
     }
     __syncthreads();                                            // merge buffer free for the next item
+#if SKV_TICKET
+    // S > 1: the partial stores of every thread precede this barrier; thread 0's fence + release add publish them (cumulatively) on the pair's ticket. Nothing waits here.
+    if (tid == 0 && rec_splits(rb) > 1) { __threadfence(); red_release_gpu(p.tickets + ticket_pair(ra.y)); }
+#endif
     if (SKV_ITEM_PREFETCH) { ra = na; qa = nqa; qb = nqb; }
   }
 }
+
+#if SKV_QMAX > 1
+// ------------------------------------------------------------------------------------------------ R6: multi-token causal decode (SKV_QMAX > 1)
+// Two-phase mma.sync consumer for the TMA ring (64-position stages, R = 64, T = R / 16 = 4 position tiles). q-rows (columns) n = 2 t + hq (token t of the sequence, q-head hq of the
+// GQA pair), N = 2 q_len <= 2 QMAX, kRNT n-tiles of 8 columns (compile time; columns >= 2 q_len hold q = 0 and see no position: never stored).
+//   Phase A (S^T = K Q^T), task (position tile tt, n-tile nt): warp w -> tt = w % 4, nt = w / 4 when kRNT == 4 (one task per warp); kRNT 2: warps with w % 8 < 4 (nt = w / 8);
+//           kRNT 1: warps 0..3. (Deviation from "idle warps >= T * NT" for kRNT < 4: the task's n-tile must lie in the same warp's phase-B n-tile set so that running m / l need no
+//           cross-warp traffic.) 8 k-steps of ldmatrix.x4 K x q B fragment (ldmatrix of the swizzled q staging), 2 accumulation chains. Column max over the tile -> colmax[g & 1][tt][n].
+//   barrier 0; every phase-B warp: stage max over the 4 tiles, running m_n, alpha_n; phase-A warps: p = ex2(s kQScale - m_n), fp32 column sums -> lsum[tt][n], P^T (bf16, via movmatrix) -> P[n][pos].
+//   barrier 0; Phase B (O^T += V^T P^T): warp w owns dims (w % 8) * 16 .. +15 and n-tiles nb0 .. nb0 + kRNTB - 1 (nb0 = (w / 8) kRNTB; kRNT 1: warps 8..15 idle); rescale by alpha, l_n = l_n alpha_n +
+//           sum_tt lsum[tt][n], 4 k-steps of V^T (ldmatrix.x4.trans) x P^T (ldmatrix from P[n][pos]). The ring slot is released (16 warp arrivals, idle warps too) after the last V ldmatrix.
+//   Single-buffered P and lsum: stage s's writes (after barrier 1 of s) are read only in phase B of s (after barrier 2 of s); stage s + 1 writes them only after barrier 1 of s + 1, which no
+//   warp passes before every warp has finished phase B of s (program order + barrier). colmax is written before barrier 1 and read between barriers 1 and 2; parity g & 1 double-buffers it.
+//   q staging is per item (all 512 threads, one 16 B chunk each, then one __syncthreads); it is rewritten after the last stage of the previous item, whose barrier 2 follows every read of q (phase A).
+//   No cross-warp merge at the end of an item: each B warp stores its 16 dims x its columns (S == 1: normalised bf16 into ao, else partial o (unnormalised w.r.t. m), m, l at part slot + t S).
+constexpr int kRNT = SKV_QMAX <= 4 ? 1 : (SKV_QMAX <= 8 ? 2 : 4);   // n-tiles of 8 columns (ceil(2 QMAX / 8), rounded up to a power of 2)
+constexpr int kRN8 = kRNT * 8;
+constexpr int kRNTB = kRNT >= 2 ? kRNT / 2 : 1;                      // n-tiles per phase-B warp
+constexpr int kRT = 4;                                               // position tiles per stage
+constexpr int kRQo = 0, kRCMo = kRN8 * 256, kRLSo = kRCMo + 2 * kRT * kRN8 * 4, kRPo = kRLSo + kRT * kRN8 * 4, kREnd = kRPo + kRN8 * 128;   // byte offsets in the merge buffer
+static_assert(kRNT * 8 >= 2 * SKV_QMAX, "R6 n-tiles");
+static_assert(kREnd <= kMrgBytes, "R6 staging must fit in the merge buffer (kMrgBytes)");
+static_assert(kStageRows == 64 && kMmaOn && SKV_IFACE == 1 && SKV_TMA_RELEASE == 1 && SKV_PROF_NOCOMP == 0 && SKV_ITEM_PREFETCH == 0 && SKV_FORCE_ENGINE != 0,
+              "SKV_QMAX > 1 needs SKV_STAGE_ROWS 64, SKV_TMA_MMA 1, SKV_IFACE 1, SKV_TMA_RELEASE 1, the TMA engine");
+static_assert(kStages * kStageBytes + kMrgBytes <= 147968, "R6 smem must not grow past the default");
+
+__device__ __forceinline__ void run_items_r6(const Params& p, int layer, unsigned char* smem, unsigned& g, const int4* rec, int ni) {
+  const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, g8 = lane >> 2, c4 = lane & 3;
+  const unsigned sbase = smaddr(smem), bar0 = sbase + kBarOff, mrga = sbase + kMrgOff;
+  unsigned char* mrgb = smem + kMrgOff;
+  const size_t layer_row = (size_t)layer * p.cache_rows;
+  const int4 zero4 = make_int4(0, 0, 0, 0);
+
+  // ---- TMA producer state (thread 0 only): as the mma consumer of run_items (interface v1)
+  int pk = -1, pp = 0, pend = 0, pkvh = 0;
+  size_t prow = 0;
+  int4 pnxt = zero4;
+  auto produce = [&](int slot) {
+    if (pp >= pend) {
+      if (pk + 1 >= ni) return;
+      ++pk;
+      const int4 it = pnxt;
+      pnxt = (pk + 1 < ni) ? rec[2 * (pk + 1)] : zero4;
+      pp = it.z; pend = it.w; pkvh = it.y & 15; prow = layer_row + (size_t)it.x;
+    }
+    const int n = min(kStageRows, pend - pp);
+    const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
+    mb_expect(bar, (unsigned)n * 512u);
+    int off = 0, rc = (int)(prow + pp);
+#pragma unroll
+    for (int rs = 0; rs < kNumMaps; ++rs) {
+      const int rows = kStageRows >> rs;
+      if (n & rows) {
+        const char* mk = (const char*)p.tmaps + (0 * kNumMaps + rs) * 128;
+        const char* mv = (const char*)p.tmaps + (1 * kNumMaps + rs) * 128;
+        tma3d(dst + off * 128, mk, 0, pkvh, rc, bar);
+        tma3d(dst + kHalfBytes + off * 128, mk, 64, pkvh, rc, bar);
+        tma3d(dst + 2 * kHalfBytes + off * 128, mv, 0, pkvh, rc, bar);
+        tma3d(dst + 3 * kHalfBytes + off * 128, mv, 64, pkvh, rc, bar);
+        off += rows; rc += rows;
+      }
+    }
+    pp += n;
+  };
+  if (tid == 0) {
+    pnxt = rec[0];
+#pragma unroll
+    for (int s = 0; s < kStages; ++s) produce((g + s) % kStages);
+  }
+
+  // ---- warp roles (see the header comment)
+  const int tt = warp & 3, tb = tt * 16;
+  const int nb0 = kRNT >= 2 ? (warp >> 3) * kRNTB : 0;               // first n-tile of this warp's phase B
+  const int la = kRNTB == 2 ? ((warp >> 2) & 1) : 0;                 // index of the phase-A n-tile inside the phase-B set
+  const int nta = nb0 + la;                                          // phase-A n-tile
+  const bool aact = kRNT == 4 ? true : (kRNT == 2 ? (warp & 7) < 4 : warp < 4);
+  const bool bact = kRNT >= 2 ? true : warp < 8;
+  const unsigned j32 = mma_j32(lane);
+  const unsigned qa = mrga + kRQo + r6_q_base(lane, nta), qxv = r6_q_xv(lane);
+  const unsigned pa = mrga + kRPo + r6_p_base(lane, nb0, kRNTB), pxp = r6_p_xp(lane);
+  const unsigned pst = mrga + kRPo + r6_p_off(nta * 8 + g8, 2 * tt) + c4 * 4;     // P^T store of this thread (second 8 positions: r6_p_off chunk 2 tt + 1)
+  const unsigned pst1 = mrga + kRPo + r6_p_off(nta * 8 + g8, 2 * tt + 1) + c4 * 4;
+  float* cmb = reinterpret_cast<float*>(mrgb + kRCMo);
+  float* lsb = reinterpret_cast<float*>(mrgb + kRLSo);
+
+  for (int k = 0; k < ni; ++k) {
+    const int4 ra = rec[2 * k], rv = rec[2 * k + 1];               // {row_base, y, p0, p1}, {part_slot, S, tok0, n_items}
+    const int kvh = ra.y & 15, p0 = ra.z, len = ra.w - ra.z, ql = ((ra.y >> 24) & 15) + 1, tok0 = rv.z, S = rv.y;
+    const int vis0 = p.pair_info[(tok0 * kKvHeads + kvh) * 4 + 3];  // vis of token 0 (kv_len + 1); token t sees kv_len + t + 1 positions
+    // q staging: row n = 2 t + hq, 16 chunks of 8 dims; rows >= 2 ql are zero
+    for (int i = tid; i < kRN8 * 16; i += kBlock) {
+      const int n = i >> 4, c = i & 15;
+      uint4 v = make_uint4(0, 0, 0, 0);
+      if (n < 2 * ql) v = ldg_cg4(p.q + ((size_t)(tok0 + (n >> 1)) * kQHeads + 2 * kvh + (n & 1)) * kDim + c * 8);
+      *reinterpret_cast<uint4*>(mrgb + kRQo + r6_q_off(n, c)) = v;
+    }
+    __syncthreads();
+    float mrun[kRNTB][2], lrun[kRNTB][2], oacc[kRNTB][4], alpha[kRNTB][2];
+#pragma unroll
+    for (int i = 0; i < kRNTB; ++i) {
+      mrun[i][0] = mrun[i][1] = neg_inf(); lrun[i][0] = lrun[i][1] = 0.f; alpha[i][0] = alpha[i][1] = 1.f;
+      oacc[i][0] = oacc[i][1] = oacc[i][2] = oacc[i][3] = 0.f;
+    }
+    const int ns = (len + kStageRows - 1) / kStageRows;
+    for (int j = 0; j < ns; ++j, ++g) {
+      const int slot = g % kStages;
+      const unsigned par = (g / kStages) & 1;
+#ifdef SKV_DEBUG_WAIT
+      mb_wait_dbg(bar0 + 8 * slot, par, layer, g, k, j);
+#else
+      mb_wait(bar0 + 8 * slot, par);
+#endif
+      const int n = min(kStageRows, len - j * kStageRows);          // valid positions of the stage (stage-relative positions >= n are stale smem)
+      const unsigned sb = sbase + kRingOff + slot * kStageBytes;
+      float* cm = cmb + (g & 1) * (kRT * kRN8);
+      unsigned kdep = 0;
+      float s0 = 0.f, s1 = 0.f, s2 = 0.f, s3 = 0.f;
+      // ---- phase A: scores of tile tt x n-tile nta (rows g8 / g8 + 8 positions, columns 2 c4, 2 c4 + 1 = tokens nta * 4 + c4, heads 0 / 1)
+      if (aact) {
+        float sa[4] = {0.f, 0.f, 0.f, 0.f}, sb2[4] = {0.f, 0.f, 0.f, 0.f};
+        const unsigned kb = sb + mma_k_base(lane, tb);
+#pragma unroll
+        for (int jj = 0; jj < 4; ++jj) {
+          unsigned qf[4];
+          ldsm4(qf, qa + r6_q_term(jj, qxv));
+#pragma unroll
+          for (int h = 0; h < 2; ++h) {
+            const int ks = 2 * jj + h;
+            unsigned k0[4];
+            ldsm4(k0, kb + mma_k_term(ks, j32, kHalfBytes));
+            hmma16816((ks & 1) ? sb2 : sa, k0, qf[2 * h], qf[2 * h + 1]);
+            kdep ^= k0[0];
+          }
+        }
+        s0 = sa[0] + sb2[0]; s1 = sa[1] + sb2[1]; s2 = sa[2] + sb2[2]; s3 = sa[3] + sb2[3];
+        // mask: tail (stage position >= n) and causal (absolute position >= vis_t); columns of tokens >= q_len see nothing
+        const int ta = nta * 4 + c4;
+        const int cut = min(n, (ta < ql ? vis0 + ta : 0) - (p0 + j * kStageRows));
+        const int pos = tb + g8;
+        if (pos >= cut) { s0 = neg_inf(); s1 = neg_inf(); }
+        if (pos + 8 >= cut) { s2 = neg_inf(); s3 = neg_inf(); }
+        float c0 = fmaxf(s0, s2), c1 = fmaxf(s1, s3);               // raw (unscaled) scores: kQScale > 0 commutes with max
+#pragma unroll
+        for (int o = 4; o <= 16; o <<= 1) { c0 = fmaxf(c0, __shfl_xor_sync(0xffffffffu, c0, o)); c1 = fmaxf(c1, __shfl_xor_sync(0xffffffffu, c1, o)); }
+        if (lane < 4) *reinterpret_cast<float2*>(cm + tt * kRN8 + nta * 8 + 2 * c4) = make_float2(c0, c1);
+      }
+      __syncthreads();
+      // ---- running max / alpha of the phase-B columns (all-masked columns keep m = -inf with alpha = 1)
+      if (bact) {
+#pragma unroll
+        for (int i = 0; i < kRNTB; ++i) {
+          float mx0 = neg_inf(), mx1 = neg_inf();
+#pragma unroll
+          for (int u = 0; u < kRT; ++u) {
+            const float2 v = *reinterpret_cast<const float2*>(cm + u * kRN8 + (nb0 + i) * 8 + 2 * c4);
+            mx0 = fmaxf(mx0, v.x); mx1 = fmaxf(mx1, v.y);
+          }
+          const float n0 = fmaxf(mrun[i][0], mx0 * kQScale), n1 = fmaxf(mrun[i][1], mx1 * kQScale);
+          alpha[i][0] = n0 == neg_inf() ? 1.f : ex2(mrun[i][0] - n0);
+          alpha[i][1] = n1 == neg_inf() ? 1.f : ex2(mrun[i][1] - n1);
+          mrun[i][0] = n0; mrun[i][1] = n1;
+        }
+      }
+      // ---- phase A, second half: p, column sums, P^T
+      if (aact) {
+        float ma0 = mrun[0][0], ma1 = mrun[0][1];
+        if (kRNTB == 2 && la) { ma0 = mrun[1][0]; ma1 = mrun[1][1]; }
+        const float f0 = ma0 == neg_inf() ? 0.f : ma0, f1 = ma1 == neg_inf() ? 0.f : ma1;
+        const float e0 = ex2(fmaf(s0, kQScale, -f0)), e1 = ex2(fmaf(s1, kQScale, -f1)), e2 = ex2(fmaf(s2, kQScale, -f0)), e3 = ex2(fmaf(s3, kQScale, -f1));
+        float l0 = e0 + e2, l1 = e1 + e3;
+#pragma unroll
+        for (int o = 4; o <= 16; o <<= 1) { l0 += __shfl_xor_sync(0xffffffffu, l0, o); l1 += __shfl_xor_sync(0xffffffffu, l1, o); }
+        if (lane < 4) *reinterpret_cast<float2*>(lsb + tt * kRN8 + nta * 8 + 2 * c4) = make_float2(l0, l1);
+        sts32(pst, movm_t(pack_bf16x2(e0, e1)));                      // C (rows pos g8, columns 2 c4..) -> (n = g8, positions 2 c4, 2 c4 + 1) of P[n][pos]
+        sts32(pst1, movm_t(pack_bf16x2(e2, e3)));                     // positions tb + 8 ..
+      }
+      __syncthreads();
+      // ---- phase B
+      unsigned vdep = 0;
+      if (bact) {
+#pragma unroll
+        for (int i = 0; i < kRNTB; ++i) {
+          float t0 = 0.f, t1 = 0.f;
+#pragma unroll
+          for (int u = 0; u < kRT; ++u) {
+            const float2 v = *reinterpret_cast<const float2*>(lsb + u * kRN8 + (nb0 + i) * 8 + 2 * c4);
+            t0 += v.x; t1 += v.y;
+          }
+          lrun[i][0] = fmaf(lrun[i][0], alpha[i][0], t0); lrun[i][1] = fmaf(lrun[i][1], alpha[i][1], t1);
+          oacc[i][0] *= alpha[i][0]; oacc[i][1] *= alpha[i][1]; oacc[i][2] *= alpha[i][0]; oacc[i][3] *= alpha[i][1];
+        }
+#pragma unroll
+        for (int ks = 0; ks < kRT; ++ks) {
+          unsigned vf[4], pf[4] = {0u, 0u, 0u, 0u};
+          ldsm4t(vf, sb + mma_v_base(lane, ks * 16) + mma_v_term(warp & 7, j32, kHalfBytes));
+          if (kRNTB == 2) ldsm4(pf, pa + r6_p_term(ks, pxp)); else ldsm2(pf[0], pf[1], pa + r6_p_term(ks, pxp));
+          if (n < kStageRows) {                                       // V rows beyond n are stale smem (0 * NaN): zero the A-fragment halves of positions >= n
+            const int kk = ks * 16 + 2 * c4;
+            const unsigned m01 = (kk < n ? 0xffffu : 0u) | (kk + 1 < n ? 0xffff0000u : 0u), m23 = (kk + 8 < n ? 0xffffu : 0u) | (kk + 9 < n ? 0xffff0000u : 0u);
+            vf[0] &= m01; vf[1] &= m01; vf[2] &= m23; vf[3] &= m23;
+          }
+          vdep ^= vf[0];
+#pragma unroll
+          for (int i = 0; i < kRNTB; ++i) hmma16816(oacc[i], vf, pf[2 * i], pf[2 * i + 1]);
+        }
+      }
+      __syncwarp();                                                   // this warp's ldmatrix of the slot (K in phase A, V in phase B) are all issued above
+      if (lane == 0) mb_arrive_dep(bar0 + 8 * (kStages + slot), kdep ^ vdep);
+      if (tid == 0) { mb_wait(bar0 + 8 * (kStages + slot), par); produce(slot); }   // all 16 warps released stage g: refill the slot with stage g + kStages
+      __syncwarp();
+    }
+    // ---- end of item: each phase-B warp stores its 16 dims x its columns. S == 1: normalised bf16 into ao; else (o, m, l) at slot part_slot + t S
+    if (bact) {
+      const int dm = (warp & 7) * 16 + g8;
+#pragma unroll
+      for (int i = 0; i < kRNTB; ++i) {
+        const int t = (nb0 + i) * 4 + c4;                             // token of this thread's columns 2 c4 (head 0), 2 c4 + 1 (head 1)
+        if (t < ql) {
+#pragma unroll
+          for (int hq = 0; hq < 2; ++hq) {
+            if (S == 1) {
+              bf16* dst = p.ao + (size_t)(tok0 + t) * (kQHeads * kDim) + (2 * kvh + hq) * kDim + dm;
+              const float inv = 1.f / lrun[i][hq];
+              dst[0] = f2bf(oacc[i][hq] * inv); dst[8] = f2bf(oacc[i][2 + hq] * inv);
+            } else {
+              float* dst = p.part + ((size_t)(rv.x + t * S) * 2 + hq) * kPartStride;
+              __stcg(dst + dm, oacc[i][hq]); __stcg(dst + dm + 8, oacc[i][2 + hq]);
+              if ((warp & 7) == 0 && g8 == 0) { __stcg(dst + 128, mrun[i][hq]); __stcg(dst + 129, lrun[i][hq]); }
+            }
+          }
+        }
+      }
+    }
+#if SKV_TICKET
+    if (S > 1) {                                                      // S is CTA-uniform: all warps' partial stores precede the barrier, then thread 0 publishes them
+      __syncthreads();
+      if (tid == 0) { __threadfence(); red_release_gpu(p.tickets + ticket_pair(ra.y)); }
+    }
+#endif
+  }
+}
+#endif  // SKV_QMAX > 1
+
+#if SKV_TICKET
+// ------------------------------------------------------------------------------------------------ SKV_TICKET: deferred last-arriver merge
+// Contract: tickets[pair] (pair = seq * 8 + kvh) is zeroed once per plan and never reset. Every S > 1 item adds 1 (release, gpu scope) after its partial store, so a layer adds exactly S
+// to its pair's counter. Layers (and steps) are separated by the caller's grid barrier, so a read at the end of layer l sees no adds of layer l + 1: count % S == 0 iff all S items of
+// layer l have arrived (count > 0 because the reader's own CTA added before reading). After its last item every CTA re-reads its S > 1 records, and one thread per item does ld.acquire.gpu
+// of the ticket: complete iff count % S == 0. A pair may be merged by several CTAs: they compute identical values (same inputs, same order), so the duplicate bf16 stores are benign.
+// At least one CTA sees a pair complete: each CTA's read follows its own add (barrier + program order) and RMWs on one address are totally ordered, so the CTA that issued the last add of the
+// layer observes all S. (count is u32 and wraps after 2^32 / S layer-steps; 2^32 % S != 0 for S not a power of 2, hence re-zero per plan.) Zero the tickets again whenever the plan changes.
+// Merge: 256 threads per (pair, token row): hq = t >> 7, dim d = t & 127; the two 256-thread halves of the CTA take alternate units. Same math as merge_th (max, weights, sum).
+constexpr int kTkChunk = 16;                                          // o loads in flight per round (S <= 32 = planner smax: at most 2 rounds)
+__device__ __forceinline__ void ticket_merge_unit(const Params& p, int slot0, int S, int hq, int d, bf16* dst) {
+  constexpr int SS = 2 * kPartStride;
+  const float* base = p.part + ((size_t)slot0 * 2 + hq) * kPartStride;     // split s at base + s * SS
+  float2 ml[32];
+#pragma unroll
+  for (int c = 0; c < 32; ++c) ml[c] = c < S ? __ldcg(reinterpret_cast<const float2*>(base + c * SS + 128)) : make_float2(neg_inf(), 0.f);
+  float o[kTkChunk];
+#pragma unroll
+  for (int c = 0; c < kTkChunk; ++c) o[c] = c < S ? __ldcg(base + c * SS + d) : 0.f;
+  float M = neg_inf();
+#pragma unroll
+  for (int c = 0; c < 32; ++c) M = fmaxf(M, ml[c].x);
+  float w[32], L = 0.f;
+#pragma unroll
+  for (int c = 0; c < 32; ++c) { w[c] = ex2(ml[c].x - M); L = fmaf(w[c], ml[c].y, L); }
+  float a = 0.f;
+#pragma unroll
+  for (int c = 0; c < kTkChunk; ++c) a = fmaf(w[c], o[c], a);
+  if (S > kTkChunk) {                                                  // S 17..32 (planner smax 32): second round (compile-time indices: no local memory)
+#pragma unroll
+    for (int c = 0; c < kTkChunk; ++c) o[c] = kTkChunk + c < S ? __ldcg(base + (kTkChunk + c) * SS + d) : 0.f;
+#pragma unroll
+    for (int c = 0; c < kTkChunk; ++c) a = fmaf(w[kTkChunk + c], o[c], a);   // (w of c >= S is 0)
+  }
+  *dst = f2bf(a / L);
+}
+// All 512 threads, after the CTA's item loop. Uses the first two words of the merge buffer (free: the item loop is done) for the per-chunk "pair complete" masks.
+__device__ __forceinline__ void ticket_merge(const Params& p, unsigned char* smem, const int4* rec, int ni) {
+  const int tid = threadIdx.x;
+  volatile unsigned* flag = reinterpret_cast<volatile unsigned*>(smem + kMrgOff);
+  const int h = tid >> 8, hq = (tid >> 7) & 1, d = tid & 127;
+  __syncthreads();                                                     // the item loop's last stores / reads of the merge buffer are done; our own red is before this barrier
+  unsigned unit = 0;
+  for (int c0 = 0, ch = 0; c0 < ni; c0 += 32, ++ch) {
+    if (tid < 32) {                                                    // warp 0: lane j checks item c0 + j (S > 1 only)
+      unsigned m = 0;
+      if (c0 + tid < ni) {
+        const int4 ra = rec[2 * (c0 + tid)], rv = rec[2 * (c0 + tid) + 1];
+        const int S = rec_splits(rv);
+        if (S > 1) m = (ld_acquire_gpu(p.tickets + ticket_pair(ra.y)) % (unsigned)S) == 0u;
+      }
+      const unsigned b = __ballot_sync(0xffffffffu, m);
+      if (tid == 0) flag[ch & 1] = b;                                  // two words alternate: the write of chunk ch + 2 follows the barrier of chunk ch + 1
+    }
+    __syncthreads();
+    unsigned mask = flag[ch & 1];
+    while (mask) {
+      const int i = c0 + (__ffs(mask) - 1);
+      mask &= mask - 1;
+      const int4 ra = rec[2 * i], rv = rec[2 * i + 1];
+      const int S = rec_splits(rv), kvh = ra.y & 15;
+      const int ql = SKV_QMAX > 1 ? ((ra.y >> 24) & 15) + 1 : 1;
+      for (int t = 0; t < ql; ++t, ++unit) {
+        if ((unit & 1) != (unsigned)h) continue;
+        const int4 pi = *reinterpret_cast<const int4*>(p.pair_info + ((rv.z + t) * kKvHeads + kvh) * 4);   // {part_base + t S, S, tok0, vis_t}
+        ticket_merge_unit(p, pi.x, S, hq, d, p.ao + (size_t)(rv.z + t) * (kQHeads * kDim) + (2 * kvh + hq) * kDim + d);
+      }
+    }
+  }
+}
+#endif
 
 // All 512 threads. Runs the CTA's items one after another. ring_phase: bit 31 = mbarriers initialised, low bits = TMA stages consumed so far;
 // start every CTA with ring_phase = 0 and pass the same variable to every layer's call.
@@ -483,7 +1187,11 @@ __device__ void attend(const Params& p, int layer, unsigned char* smem, unsigned
   static_assert(TNT == kBlock, "skv::attend is written for 512 threads");
   const int tid = threadIdx.x;
   const unsigned bar0 = smaddr(smem) + kBarOff;
+#if SKV_QMAX > 1
+  constexpr bool tma = true;                                    // R6: TMA engine only (the planner never emits engine 0 for q_len > 1)
+#else
   const bool tma = SKV_FORCE_ENGINE < 0 ? (p.engine != 0) : (SKV_FORCE_ENGINE != 0);
+#endif
   // mbarriers (last kBarBytes of the smem: full[s] at +8 s, empty[s] at +8 (kStages + s)) are initialised once per kernel (first TMA call) and then
   // carried with their phase in ring_phase; re-initialising them on every call hung the TMA ring (P2 debug, job 9599). The fence orders the caller's
   // generic-proxy use of the ring bytes between calls before this call's TMA (async-proxy) writes.
@@ -497,10 +1205,21 @@ __device__ void attend(const Params& p, int layer, unsigned char* smem, unsigned
   if (tma) { asm volatile("fence.proxy.async.shared::cta;" ::: "memory"); __syncthreads(); }
   unsigned g = ring_phase & 0x7fffffffu;
   const int4* rec = p.items + (size_t)blockIdx.x * p.items_stride * 2;
+#if SKV_IFACE == 2
+  const int ni = rec[1].y >> 8;                                 // iface 2: n_items = S word >> 8 (word 7 is vis)
+#else
   const int ni = rec[1].w;                                      // n_items is stored in every record of the CTA
+#endif
   if (ni == 0) return;
+#if SKV_QMAX > 1
+  run_items_r6(p, layer, smem, g, rec, ni);
+#else
   if (tma) run_items<true>(p, layer, smem, g, rec, ni);
   else run_items<false>(p, layer, smem, g, rec, ni);
+#endif
+#if SKV_TICKET
+  ticket_merge(p, smem, rec, ni);
+#endif
   ring_phase = (ring_phase & 0x80000000u) | (g & 0x7fffffffu);
 }
 
@@ -548,6 +1267,42 @@ __device__ __forceinline__ float4 merge_th(const Params& p, int tok, int head, i
 }
 // S pieces of a pair can exceed kMergeChunk only up to 32 (planner smax); lanes >= S must not be read as partials (guarded above).
 
+// Half-row form for few tokens (combine_head with ntok <= 8: two warps per token row): dims half * 64 + lane * 2, +1. float2 loads -> 2 registers per
+// split, so kMergeChunk2 = 20 covers the b1 plans (S <= 20) in one round without spills (the float4 form needs SKV_MERGE_CHUNK = 18 for 0 spills).
+constexpr int kMergeChunk2 = 20;
+__device__ __forceinline__ float2 merge_th2(const Params& p, int tok, int head, int lane, int half) {
+  const int4 pi = *reinterpret_cast<const int4*>(p.pair_info + (tok * kKvHeads + (head >> 1)) * 4);
+  const int S = pi.y;
+  const float* base = p.part + ((size_t)pi.x * 2 + (head & 1)) * kPartStride + half * 64;
+  constexpr int SS = 2 * kPartStride;
+  float2 x[kMergeChunk2];
+#pragma unroll
+  for (int c = 0; c < kMergeChunk2; ++c) x[c] = c < S ? __ldcg(reinterpret_cast<const float2*>(base + c * SS) + lane) : make_float2(0.f, 0.f);
+  float2 ml = lane < S ? __ldcg(reinterpret_cast<const float2*>(base - half * 64 + lane * SS + 128)) : make_float2(neg_inf(), 0.f);
+  float M = ml.x;
+#pragma unroll
+  for (int o = 16; o; o >>= 1) M = fmaxf(M, __shfl_xor_sync(0xffffffffu, M, o));
+  const float w = lane < S ? ex2(ml.x - M) : 0.f;
+  float L = w * ml.y;
+#pragma unroll
+  for (int o = 16; o; o >>= 1) L += __shfl_xor_sync(0xffffffffu, L, o);
+  float2 a = make_float2(0.f, 0.f);
+#pragma unroll
+  for (int c = 0; c < kMergeChunk2; ++c) {
+    if (c < S) { const float wc = __shfl_sync(0xffffffffu, w, c); a.x = fmaf(wc, x[c].x, a.x); a.y = fmaf(wc, x[c].y, a.y); }
+  }
+  for (int s0 = kMergeChunk2; s0 < S; s0 += kMergeChunk2) {         // S > kMergeChunk2 (rare): further rounds
+#pragma unroll
+    for (int c = 0; c < kMergeChunk2; ++c) x[c] = s0 + c < S ? __ldcg(reinterpret_cast<const float2*>(base + (s0 + c) * SS) + lane) : make_float2(0.f, 0.f);
+#pragma unroll
+    for (int c = 0; c < kMergeChunk2; ++c) {
+      if (s0 + c < S) { const float wc = __shfl_sync(0xffffffffu, w, s0 + c); a.x = fmaf(wc, x[c].x, a.x); a.y = fmaf(wc, x[c].y, a.y); }
+    }
+  }
+  const float inv = 1.f / L;
+  return make_float2(a.x * inv, a.y * inv);
+}
+
 // All 512 threads: q-head `head`, tokens 0..ntok-1 -> bf16 into the SW128 K-major B slot xs (2 * TPAD * 128 bytes), rows ntok..TPAD-1 zero.
 // element (t, k) -> xs + (k/64) * TPAD * 128 + t * 128 + ((((k%64)/8) ^ (t&7)) << 4), position k%8 in the chunk. One warp per token row.
 // No __syncthreads inside; ends with fence.proxy.async (generic -> async proxy) so the caller only needs its own __syncthreads before the MMA.
@@ -556,6 +1311,31 @@ __device__ void combine_head(const Params& p, int layer, int head, unsigned char
   static_assert(TNT == kBlock && TPAD % 16 == 0, "combine_head: 512 threads, TPAD multiple of 16");
   (void)layer;
   const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+  if (SKV_COMBINE_HALF && ntok <= 4) {                             // few tokens (b1 .. b4): two warps per token row; rows with S > kMergeChunk use merge_th2
+    const int half = warp & 1;                                     // (one float2 round, 64 dims per warp), the others the float4 form on warp half 0 (job 9663:
+    for (int t = warp >> 1; t < TPAD; t += 8) {                    // half rows are slower when S <= kMergeChunk or when all 16 warps have a row)
+      const int4 pi = t < ntok ? *reinterpret_cast<const int4*>(p.pair_info + (t * kKvHeads + (head >> 1)) * 4) : make_int4(0, 0, 0, 0);
+      if (pi.y > kMergeChunk) {
+        const float2 o = merge_th2(p, t, head, lane, half);
+        const int c = half * 8 + (lane >> 2);                      // 16-byte chunk of the row; lanes 4c' .. 4c'+3 hold its four 4-byte quarters
+        const int off = (c >> 3) * (TPAD * 128) + t * 128 + ((((c & 7) ^ (t & 7))) << 4) + (lane & 3) * 4;
+        *reinterpret_cast<unsigned*>(xs + off) = pack2(o.x, o.y);
+      } else if (half == 0) {
+        uint2 v = make_uint2(0u, 0u);
+        if (pi.y == 1) {
+          v = __ldcg(reinterpret_cast<const uint2*>(p.ao + (size_t)t * (kQHeads * kDim) + head * kDim) + lane);
+        } else if (pi.y > 1) {
+          const float4 o = merge_th(p, t, head, lane);
+          v.x = pack2(o.x, o.y); v.y = pack2(o.z, o.w);
+        }
+        const int c = lane >> 1;
+        const int off = (c >> 3) * (TPAD * 128) + t * 128 + ((((c & 7) ^ (t & 7))) << 4) + (lane & 1) * 8;
+        *reinterpret_cast<uint2*>(xs + off) = v;
+      }
+    }
+    asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
+    return;
+  }
   const int c = lane >> 1;                                         // 16-byte chunk (8 dims) of the row; lanes 2c, 2c+1 hold its two halves
   for (int t = warp; t < TPAD; t += 16) {
     uint2 v = make_uint2(0u, 0u);
