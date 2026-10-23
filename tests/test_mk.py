@@ -431,7 +431,7 @@ def test_skv_map_specs():
     assert len(r6) == 14 == 2 * B.skv_num_maps(16) and B.skv_geometry(B.skv_defines(16)) == (64, 4) and B.skv_geometry() == (128, 2)
     assert [s[2][2] for s in r6[:7]] == [64, 32, 16, 8, 4, 2, 1] and [s[2][2] for s in r6[7:]] == [64, 32, 16, 8, 4, 2, 1]
     assert all(s[0] == [128, 8, 28 * 1000] and s[1] == [256, 2048] and s[2][:2] == [64, 1] for s in r6)
-    assert B.skv_defines(1) == [] and B.skv_defines(1, 64) == ["SKV_FORCE_ENGINE=1"] and B.skv_defines(16, 256) == ["SKV_QMAX=16"] and B.skv_defines(16) == ["SKV_QMAX=16"] and B.skv_qmax_of([(128, 1)]) == 1 and B.skv_qmax_of([(128, 1), (64, 2)]) == 16
+    assert B.skv_defines(1) == [] and B.skv_defines(1, 64) == [] and B.skv_defines(16, 256) == ["SKV_QMAX=16"] and B.skv_defines(16) == ["SKV_QMAX=16"] and B.skv_qmax_of([(128, 1)]) == 1 and B.skv_qmax_of([(128, 1), (64, 2)]) == 16
     with pytest.raises(ValueError):
         B.skv_defines(4)
 

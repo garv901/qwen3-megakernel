@@ -104,19 +104,17 @@ class MkStep:
             tok0 = [sum(x.q_len for x in w.seqs[:i]) for i in range(len(w.seqs))]   # t_base is per token, row_base per seq (equal lists only when every q_len is 1)
             assert list(pl.row_base) == [int(d.t_base[t]) for t in tok0], "A1 row_base != mk t_base of the seq's first token (fixture packs seq s at the sum of the previous kv_len + q_len)"
             assert pl.total_q == c.ntok == w.total_q and pl.cache_rows == rows
-            if self.qmax == 1 and self.npad >= B.SKV_TMA_ONLY_MIN:
-                assert pl.engine == 1, f"NPAD {self.npad}: the splitkv build is TMA-only (SKV_FORCE_ENGINE=1) but the plan chose LDG ({pl.summary()})"
             self.plan = pl
             t = pl.to_torch(dev)
             self.skv_items, self.skv_pair = t["items"], t["pair_info"]
             self.skv_part = torch.empty(max(pl.part_floats, 4), dtype=torch.float32, device=dev)
-            self.skv_maps = None
-            if pl.engine == 1:   # TMA engine: 2 * kNumMaps KV maps (16 default build, 14 R6; K, V x SW128 box {64, 1, rows}) in a separate 64 B aligned device buffer
-                blob = B.encode_skv_maps(self.kc.data_ptr(), self.vc.data_ptr(), rows, g.layers, self.qmax)
-                self.skv_maps = torch.frombuffer(bytearray(blob), dtype=torch.uint8).to(dev)
-                assert self.skv_maps.data_ptr() % 64 == 0
+            # splitkv-v3 builds are TMA-only (the plan's engine field is ignored): 2 * kNumMaps KV maps at every plan (16 default build, 14 R6;
+            # K, V x SW128 box {64, 1, rows}) in a separate 64 B aligned device buffer
+            blob = B.encode_skv_maps(self.kc.data_ptr(), self.vc.data_ptr(), rows, g.layers, self.qmax)
+            self.skv_maps = torch.frombuffer(bytearray(blob), dtype=torch.uint8).to(dev)
+            assert self.skv_maps.data_ptr() % 64 == 0
             skv_args = (self.skv_items.data_ptr(), i32(pl.stride), self.skv_pair.data_ptr(), self.skv_part.data_ptr(),
-                        self.skv_maps.data_ptr() if self.skv_maps is not None else 0, i32(pl.engine), i32(int(pl.s_max > 1)))
+                        self.skv_maps.data_ptr(), i32(pl.engine), i32(int(pl.s_max > 1)))
         self.pkey = torch.zeros(self.nb * M, dtype=torch.int32, device=dev)
         self.pidx = torch.zeros(self.nb * M, dtype=torch.int32, device=dev)
         self.rope = B.rope_table(d.max_pos).to(dev)

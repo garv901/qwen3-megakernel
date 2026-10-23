@@ -28,7 +28,8 @@
 #endif
 
 #ifndef SKV_FORCE_ENGINE
-#define SKV_FORCE_ENGINE (-1)   // -1: runtime Params::engine; 0 / 1: compile only the LDG / TMA engine (smaller code)
+#define SKV_FORCE_ENGINE 1      // 1 (default, P8 job 9708): compile only the TMA engine (smaller code, 120-122 regs; TMA-only <= both + 0.08 us at 17 points).
+                                // 0: only the LDG engine (best at b1 kv <= 2K by 0.1-0.2, b256 kv128 by 1.4). -1: both, runtime Params::engine
 #endif
 
 #ifndef SKV_QMAX

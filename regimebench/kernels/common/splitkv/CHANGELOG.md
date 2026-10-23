@@ -72,3 +72,6 @@
   R6 buckets (slower at q_len 1). Planner auto `no_split` limit LPT max/mean 1.10 -> 1.20 (`plan.LPT_MAX_IMB`): b32 kv1K and
   b64 / b128 / b256 kv128 now have S = 1 (ao written by attend, no combine). Callers must not call combine_head when
   `plan.s_max == 1`. `SKV_TICKET=1` is correct but slower than attend + combine (b1 kv1K 7.04 vs 6.88): do not use it.
+- 2026-10-23 (P8, job 9708, tag splitkv-v3): `SKV_FORCE_ENGINE` default -1 -> 1 (TMA-only build; LDG compiled out). The TMA maps are
+  needed at every plan (the planner's `engine` field is ignored by this build). `-DSKV_FORCE_ENGINE=0` (LDG-only) is faster at
+  b1 kv <= 2K (0.1-0.2 us/layer) and b256 kv128 (1.4); `-1` restores the runtime choice.

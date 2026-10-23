@@ -198,17 +198,12 @@ SKV_NUM_MAPS = SKV_STAGE_ROWS.bit_length()   # log2(128) + 1 = 8 (skv::kNumMaps)
 SKV_QMAX_R6 = 16                             # the R6 build (q_len 2..16): -DSKV_QMAX=16
 
 
-SKV_TMA_ONLY_MIN = 64   # default builds at NPAD >= 64 compile only the TMA engine (-DSKV_FORCE_ENGINE=1): every plan there is TMA (largest CTA share > 160 KB or no_split; MK-attn), and the both-engine build spills 200-232 B
-
-
 def skv_defines(qmax: int = 1, npad: int = 16) -> list[str]:
-    """Extra NVRTC defines of a splitkv build: -DSKV_QMAX=16 for the R6 build (q_len > 1); -DSKV_FORCE_ENGINE=1 for default builds at NPAD >= SKV_TMA_ONLY_MIN.
-    The cache name / build key is (npad, knobs, attn, qmax); the arm checks plan.engine == 1 at the TMA-only buckets."""
+    """Extra NVRTC defines of a splitkv build: -DSKV_QMAX=16 for the R6 build (q_len > 1). splitkv-v3 builds are TMA-only by default
+    (SKV_FORCE_ENGINE 1 in the header, job 9708): the arm encodes the KV maps at every plan. The cache name / build key is (npad, knobs, attn, qmax)."""
     if qmax not in (1, SKV_QMAX_R6):
         raise ValueError(f"skv_qmax {qmax}: 1 (default build) or {SKV_QMAX_R6} (R6 build)")
-    if qmax > 1:
-        return [f"SKV_QMAX={qmax}"]
-    return ["SKV_FORCE_ENGINE=1"] if npad >= SKV_TMA_ONLY_MIN else []
+    return [f"SKV_QMAX={qmax}"] if qmax > 1 else []
 
 
 def skv_qmax_of(seqs) -> int:
