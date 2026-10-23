@@ -22,6 +22,8 @@ DASH = "-"
 FALLBACK_CLOCK_MHZ = 1965
 HEADLINE = "hv2g"
 PROXY = "hv2-repeat"
+# hv2-repeat runs b1/kv128 work per launch; it matches the real step only where every sequence is kv 128, q 1.
+PROXY_REGIMES = {"R0", "R1"}
 BASELINE = "fi-graph"
 VLLM = "vllm"
 REGIME_ORDER = [f"R{i}" for i in range(9)]
@@ -152,7 +154,7 @@ def regime_table(d: Data, regime: str) -> str:
         vl = (f"{_f(r['vllm'][1])} / {_f(r['vllm_gpu'])} ({r['vllm'][0]})") if r["vllm"] else DASH
         out.append("| " + " | ".join([
             r["id"], f"{_f(r['sol_us'])} ({r['bound'] or DASH})", _f(r["ffma_us"]), _cell(r["hv2g"]),
-            _cell(r["mtn"]), _cell(r["proxy"]), best, vl,
+            _cell(r["mtn"]), _cell(r["proxy"]) if regime in PROXY_REGIMES else "n/a", best, vl,
             _f(r["ratio"], "{:.2f}"), _f(r["pct_hv2g"]), _f(r["pct_ffma_hv2g"]), _f(r["pct_best"])]) + " |")
     return "\n".join(out)
 
@@ -307,7 +309,8 @@ def header(d: Data, records: list[dict]) -> str:
              f"cuBLAS bf16 {_f(gemm.get('peak_tflops'), '{:.0f}')} TFLOP/s, "
              f"SM clock at probe {clk.get('sm_mhz', DASH)} MHz",
              "- All times are microseconds per step (steady = back-to-back launches). "
-             "hv2-repeat is a timing proxy (N repeated b1 decodes), not a correct forward."]
+             "hv2-repeat is a timing proxy (N repeated b1 decodes), not a correct forward; shown only in R0/R1, "
+             "where its b1/kv128 work matches the step (elsewhere it skips KV work and can fall below SOL)."]
     lines.append("- FFMA-SOL = max(T_bw, flops / (148 SMs x 128 lanes x 2 x probed SM clock)); a ceiling for an "
                  "FP32-FFMA design like hv2g, not for a tensor-core one (hypothesis-grade model, not a measurement).")
     for rid in sorted({r.get("run_id") for r in records if r.get("run_id")}):
@@ -352,8 +355,9 @@ def plot_regime(d: Data, regime: str, out_dir: Path) -> Path | None:
                 ax.plot(*zip(*pairs), label=label, **{"marker": "o", **kw})
         series([r["hv2g"][1] if r["hv2g"] else None for r in rows], "hv2g", color="C3")
         series([r["mtn"][1] if r["mtn"] else None for r in rows], "hv2g mtn", color="C1")
-        series([r["proxy"][1] if r["proxy"] else None for r in rows], "hv2-repeat (proxy)",
-               color="C3", linestyle="--")
+        if regime in PROXY_REGIMES:
+            series([r["proxy"][1] if r["proxy"] else None for r in rows], "hv2-repeat (proxy)",
+                   color="C3", linestyle="--")
         series([r["best"][1] if r["best"] else None for r in rows], "best fi-graph", color="C0")
         series([r["vllm"][1] if r["vllm"] else None for r in rows], "vllm", color="C2")
         series([r["sol_us"] for r in rows], "SOL spec", color="k", linestyle=":", marker="")
