@@ -35,7 +35,7 @@ class _Loaded:
         d = {**B.DEFAULT_KNOBS, **dict(knobs)}
         cubin, info, _ = B.compile_build(npad, self.nb, knobs, attn=attn)
         self.ptxas = info
-        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"])
+        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"])
         self.kernel = CoopKernel(cubin, B.KERNEL, self.dyn)
         self.regs, self.static_smem = self.kernel.regs, self.kernel.static_smem
         self.local_bytes, self.dyn_smem = self.kernel.local_bytes, self.kernel.dyn_smem
