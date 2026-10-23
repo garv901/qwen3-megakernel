@@ -149,20 +149,20 @@ def skipped_by_cap() -> list[str]:
     return [i for i in full if i not in kept]
 
 
-# Decode points owned by each bespoke megakernel (docs/briefs/): tokens per step 1-8 vs 9-256, and room
-# (best baseline / SOL, 2026-10-22 runs) >= 2. R3-b8-kv16K, R3-b32-kv4K, R3-b128-kv1K and R8 are out of scope.
+# Decode points targeted by the bespoke megakernel `mk` (docs/briefs/): room (best baseline / SOL, 2026-10-22 runs)
+# >= 2. R3-b8-kv16K, R3-b32-kv4K, R3-b128-kv1K and R8 are out of scope. `mk_kv`: the kv >= 1K points (attention focus).
+_MK_POINTS = ("R0-b1-kv128", *(f"R1-b{b}-kv128" for b in (1, 2, 4, 8, 16, 32, 64, 128, 256)),
+              *(f"R2-b1-kv{kv}" for kv in (128, 512, 1 * K, 2 * K, 4 * K, 8 * K, 16 * K, 32 * K)),
+              "R3-b1-kv1024", "R3-b1-kv4096", "R3-b1-kv16384", "R3-b8-kv1024", "R3-b8-kv4096", "R3-b32-kv1024",
+              *(f"R6-b1-kv1024-q{q}" for q in (2, 4, 8, 16)))
 OWNER_POINTS: dict[str, tuple[str, ...]] = {
-    "mk_small": ("R0-b1-kv128", "R1-b1-kv128", "R1-b2-kv128", "R1-b4-kv128", "R1-b8-kv128",
-                 *(f"R2-b1-kv{kv}" for kv in (128, 512, 1 * K, 2 * K, 4 * K, 8 * K, 16 * K, 32 * K)),
-                 "R3-b1-kv1024", "R3-b1-kv4096", "R3-b1-kv16384", "R3-b8-kv1024", "R3-b8-kv4096",
-                 "R6-b1-kv1024-q2", "R6-b1-kv1024-q4", "R6-b1-kv1024-q8"),
-    "mk_batch": ("R1-b16-kv128", "R1-b32-kv128", "R1-b64-kv128", "R1-b128-kv128", "R1-b256-kv128",
-                 "R3-b32-kv1024", "R6-b1-kv1024-q16"),
+    "mk": _MK_POINTS,
+    "mk_kv": tuple(p for p in _MK_POINTS if int(p.split("-kv")[1].split("-")[0]) >= 1 * K),
 }
 
 
 def select(ids_or_regimes: list[str] | None) -> list[Workload]:
-    """Filter the grid by workload ids, regime names (``R1``) or owner presets (``mk_small``); None = all."""
+    """Filter the grid by workload ids, regime names (``R1``) or presets (``mk``, ``mk_kv``); None = all."""
     grid = regime_grid()
     if not ids_or_regimes:
         return grid

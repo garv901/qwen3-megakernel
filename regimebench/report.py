@@ -22,7 +22,7 @@ DASH = "-"
 FALLBACK_CLOCK_MHZ = 1965
 HEADLINE = "hv2g"
 # Megakernel arms compared against the best baseline in their own table (bespoke kernels: docs/briefs/).
-MK_ARMS = ("hv2g", "mk_small", "mk_batch")
+MK_ARMS = ("hv2g", "mk")
 PROXY = "hv2-repeat"
 # hv2-repeat runs b1/kv128 work per launch; it matches the real step only where every sequence is kv 128, q 1.
 PROXY_REGIMES = {"R0", "R1"}
@@ -374,8 +374,7 @@ def plot_regime(d: Data, regime: str, out_dir: Path) -> Path | None:
                 ax.plot(*zip(*pairs), label=label, **{"marker": "o", **kw})
         series([r["hv2g"][1] if r["hv2g"] else None for r in rows], "hv2g", color="C3")
         series([r["mtn"][1] if r["mtn"] else None for r in rows], "hv2g mtn", color="C1")
-        for a, c in (("mk_small", "C4"), ("mk_batch", "C5")):
-            series([r["mk"][a][1] if r["mk"][a] else None for r in rows], a, color=c)
+        series([r["mk"]["mk"][1] if r["mk"]["mk"] else None for r in rows], "mk", color="C4")
         if regime in PROXY_REGIMES:
             series([r["proxy"][1] if r["proxy"] else None for r in rows], "hv2-repeat (proxy)",
                    color="C3", linestyle="--")
@@ -430,7 +429,7 @@ def write_csv(d: Data, path: Path) -> None:
 
 def render(d: Data, records: list[dict], plot_files: dict[str, str]) -> str:
     parts = [header(d, records), "", "## Executive summary", "", summary_table(d), ""]
-    if any(arm in ("mk_small", "mk_batch") for t in d.timing.values() for (arm, _) in t):
+    if any(arm == "mk" for t in d.timing.values() for (arm, _) in t):
         parts += ["## Megakernel arms vs best baseline", "", mk_table(d), ""]
     if "overview" in plot_files:
         parts += ["![overview](overview.png)", ""]
