@@ -11,6 +11,6 @@ cd "$REPO"
 export CUDA_CACHE_DISABLE=1 PYTHONPATH=$REPO
 echo "REPO=$REPO $(git rev-parse --abbrev-ref HEAD) $(git rev-parse --short HEAD)"
 nvidia-smi -L
-W=R0-b1-kv128,R1-b16-kv128,R1-b64-kv128,R1-b256-kv128
+W=${1:-R0-b1-kv128,R1-b16-kv128,R1-b64-kv128,R1-b256-kv128}   # sbatch slurm/mk_spread.sbatch [WORKLOADS]
 "$PY" probe/mk_core/debug/stamps_spread.py $W 0
 "$PY" probe/mk_core/debug/stamps_spread.py $W 0x7f
