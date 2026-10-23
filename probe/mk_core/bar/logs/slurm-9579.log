@@ -1,0 +1,30 @@
+GPU 0: NVIDIA B200 (UUID: GPU-019267a2-092a-6798-3cc5-57ffc761e004)
+built: bar0 bar1 bar2 bar3 bar4 bar5 bar6  (ptxas log: logs/build.log)
+PASS bar=0 skew_ns=0
+PASS bar=0 skew_ns=100
+{"bar":0,"skew_ns":0,"us_per_bar":1.0954,"us_reps":[1.0954,1.0955,1.0951,1.0950,1.0955],"mhz":1965,"G":148,"regs":16}
+{"bar":0,"skew_ns":100,"us_per_bar":1.7263,"us_reps":[1.7264,1.7262,1.7263,1.7263,1.7257],"mhz":1965,"G":148,"regs":16}
+PASS bar=1 skew_ns=0
+PASS bar=1 skew_ns=100
+{"bar":1,"skew_ns":0,"us_per_bar":1.1658,"us_reps":[1.1660,1.1658,1.1654,1.1659,1.1657],"mhz":1965,"G":148,"regs":16}
+{"bar":1,"skew_ns":100,"us_per_bar":1.7935,"us_reps":[1.7931,1.7933,1.7939,1.7936,1.7935],"mhz":1965,"G":148,"regs":16}
+PASS bar=2 skew_ns=0
+PASS bar=2 skew_ns=100
+{"bar":2,"skew_ns":0,"us_per_bar":1.7420,"us_reps":[1.7418,1.7421,1.7425,1.7420,1.7419],"mhz":1965,"G":148,"regs":21}
+{"bar":2,"skew_ns":100,"us_per_bar":2.4269,"us_reps":[2.4270,2.4269,2.4268,2.4269,2.4270],"mhz":1965,"G":148,"regs":21}
+PASS bar=3 skew_ns=0
+PASS bar=3 skew_ns=100
+{"bar":3,"skew_ns":0,"us_per_bar":2.4628,"us_reps":[2.4627,2.4631,2.4628,2.4626,2.4629],"mhz":1965,"G":148,"regs":22}
+{"bar":3,"skew_ns":100,"us_per_bar":3.1660,"us_reps":[3.1661,3.1658,3.1664,3.1658,3.1660],"mhz":1965,"G":148,"regs":22}
+PASS bar=4 skew_ns=0
+PASS bar=4 skew_ns=100
+{"bar":4,"skew_ns":0,"us_per_bar":3.1367,"us_reps":[3.2169,3.1369,3.1364,3.1365,3.1367],"mhz":1965,"G":148,"regs":31}
+{"bar":4,"skew_ns":100,"us_per_bar":4.5133,"us_reps":[4.5116,4.5138,4.5136,4.5130,4.5133],"mhz":1965,"G":148,"regs":31}
+PASS bar=5 skew_ns=0
+PASS bar=5 skew_ns=100
+{"bar":5,"skew_ns":0,"us_per_bar":1.2550,"us_reps":[1.2550,1.2552,1.2550,1.2547,1.2548],"mhz":1965,"G":148,"regs":18}
+{"bar":5,"skew_ns":100,"us_per_bar":1.8717,"us_reps":[1.8717,1.8728,1.8714,1.8719,1.8699],"mhz":1965,"G":148,"regs":18}
+PASS bar=6 skew_ns=0
+PASS bar=6 skew_ns=100
+{"bar":6,"skew_ns":0,"us_per_bar":1.6678,"us_reps":[1.6677,1.6681,1.6680,1.6677,1.6678],"mhz":1965,"G":148,"regs":21}
+{"bar":6,"skew_ns":100,"us_per_bar":2.3580,"us_reps":[2.3581,2.3580,2.3580,2.3581,2.3580],"mhz":1965,"G":148,"regs":21}

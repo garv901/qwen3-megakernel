@@ -49,6 +49,14 @@ static_assert(XREG >= ATTN_BYTES, "attention smem overlay");
 static_assert(MK_EXPECT_DYN == DYN_SMEM, "host dyn_smem (build.py) != kernel DYN_SMEM");
 #endif
 
+// next-phase weight prefetch vs grid-barrier arrive: MK_PFA 0 = prefetch, then arrive (v0); 1 = arrive, then prefetch (the TMA issue
+// overlaps the barrier latency and cannot delay the arrive's release fence). The prefetch writes only ring slots whose MMAs completed.
+#if MK_PFA
+#define MK_PF_ARRIVE(...) do { bar_arrive(bar_cnt); __VA_ARGS__; } while (0)
+#else
+#define MK_PF_ARRIVE(...) do { __VA_ARGS__; bar_arrive(bar_cnt); } while (0)
+#endif
+
 // Unit numbering and row-block ownership live ONLY here (geom) and in PH::src: u = rb * KC + kc, CTA b owns units [u0, u0 + n).
 template <class PH> struct Geom { int u0, n; };
 template <class PH>
@@ -281,11 +289,10 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     zero_f32(qkv, ntok * QKVN);
     zero_f32(gu, ntok * GUN);
     if (MK_DBG_EXIT == 2) return;
-    if (tid == 0) {   // layer 0 QKV: first weight units (landing during the barrier)
+    MK_PF_ARRIVE(if (tid == 0) {   // layer 0 QKV: first weight units (landing during the barrier)
         const Geom<PhQkv> ge = geom<PhQkv>();
         for (int i = 0; i < RING && i < ge.n; ++i) fill_unit<PhQkv>(g, 0, ge.u0 + i, i);
-    }
-    bar_arrive(bar_cnt);
+    });
     bar_wait(bar_cnt, bar_target);
 
     for (int l = 0; l < NLAY; ++l) {
@@ -306,9 +313,8 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             auto extra = [&]() { rr_of_x(x, rr1, ntok); zero_f32(gu, ntok * GUN); };
             skv_prefetch(l, blockIdx.x, gridDim.x);
             gemm_phase<PhQkv, mk_null(0)>(g, l, ntok, get, epi, extra);
-            prefetch_next<PhO>(g, l);   // phases 2 and 3 do not use the ring: O's first units land meanwhile
         }
-        bar_arrive(bar_cnt);
+        MK_PF_ARRIVE(prefetch_next<PhO>(g, l));   // phases 2 and 3 do not use the ring: O's first units land meanwhile
         bar_wait(bar_cnt, bar_target);
 
         // ---- Phase 2: q/k-norm + RoPE + KV write; one warp per (token, head); head < 16: q (-> qb), else kv head ----
@@ -368,9 +374,8 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             };
             auto extra = [&]() { zero_f32(qkv, ntok * QKVN); };
             gemm_phase<PhO, mk_null(3)>(g, l, ntok, get, epi, extra);
-            prefetch_next<PhGu>(g, l);
         }
-        bar_arrive(bar_cnt);
+        MK_PF_ARRIVE(prefetch_next<PhGu>(g, l));
         bar_wait(bar_cnt, bar_target);
 
         // ---- Phase 5: GU GEMM, B = bf16(x * ln2), red.add -> gu (rows 0..3071 gate, 3072.. up); rr2 ----
@@ -389,9 +394,8 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             };
             auto extra = [&]() { rr_of_x(x, rr2, ntok); };
             gemm_phase<PhGu, mk_null(4)>(g, l, ntok, get, epi, extra);
-            prefetch_next<PhD>(g, l);
         }
-        bar_arrive(bar_cnt);
+        MK_PF_ARRIVE(prefetch_next<PhD>(g, l));
         bar_wait(bar_cnt, bar_target);
 
         // ---- Phase 6: D GEMM (K = 3072), B = bf16(silu(rr2 * gate) * (rr2 * up)), red.add -> x ----
@@ -416,10 +420,8 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             };
             auto extra = [&]() {};
             gemm_phase<PhD, mk_null(5)>(g, l, ntok, get, epi, extra);
-            if (l + 1 < NLAY) prefetch_next<PhQkv>(g, l + 1);
-            else prefetch_next<PhLm>(g, 0);
         }
-        bar_arrive(bar_cnt);
+        MK_PF_ARRIVE(if (l + 1 < NLAY) prefetch_next<PhQkv>(g, l + 1); else prefetch_next<PhLm>(g, 0));
         bar_wait(bar_cnt, bar_target);
     }
 
