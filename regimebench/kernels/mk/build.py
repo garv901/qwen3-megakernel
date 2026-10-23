@@ -266,10 +266,13 @@ def encode_skv_maps(kc_ptr: int, vc_ptr: int, rows: int, n_layers: int = NL, qma
 def auto_attn(seqs) -> str:
     """attn = "auto": splitkv (A1 v2) when every sequence has q_len == 1 and (the longest kv_len >= SKV_AUTO_MIN_KV or n_seq >= SKV_AUTO_MIN_SEQ), else the placeholder.
     Job 9702 (splitkv-v2 vs placeholder, 28 points): kv >= 512 all win (R2-kv512 -67 .. kv32768 -8051, R3-b8-kv1024 -20); kv128: b16 -1.3, b32 -125, b64 -133, b128 -272,
-    b256 -897, but b1 / b2 +23..+41 and b4 / b8 +81..+83 (the combine at S > 1). q_len > 1 (R6, SKV_QMAX 16 build): not measured yet -> placeholder. ``seqs``: iterable of (kv_len, q_len)."""
+    b256 -897, but b1 / b2 +23..+41 and b4 / b8 +81..+83 (the combine at S > 1). q_len 2..16 (R6, SKV_QMAX 16 build; job 9703, kv1024): q2 -172, q4 -161, q8 -142,
+    q16 -405 -> splitkv whenever some q_len > 1 (max 16). ``seqs``: iterable of (kv_len, q_len)."""
     seqs = [(int(k), int(q)) for k, q in seqs]
-    if not seqs or any(q != 1 for _, q in seqs):
+    if not seqs or any(q > SKV_QMAX_R6 for _, q in seqs):
         return "placeholder"
+    if any(q > 1 for _, q in seqs):
+        return "splitkv"
     return "splitkv" if max(k for k, _ in seqs) >= SKV_AUTO_MIN_KV or len(seqs) >= SKV_AUTO_MIN_SEQ else "placeholder"
 
 

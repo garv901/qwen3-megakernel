@@ -382,7 +382,7 @@ def test_skv_source_defines():
 
 
 def test_skv_plan_matches_mk_layout_on_mk_points():
-    """plan.plan row_base == mk's t_base, total_q == ntok, cache_rows == the arm's rows for every q_len == 1 point of --workloads mk; R6 (q > 1) is the placeholder under auto."""
+    """plan.plan row_base == mk's t_base, total_q == ntok, cache_rows == the arm's rows for every q_len == 1 point of --workloads mk; R6 (q > 1) is splitkv (R6 build) under auto."""
     from regimebench.kernels.common.splitkv import plan as P
     from regimebench.workload import select
     pts = select(["mk"])
@@ -399,9 +399,9 @@ def test_skv_plan_matches_mk_layout_on_mk_points():
             assert (pl.items[:, :, 7] <= pl.stride).all()
             assert all(len(w2) == 1 for w2 in [pl.cta_positions[:1]])
         else:
-            assert used[w.id] == "placeholder", w.id
-    exp = {w.id: ("splitkv" if all(s.q_len == 1 for s in w.seqs) and (max(s.kv_len for s in w.seqs) >= B.SKV_AUTO_MIN_KV or len(w.seqs) >= B.SKV_AUTO_MIN_SEQ) else "placeholder") for w in pts}
-    assert used == exp and sum(v == "splitkv" for v in used.values()) == 18   # R2-kv512..32768, R3-*, R1-b16..b256
+            assert used[w.id] == "splitkv", w.id   # R6: the SKV_QMAX 16 build (job 9703)
+    exp = {w.id: ("splitkv" if any(s.q_len > 1 for s in w.seqs) or max(s.kv_len for s in w.seqs) >= B.SKV_AUTO_MIN_KV or len(w.seqs) >= B.SKV_AUTO_MIN_SEQ else "placeholder") for w in pts}
+    assert used == exp and sum(v == "splitkv" for v in used.values()) == 22   # R2-kv512..32768, R3-*, R1-b16..b256, R6-*
 
 
 def test_skv_attn_option_and_supports():
@@ -410,14 +410,14 @@ def test_skv_attn_option_and_supports():
         MkArm(attn="nope")
     w1 = Workload("t", "R1", tuple(Seq(1024, 1) for _ in range(8)))
     wq = Workload("t2", "R6", (Seq(1024, 4),))
-    assert MkArm(attn="auto").resolve_attn(w1) == "splitkv" and MkArm(attn="auto").resolve_attn(wq) == "placeholder"
+    assert MkArm(attn="auto").resolve_attn(w1) == "splitkv" and MkArm(attn="auto").resolve_attn(wq) == "splitkv"
     assert MkArm(attn="auto").resolve_attn(Workload("t3", "R1", tuple(Seq(128, 1) for _ in range(8)))) == "placeholder"   # kv < SKV_AUTO_MIN_KV
     assert MkArm(attn="auto", ku=64).resolve_attn(w1) == "placeholder"
     assert MkArm(attn="splitkv").supports(w1, "auto") is None
     assert MkArm(attn="splitkv").supports(wq, "auto") is None   # SPEC-P2b: q_len <= 16 on the R6 build
     assert "q_len <= 16" in MkArm(attn="splitkv").supports(Workload("t4", "R6", (Seq(128, 17),)), "auto")
     assert "MK_KU" in MkArm(attn="splitkv", ku=64).supports(w1, "auto")
-    assert MkArm(attn="placeholder").supports(wq, "auto") is None and B.auto_attn([(1024, 1), (5, 1)]) == "splitkv" and B.auto_attn([(128, 1), (5, 1)]) == "placeholder" and B.auto_attn([(128, 1), (5, 2)]) == "placeholder"
+    assert MkArm(attn="placeholder").supports(wq, "auto") is None and B.auto_attn([(1024, 1), (5, 1)]) == "splitkv" and B.auto_attn([(128, 1), (5, 1)]) == "placeholder" and B.auto_attn([(128, 1), (5, 2)]) == "splitkv" and B.auto_attn([(128, 17)]) == "placeholder"
 
 
 def test_skv_map_specs():
