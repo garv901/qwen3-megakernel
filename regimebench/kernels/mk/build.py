@@ -26,8 +26,10 @@ KERNEL = "mk_step"
 ATTN_PLACEHOLDER = HERE / "attn_placeholder.cuh"
 ATTN_SPLITKV = COMMON / "splitkv" / "splitkv.cuh"
 OWN_SOURCES = ("mk_common.cuh", "mk_step.cu")
-DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0}
+DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 0}
 WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map order (kernel: maps 0..7)
+WORKSPACE_MAPS = ("xb",)   # kernel map 8 (MK_TS): bf16 [MAXTOK_MK][H] workspace of the tile-stream QKV (B tiles by TMA)
+TS_TT = 128   # TS token tile (mk_common.cuh TS_TT)
 
 
 def bucket_for(ntok: int) -> int:
@@ -83,12 +85,21 @@ def lm_ring(npad: int, lmr: int) -> int:
     return lmr if lmr else {16: 4, 32: 3}.get(npad, 2)
 
 
-def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0) -> int:
+def ts_ring(ts: int = 1) -> int:
+    """Tile-stream ring depth TS_R (mk_common.cuh): slots of 32 KB A + TS_TT x 256 B B that fit the 227 KB budget (static 11280, align 1024, barriers 384)."""
+    if not ts:
+        return 1
+    return min(8, (227 * 1024 - 11280 - 1024 - 384) // (32768 + TS_TT * 256))
+
+
+def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0) -> int:
     """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM; the kernel traps if the launch gives less).
     lmp: MK_LMP (the pipelined LM head only applies at npad <= 64: smem = [8 X chunks][lmr x 32 KB ring], 384 B of barriers)."""
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     off_bars = ring * ub + max(2 * xs, attn_bytes)
+    if ts and npad >= 128 and ku == 128:   # MK_TS: tile-stream ring overlays the other regions; 384 B of barriers
+        return 1024 + max(off_bars, ts_ring(1) * (32768 + TS_TT * 256)) + 384
     if lmp and npad <= 64 and ku == 128:
         return 1024 + max(off_bars, 8 * xs + lm_ring(npad, lmr) * ub) + 384
     return 1024 + off_bars + 256
@@ -104,7 +115,7 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     if stripped:
         src = strip_knobs(src)
     k = {**DEFAULT_KNOBS, **dict(knobs)}
-    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"]) if attn == "placeholder" and attn_path is None else 0
+    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"]) if attn == "placeholder" and attn_path is None else 0
     defs = [f"NPAD={npad}", f"NB={nb}", f"MK_EXPECT_DYN={exp}", *knob_defines(dict(knobs))]
     cubin, log = nvrtc_compile(src, defs, arch=arch, ptxas_verbose=True, name="mk.cu")
     return cubin, parse_ptxas(log), log
@@ -124,11 +135,23 @@ def map_specs(weights: dict) -> list[tuple[list[int], list[int], list[int]]]:
     return out
 
 
-def encode_maps(weights: dict, ptrs: dict) -> bytes:
-    """128 B x 8 tensor maps with the real device addresses. Needs cuInit (a GPU host)."""
+def workspace_map_specs() -> list[tuple[list[int], list[int], list[int]]]:
+    """Map 8 (MK_TS), ``xb``: bf16 [MAXTOK_MK][H], dims {H, MAXTOK_MK}, box {64 k, TS_TT tokens}, SW128 (same box shape as the weight maps)."""
+    return [([H, MAXTOK_MK], [H * 2], [64, TS_TT])]
+
+
+def encode_maps(weights: dict, ptrs: dict, workspace: dict | None = None) -> bytes:
+    """128 B x 8 tensor maps with the real device addresses (+ 128 B for the ``xb`` workspace map when ``workspace`` = {"xb": device ptr} is given).
+    Needs cuInit (a GPU host)."""
     from cuda.bindings import driver as d
     blob = b""
-    for name, (dims, strides, box) in zip(WEIGHT_MAPS, map_specs(weights)):
+    names = list(WEIGHT_MAPS)
+    specs = list(map_specs(weights))
+    if workspace is not None:
+        names += list(WORKSPACE_MAPS)
+        specs += workspace_map_specs()
+        ptrs = {**ptrs, **workspace}
+    for name, (dims, strides, box) in zip(names, specs):
         res = d.cuTensorMapEncodeTiled(
             d.CUtensorMapDataType.CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, len(dims), int(ptrs[name]),
             [d.cuuint64_t(v) for v in dims], [d.cuuint64_t(v) for v in strides], [d.cuuint32_t(v) for v in box],

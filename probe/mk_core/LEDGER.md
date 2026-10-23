@@ -31,5 +31,10 @@
   t_base/t_vis and does q/k-norm + RoPE + KV write. The last KV split of each (seq, kv-head) owns the new-token rows (only
   writer, uses them from smem). MK-attn estimate [H]: +0.1-0.3 us/layer at b1, +0.3-0.8 at b256. Lands behind a flag; v1
   (post-RoPE bf16 q) stays. MK-core sends the SPEC with exact layouts when P2 starts.
+- Update 2026-10-23 (MK-attn correction, splitkv/CHANGELOG.md): attend() does NOT re-init its mbarriers per call (that hung the
+  TMA ring at kv >= 16K, jobs 9581 / 9598 / 9599). attend_smem_bytes() = 82,496 B; bytes [0, skv::kBarOff = 82,432) are free between
+  calls (GEMM / LM / TS rings, combine_head xs slot); the last 64 B (mbarriers) must stay unchanged for the whole kernel; ring_phase
+  starts at 0 per CTA and the same variable is passed to every layer. MK-core integration rule: place the attention scratch at
+  OFF_BARS - 82,432 so its 64 B of mbarriers sit in a reserved hole of mk's barrier region (never overlaid); keep overlays below OFF_BARS.
 - MK-attn bench barrier (= hv2g bar_arrive/bar_wait): 1.12 us (job 9567) vs 1.7-2.7 us "wait" in mk v0 stamps: v0 waits
   include imbalance / phase-edge work (P1 bench separates them).
