@@ -52,10 +52,10 @@
 #define MK_LMR 0   // LM ring slots (32 KB each) of the MK_LMP path; 0 = per bucket: 4 at NPAD 16, 3 at NPAD 32 (job 9586), 2 at NPAD 64 (smem limit)
 #endif
 #ifndef MK_TS
-#define MK_TS 256   // 0 off; N (128 / 256): QKV on the tile-stream engine (ts_phase) at NPAD >= N (1 = 128; default 256: job 9602 b256 -211, b128 +54 us); the D phase writes xb = bf16(x * ln1[l+1]) (see NOTES.md)
+#define MK_TS 128   // 0 off; N (128 / 256): tile-stream engine (ts_phase) at NPAD >= N (1 = 128; default 128 with MK_TSB 1: job 9622 b128 -167, b256 -957 us; P5a alone was b128 +54, job 9602); the D phase writes xb = bf16(x * ln1[l+1]) (see NOTES.md)
 #endif
 #ifndef MK_TSB
-#define MK_TSB 0   // 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
+#define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
 #endif
 #ifndef MK_STG
 #define MK_STG 4   // staging chunks (16 B) in flight per thread

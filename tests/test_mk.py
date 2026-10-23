@@ -158,18 +158,24 @@ def test_ts_dyn_smem_and_ring():
     assert B.dyn_smem(128) == 132352 and B.dyn_smem(256) == 197888   # MK_TS=0 layouts unchanged
 
 
+def _cb(npad, **k):
+    """compile_build on the P5a knob base (MK_TS 256, MK_TSB 0; the defaults before job 9622) plus k."""
+    return B.compile_build(npad, knobs=tuple({"MK_TS": 256, "MK_TSB": 0, **k}.items()))[0]
+
+
 def test_ts_off_sass_identical():
-    """MK_TS=1 at NPAD <= 64 (and with MK_KU=64) is the MK_TS=0 build; default MK_TS=256 is on at NPAD 256 only."""
+    """MK_TS=1 at NPAD <= 64 (and with MK_KU=64) is the MK_TS=0 build; MK_TS=256 is on at NPAD 256 only (MK_TSB 0 base)."""
     pytest.importorskip("cuda.bindings.nvrtc")
     if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
         pytest.skip("no cuobjdump")
     for npad in (16, 32, 64):
-        assert _sass(B.compile_build(npad, knobs=(("MK_TS", 1),))[0]) == _sass(B.compile_build(npad)[0])
-    assert _sass(B.compile_build(128, knobs=(("MK_TS", 1), ("MK_KU", 64)))[0]) == _sass(B.compile_build(128, knobs=(("MK_KU", 64),))[0])
-    assert _sass(B.compile_build(128, knobs=(("MK_TS", 0),))[0]) == _sass(B.compile_build(128)[0])
-    assert _sass(B.compile_build(256, knobs=(("MK_TS", 1),))[0]) == _sass(B.compile_build(256)[0])   # default MK_TS = 256
-    assert _sass(B.compile_build(256, knobs=(("MK_TS", 0),))[0]) != _sass(B.compile_build(256)[0])
-    assert _sass(B.compile_build(128, knobs=(("MK_TS", 128),))[0]) != _sass(B.compile_build(128)[0])
+        assert _sass(_cb(npad, MK_TS=1)) == _sass(_cb(npad))
+    assert _sass(_cb(128, MK_TS=1, MK_KU=64)) == _sass(_cb(128, MK_KU=64))
+    assert _sass(_cb(128, MK_TS=0)) == _sass(_cb(128))
+    assert _sass(_cb(256, MK_TS=1)) == _sass(_cb(256))
+    assert _sass(_cb(256, MK_TS=0)) != _sass(_cb(256))
+    assert _sass(_cb(128, MK_TS=128)) != _sass(_cb(128))
+
 
 
 @pytest.mark.parametrize("npad", (32, 256))
@@ -202,9 +208,9 @@ def test_ts_workspace_map_specs():
 
 
 def test_ts_knob_default_and_arm():
-    assert B.DEFAULT_KNOBS["MK_TS"] == 256 and B.ts_min(1) == 128 and B.ts_min(256) == 256
+    assert B.DEFAULT_KNOBS["MK_TS"] == 128 and B.ts_min(1) == 128 and B.ts_min(256) == 256
     assert dict(B.knob_defines({"MK_TS": 1}) and [d.split("=") for d in B.knob_defines({"MK_TS": 1})])["MK_TS"] == "1"
-    assert MkArm(ts=1).knobs["MK_TS"] == 1 and MkArm().knobs["MK_TS"] == 256
+    assert MkArm(ts=1).knobs["MK_TS"] == 1 and MkArm().knobs["MK_TS"] == 128
 
 
 # ---------------------------------------------------------------- MK_TSB: GU and D on the tile stream, idle-CTA finalizers (SPEC-P5b)
@@ -232,20 +238,21 @@ def test_tsb_dyn_smem_and_rings():
     for npad in (16, 32, 64):   # TS does not apply below NPAD 128
         assert B.dyn_smem(npad, ts=1, tsb=1) == B.dyn_smem(npad)
     assert B.dyn_smem(128, ts=256, tsb=1) == B.dyn_smem(128)   # MK_TS = 256: NPAD 128 is below TS_MIN
-    assert B.tsb_on(256, {"MK_TSB": 1}) and not B.tsb_on(128, {"MK_TSB": 1}) and B.tsb_on(128, {"MK_TSB": 1, "MK_TS": 128})
-    assert not B.tsb_on(256, {"MK_TSB": 1, "MK_TS": 0}) and not B.tsb_on(256, {})
+    assert B.tsb_on(256, {"MK_TSB": 1, "MK_TS": 256}) and not B.tsb_on(128, {"MK_TSB": 1, "MK_TS": 256}) and B.tsb_on(128, {"MK_TSB": 1, "MK_TS": 128})
+    assert not B.tsb_on(256, {"MK_TSB": 1, "MK_TS": 0}) and not B.tsb_on(256, {"MK_TSB": 0}) and B.tsb_on(128, {}) and not B.tsb_on(64, {})
 
 
 def test_tsb_off_sass_identical():
-    """MK_TSB=0 (explicit) is the default build; MK_TSB=1 where TS is off (NPAD <= 64, NPAD 128 with the default MK_TS = 256) is MK_TSB=0."""
+    """MK_TSB=1 where TS is off (NPAD <= 64, NPAD 128 with MK_TS = 256) is MK_TSB=0; the default build is MK_TS 128 + MK_TSB 1 (job 9622)."""
     pytest.importorskip("cuda.bindings.nvrtc")
     if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
         pytest.skip("no cuobjdump")
-    assert _sass(B.compile_build(256, knobs=(("MK_TSB", 0),))[0]) == _sass(B.compile_build(256)[0])
+    assert _sass(_cb(256, MK_TS=128, MK_TSB=1)) == _sass(B.compile_build(256)[0])
     for npad in (32, 128):
-        assert _sass(B.compile_build(npad, knobs=(("MK_TSB", 1),))[0]) == _sass(B.compile_build(npad)[0])
-    assert _sass(B.compile_build(128, knobs=(("MK_TS", 128), ("MK_TSB", 1)))[0]) != _sass(B.compile_build(128, knobs=(("MK_TS", 128),))[0])
-    assert _sass(B.compile_build(256, knobs=(("MK_TSB", 1),))[0]) != _sass(B.compile_build(256)[0])
+        assert _sass(_cb(npad, MK_TSB=1)) == _sass(_cb(npad))
+    assert _sass(_cb(128, MK_TS=128, MK_TSB=1)) != _sass(_cb(128, MK_TS=128))
+    assert _sass(_cb(256, MK_TSB=1)) != _sass(_cb(256))
+
 
 
 @pytest.mark.parametrize("npad,ts", ((32, 256), (128, 128), (256, 256)))
@@ -302,7 +309,7 @@ def test_tsb_map_specs():
                                                       ([1024, 28 * 6144], [2048], [64, 128]), ([3072, 256], [6144], [64, 128])]
     assert B.workspace_map_specs(128, B.WS_ORDER)[1] == ([1024, 256], [2048], [64, 64])
     assert B.workspace_map_specs() == [([1024, 256], [2048], [64, 128])]
-    assert MkArm(tsb=1).knobs["MK_TSB"] == 1 and MkArm().knobs["MK_TSB"] == 0 and B.DEFAULT_KNOBS["MK_TSB"] == 0 and B.TK_SIZE == 64
+    assert MkArm(tsb=1).knobs["MK_TSB"] == 1 and MkArm().knobs["MK_TSB"] == 1 and B.DEFAULT_KNOBS["MK_TSB"] == 1 and B.TK_SIZE == 64
 
 
 # ---------------------------------------------------------------- attn = splitkv (A1 v1, SPEC-P2)
