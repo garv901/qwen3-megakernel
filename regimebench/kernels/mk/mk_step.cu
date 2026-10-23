@@ -45,6 +45,9 @@ struct PhLm {
 static_assert(VOCAB % 128 == 0, "LM row blocks");
 static_assert(NW == SKV_NW, "attention header assumes 16 warps");
 static_assert(XREG >= ATTN_BYTES, "attention smem overlay");
+#if defined(MK_EXPECT_DYN) && MK_EXPECT_DYN
+static_assert(MK_EXPECT_DYN == DYN_SMEM, "host dyn_smem (build.py) != kernel DYN_SMEM");
+#endif
 
 // Unit numbering and row-block ownership live ONLY here (geom) and in PH::src: u = rb * KC + kc, CTA b owns units [u0, u0 + n).
 template <class PH> struct Geom { int u0, n; };
@@ -244,6 +247,12 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     float* rr2 = rr + MAXTOK;
 
     // ---- prologue: TMEM, mbarriers, small smem state ----
+    if (tid == 0) {   // the host's dyn smem must cover the layout (build.py dyn_smem mirrors DYN_SMEM)
+        u32 dyn;
+        asm volatile("mov.u32 %0, %%dynamic_smem_size;" : "=r"(dyn));
+        if (dyn < (u32)DYN_SMEM) __trap();
+    }
+    __syncthreads();
     if (warp == 0) mk_tmem_alloc(smem_u32((void*)tslot));
     if (tid == 0) {
         for (int i = 0; i < RING; ++i) { mbar_init(base + OFF_BARS + 8 * i, 1); mbar_init(base + OFF_BARS + 64 + 8 * i, 1); }
@@ -264,12 +273,14 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     tc_fence_after();
     GS g;
     g.base = base; g.sm = sm; g.bars = base + OFF_BARS; g.tb = *tslot; g.maps = maps; g.F = 0;
+    if (MK_DBG_EXIT == 1) return;
 
     // x[t] = embed[token[t]]; qkv and gu zeroed (their red.add targets)
     for (int i = blockIdx.x * NT + tid; i < ntok * HID; i += gridDim.x * NT)
         __stcg(x + i, bf2f(embed[(size_t)token[i / HID] * HID + (i % HID)]));
     zero_f32(qkv, ntok * QKVN);
     zero_f32(gu, ntok * GUN);
+    if (MK_DBG_EXIT == 2) return;
     if (tid == 0) {   // layer 0 QKV: first weight units (landing during the barrier)
         const Geom<PhQkv> ge = geom<PhQkv>();
         for (int i = 0; i < RING && i < ge.n; ++i) fill_unit<PhQkv>(g, 0, ge.u0 + i, i);

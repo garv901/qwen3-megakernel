@@ -31,6 +31,9 @@
 #ifndef MK_NULL
 #define MK_NULL 0
 #endif
+#ifndef MK_DBG_EXIT
+#define MK_DBG_EXIT 0   // debug: return after prologue stage n (1: smem/TMEM/mbarrier init, 2: + embed copy and zeroing)
+#endif
 #ifndef MK_EPI2
 #define MK_EPI2 0   // TMEM read: 2 chunks of 16 columns per warp iteration (1) or one (0, default: 1 spills at NPAD 16..256)
 #endif

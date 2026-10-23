@@ -26,7 +26,7 @@ KERNEL = "mk_step"
 ATTN_PLACEHOLDER = HERE / "attn_placeholder.cuh"
 ATTN_SPLITKV = COMMON / "splitkv" / "splitkv.cuh"
 OWN_SOURCES = ("mk_common.cuh", "mk_step.cu")
-DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0}
+DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0}
 WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map order (kernel: maps 0..7)
 
 
@@ -74,12 +74,15 @@ def knob_defines(knobs: dict | None) -> list[str]:
     return [f"{n}={int(v)}" for n, v in sorted(k.items())]
 
 
-def dyn_smem(npad: int, ku: int = 128, ring: int = 2) -> int:
-    """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM)."""
+# placeholder SKV_SMEM_BYTES: SKV_CTX x 128 bf16 K/V chunk + 16 warps x 128 fp32 partial o + 2 x 16 fp32 (m, l)
+ATTN_SMEM_PLACEHOLDER = CTX * 128 * 2 + 16 * 128 * 4 + 2 * 16 * 4
+
+
+def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER) -> int:
+    """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM; the kernel traps if the launch gives less)."""
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
-    attn = 16 * 128 * 2 + 16 * 128 * 4 + 2 * 16 * 4
-    return 1024 + ring * ub + max(2 * xs, attn) + 256
+    return 1024 + ring * ub + max(2 * xs, attn_bytes) + 256
 
 
 @lru_cache(maxsize=None)
@@ -91,7 +94,9 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     src = source(attn, Path(attn_path) if attn_path else None)
     if stripped:
         src = strip_knobs(src)
-    defs = [f"NPAD={npad}", f"NB={nb}", *knob_defines(dict(knobs))]
+    k = {**DEFAULT_KNOBS, **dict(knobs)}
+    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"]) if attn == "placeholder" and attn_path is None else 0
+    defs = [f"NPAD={npad}", f"NB={nb}", f"MK_EXPECT_DYN={exp}", *knob_defines(dict(knobs))]
     cubin, log = nvrtc_compile(src, defs, arch=arch, ptxas_verbose=True, name="mk.cu")
     return cubin, parse_ptxas(log), log
 

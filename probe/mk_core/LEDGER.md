@@ -14,3 +14,9 @@
 - `skv_prefetch(layer, cta, nct)` call site in the QKV phase after the weight TMAs are issued (no-op in the placeholder).
   Smem for it: TBD after Pass 0b; L2 prefetch only until stated.
 - `skv_combine` at the start of O-proj, barrier owned by MK-core (default; ticket-last-CTA option later, on data).
+- Update 2026-10-23 (agreed by message): `skv_prefetch` stays a no-op (MK-attn job 9567: L2 KV prefetch net <= 0 [M]).
+  O-proj needs one q-head per CTA (unit u = rb * 16 + kc, kc = head; 128 units, CTA b owns [b*128/148, (b+1)*128/148)).
+  A1 v1 provides `skv_combine_head(layer, head, xs, ntok)`: all 512 threads, writes that head for tokens 0..NPAD-1 as bf16
+  K-major SW128 into the B slot `xs` (layout of mk_step.cu:96-115 @0be7b19, rows >= ntok zero), 0 B scratch smem.
+  Called after the O-proj barrier while the Wo TMA is in flight; MK-core fences proxy.async after it. Global ao
+  [total_q, 2048] stays the fallback. Owed by MK-core: the unit rule of the NPAD 256 (cta_group::2) bucket.
