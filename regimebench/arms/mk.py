@@ -3,7 +3,7 @@ attention as a placeholder behind the A1 interface.
 
 Variants: ``auto`` (smallest token bucket NPAD in {16, 32, 64, 128, 256} >= total_q, CUDA graph) and ``auto-direct`` (same, no graph).
 One cooperative launch per step (total_q <= 256). Options (``load_arm("mk", **opts)``): ``stamps`` (MK_STAMPS), ``null`` (MK_NULL bitmask),
-``ku``, ``ring``, ``ts`` (MK_TS: tile-stream QKV with B = bf16 ``xb`` by TMA, NPAD >= 128 only), ``attn`` ("placeholder" | "splitkv"). The step clones the fixture KV into a packed cache with CTX zero padding rows
+``ku``, ``ring``, ``ts`` (MK_TS: tile-stream QKV with B = bf16 ``xb`` by TMA at NPAD >= ts (1 = 128); default 256, 0 = off), ``attn`` ("placeholder" | "splitkv"). The step clones the fixture KV into a packed cache with CTX zero padding rows
 (as hv2g), encodes the 8 weight tensor maps once, and ``outputs()`` gathers k_new / v_new from the cache.
 """
 
@@ -174,7 +174,7 @@ class MkStep:
 class MkArm:
     name = "mk"
 
-    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 0, attn: str = "placeholder", **_: Any):
+    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 256, attn: str = "placeholder", **_: Any):
         self.attn = attn
         self.knobs = {"MK_STAMPS": int(stamps), "MK_NULL": int(null), "MK_KU": int(ku), "MK_RING": int(ring), "MK_TS": int(ts)}
         self._loaded: dict[tuple, _Loaded] = {}

@@ -26,7 +26,7 @@ KERNEL = "mk_step"
 ATTN_PLACEHOLDER = HERE / "attn_placeholder.cuh"
 ATTN_SPLITKV = COMMON / "splitkv" / "splitkv.cuh"
 OWN_SOURCES = ("mk_common.cuh", "mk_step.cu")
-DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 0}
+DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 256}
 WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map order (kernel: maps 0..7)
 WORKSPACE_MAPS = ("xb",)   # kernel map 8 (MK_TS): bf16 [MAXTOK_MK][H] workspace of the tile-stream QKV (B tiles by TMA)
 TS_TT = 128   # TS token tile (mk_common.cuh TS_TT)
@@ -85,6 +85,11 @@ def lm_ring(npad: int, lmr: int) -> int:
     return lmr if lmr else {16: 4, 32: 3}.get(npad, 2)
 
 
+def ts_min(ts: int) -> int:
+    """Smallest NPAD on the tile stream for MK_TS (mk_common.cuh TS_MIN): 0 = off, 1 = 128, else the value."""
+    return 128 if ts == 1 else ts
+
+
 def ts_ring(ts: int = 1) -> int:
     """Tile-stream ring depth TS_R (mk_common.cuh): slots of 32 KB A + TS_TT x 256 B B that fit the 227 KB budget (static 11280, align 1024, barriers 384)."""
     if not ts:
@@ -98,7 +103,7 @@ def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SME
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     off_bars = ring * ub + max(2 * xs, attn_bytes)
-    if ts and npad >= 128 and ku == 128:   # MK_TS: tile-stream ring overlays the other regions; 384 B of barriers
+    if ts and npad >= ts_min(ts) and ku == 128:   # MK_TS: tile-stream ring overlays the other regions; 384 B of barriers
         return 1024 + max(off_bars, ts_ring(1) * (32768 + TS_TT * 256)) + 384
     if lmp and npad <= 64 and ku == 128:
         return 1024 + max(off_bars, 8 * xs + lm_ring(npad, lmr) * ub) + 384

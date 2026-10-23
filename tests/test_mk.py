@@ -159,7 +159,7 @@ def test_ts_dyn_smem_and_ring():
 
 
 def test_ts_off_sass_identical():
-    """MK_TS=1 at NPAD <= 64 (and with MK_KU=64) is the MK_TS=0 build; MK_TS=1 at NPAD >= 128 differs."""
+    """MK_TS=1 at NPAD <= 64 (and with MK_KU=64) is the MK_TS=0 build; default MK_TS=256 is on at NPAD 256 only."""
     pytest.importorskip("cuda.bindings.nvrtc")
     if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
         pytest.skip("no cuobjdump")
@@ -167,12 +167,14 @@ def test_ts_off_sass_identical():
         assert _sass(B.compile_build(npad, knobs=(("MK_TS", 1),))[0]) == _sass(B.compile_build(npad)[0])
     assert _sass(B.compile_build(128, knobs=(("MK_TS", 1), ("MK_KU", 64)))[0]) == _sass(B.compile_build(128, knobs=(("MK_KU", 64),))[0])
     assert _sass(B.compile_build(128, knobs=(("MK_TS", 0),))[0]) == _sass(B.compile_build(128)[0])
-    assert _sass(B.compile_build(256, knobs=(("MK_TS", 1),))[0]) != _sass(B.compile_build(256)[0])
+    assert _sass(B.compile_build(256, knobs=(("MK_TS", 1),))[0]) == _sass(B.compile_build(256)[0])   # default MK_TS = 256
+    assert _sass(B.compile_build(256, knobs=(("MK_TS", 0),))[0]) != _sass(B.compile_build(256)[0])
+    assert _sass(B.compile_build(128, knobs=(("MK_TS", 128),))[0]) != _sass(B.compile_build(128)[0])
 
 
 @pytest.mark.parametrize("npad", (32, 256))
 def test_ts0_sass_identical_to_head(npad, tmp_path):
-    """MK_TS=0 (default) == the sources of HEAD_P5A (built from `git show`), `cuobjdump -sass` with addresses removed. Skipped when the commit is not in the repo."""
+    """MK_TS=0 == the sources of HEAD_P5A (built from `git show`), `cuobjdump -sass` with addresses removed. Skipped when the commit is not in the repo."""
     pytest.importorskip("cuda.bindings.nvrtc")
     if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
         pytest.skip("no cuobjdump")
@@ -187,7 +189,7 @@ def test_ts0_sass_identical_to_head(npad, tmp_path):
             "print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))" % npad)
     env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
     head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
-    assert head.strip() == _sass(B.compile_build(npad)[0]).strip() and len(head) > 10000
+    assert head.strip() == _sass(B.compile_build(npad, knobs=(("MK_TS", 0),))[0]).strip() and len(head) > 10000
 
 
 def test_ts_workspace_map_specs():
@@ -200,6 +202,6 @@ def test_ts_workspace_map_specs():
 
 
 def test_ts_knob_default_and_arm():
-    assert B.DEFAULT_KNOBS["MK_TS"] == 0
+    assert B.DEFAULT_KNOBS["MK_TS"] == 256 and B.ts_min(1) == 128 and B.ts_min(256) == 256
     assert dict(B.knob_defines({"MK_TS": 1}) and [d.split("=") for d in B.knob_defines({"MK_TS": 1})])["MK_TS"] == "1"
-    assert MkArm(ts=1).knobs["MK_TS"] == 1 and MkArm().knobs["MK_TS"] == 0
+    assert MkArm(ts=1).knobs["MK_TS"] == 1 and MkArm().knobs["MK_TS"] == 256

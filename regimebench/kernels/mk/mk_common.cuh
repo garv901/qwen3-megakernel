@@ -9,7 +9,7 @@
 //   MK_XTMA   0 only (reserved: O-phase B tile by TMA from ao; not implemented in v0).
 //   MK_STAMPS 1: thread 0 stores %globaltimer at every bar_arrive and bar_wait exit into smem, one dump to mk_stamps at the end.
 //   MK_LMP    1: pipelined LM head (NPAD <= 64; NOTES.md "LM head, pipelined"); MK_LMR LM ring slots.
-//   MK_TS     1: tile-stream engine (SPEC-P5a; NOTES.md "Tile-stream QKV"): QKV phase with B = bf16 xb by TMA (NPAD >= 128, MK_KU 128 only; else no effect).
+//   MK_TS     N: tile-stream engine at NPAD >= N (0 off, 1 = 128, default 256) (SPEC-P5a; NOTES.md "Tile-stream QKV"): QKV phase with B = bf16 xb by TMA (NPAD >= 128, MK_KU 128 only; else no effect).
 //   MK_NULL   bitmask, bit p-1 = phase p (1..6), bit 6 = LM head: the phase keeps its barrier(s), weight TMAs and ring waits and skips
 //             staging, MMA, TMEM read and output (wrong outputs by design; null-work oracle).
 #ifndef NPAD
@@ -49,7 +49,7 @@
 #define MK_LMR 0   // LM ring slots (32 KB each) of the MK_LMP path; 0 = per bucket: 4 at NPAD 16, 3 at NPAD 32 (job 9586), 2 at NPAD 64 (smem limit)
 #endif
 #ifndef MK_TS
-#define MK_TS 0   // 1: QKV on the tile-stream engine (ts_phase) at NPAD >= 128; the D phase writes xb = bf16(x * ln1[l+1]) (see NOTES.md)
+#define MK_TS 256   // 0 off; N (128 / 256): QKV on the tile-stream engine (ts_phase) at NPAD >= N (1 = 128; default 256: job 9602 b256 -211, b128 +54 us); the D phase writes xb = bf16(x * ln1[l+1]) (see NOTES.md)
 #endif
 #ifndef MK_STG
 #define MK_STG 4   // staging chunks (16 B) in flight per thread
@@ -57,7 +57,7 @@
 static_assert(NPAD == 16 || NPAD == 32 || NPAD == 64 || NPAD == 128 || NPAD == 256, "NPAD bucket");
 static_assert(MK_KU == 128 || MK_KU == 64, "MK_KU");
 static_assert(MK_RING >= 2 && MK_RING <= 4, "MK_RING");
-static_assert(MK_TS == 0 || MK_TS == 1, "MK_TS");
+static_assert(MK_TS == 0 || MK_TS == 1 || MK_TS == 128 || MK_TS == 256, "MK_TS");
 static_assert(MK_LMP == 0 || MK_LMP == 1, "MK_LMP");
 static_assert(MK_LMR == 0 || (MK_LMR >= 2 && MK_LMR <= 8), "MK_LMR");
 static_assert(MK_XTMA == 0, "MK_XTMA = 1 (O-phase B tile by TMA) is not implemented in v0");
@@ -71,7 +71,8 @@ constexpr int HID = 1024, NLAY = 28, NQH = 16, NKVH = 8, HDIM = 128, INTER = 307
 constexpr int QKVN = 4096, GUN = 6144, QDIM = 2048;
 constexpr int MAXTOK = 256;
 constexpr float EPS = 1e-6f;
-constexpr bool TS = MK_TS && NPAD >= 128 && MK_KU == 128;   // tile-stream QKV (SPEC-P5a)
+constexpr int TS_MIN = MK_TS == 1 ? 128 : MK_TS;   // smallest NPAD bucket on the tile stream (keep in sync with build.py:ts_min)
+constexpr bool TS = MK_TS && NPAD >= TS_MIN && MK_KU == 128;   // tile-stream QKV (SPEC-P5a)
 constexpr int NMAP = TS ? 9 : 8;   // tensor maps: wq, wk, wv, wo, wg, wu, wd, embed (+ xb when TS), 128 B each, in global memory
 
 constexpr int KU = MK_KU, NBOX = KU / 64, RING = MK_RING;
