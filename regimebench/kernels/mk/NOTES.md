@@ -92,7 +92,7 @@ Knob-off identity: `tests/test_mk.py::test_knob_off_sass_identical_to_stripped_s
 7. Cooperative launch co-residency: 209168 B smem at NPAD 256 plus 128 regs x 512 threads; one CTA per SM.
 
 ## LM head, pipelined (MK_LMP, SPEC-lm; CPU-verified only: compile, SASS, pytest)
-Knobs `MK_LMP` (default 0) and `MK_LMR` (LM ring slots, default 4). `LMP = MK_LMP && NPAD <= 32`; at NPAD >= 64 MK_LMP=1 keeps the v0 `gemm_phase<PhLm>` path
+Knobs `MK_LMP` (default 1, job 9586) and `MK_LMR` (LM ring slots, default 0 = 4 at NPAD 16, 3 at 32, 2 at 64). `LMP = MK_LMP && NPAD <= 64` (NPAD 64 since P3b: the 12 epilogue warps loop over the 4 column chunks, `LM_EPI_WARPS` = accempty count); at NPAD >= 128 MK_LMP=1 keeps the v0 `gemm_phase<PhLm>` path
 (`if constexpr`). MK_LMP=0: SASS identical to HEAD for all 5 buckets (checked by building `git show HEAD:` sources; also `test_lmp_off_sass_identical`).
 Code: `lm_fill`, `lm_first`, `lm_phase` in `mk_step.cu`; constants `LM_RING_OFF`, `LMB_*`, `BARS_BYTES` in `mk_common.cuh`; `build.py:dyn_smem(..., lmp, lmr)`.
 - Smem (from the 1024-aligned base): `[XL: 8 x XS][LM ring: LMR x 32 KB]`, overlaying every other region; `OFF_BARS = max(v0 layout, LM layout)`; 384 B of barriers

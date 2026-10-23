@@ -8,7 +8,7 @@
 //   MK_RING   weight ring slots (units in flight), 2..4.
 //   MK_XTMA   0 only (reserved: O-phase B tile by TMA from ao; not implemented in v0).
 //   MK_STAMPS 1: thread 0 stores %globaltimer at every bar_arrive and bar_wait exit into smem, one dump to mk_stamps at the end.
-//   MK_LMP    1: pipelined LM head (NPAD <= 32; NOTES.md "LM head, pipelined"); MK_LMR LM ring slots.
+//   MK_LMP    1: pipelined LM head (NPAD <= 64; NOTES.md "LM head, pipelined"); MK_LMR LM ring slots.
 //   MK_NULL   bitmask, bit p-1 = phase p (1..6), bit 6 = LM head: the phase keeps its barrier(s), weight TMAs and ring waits and skips
 //             staging, MMA, TMEM read and output (wrong outputs by design; null-work oracle).
 #ifndef NPAD
@@ -42,10 +42,10 @@
 #define MK_EPI2 0   // TMEM read: 2 chunks of 16 columns per warp iteration (1) or one (0, default: 1 spills at NPAD 16..256)
 #endif
 #ifndef MK_LMP
-#define MK_LMP 1   // 1 (default, job 9586): pipelined LM head (SPEC-lm): X staged once, LM ring of MK_LMR units, 2 TMEM accumulators, warp-specialized (NPAD <= 32 only; larger NPAD keeps the v0 LM path)
+#define MK_LMP 1   // 1 (default, job 9586): pipelined LM head (SPEC-lm): X staged once, LM ring of MK_LMR units, 2 TMEM accumulators, warp-specialized (NPAD <= 64 only; larger NPAD keeps the v0 LM path)
 #endif
 #ifndef MK_LMR
-#define MK_LMR 0   // LM ring slots (32 KB each) of the MK_LMP path; 0 = per bucket: 4 at NPAD 16, 3 at NPAD 32 (job 9586)
+#define MK_LMR 0   // LM ring slots (32 KB each) of the MK_LMP path; 0 = per bucket: 4 at NPAD 16, 3 at NPAD 32 (job 9586), 2 at NPAD 64 (smem limit)
 #endif
 #ifndef MK_STG
 #define MK_STG 4   // staging chunks (16 B) in flight per thread
@@ -74,11 +74,12 @@ constexpr int XS = NBOX * NPAD * 128;         // bytes of one B-tile slot (NBOX 
 constexpr int ATTN_BYTES = SKV_SMEM_BYTES;    // attention scratch, overlaid on the B-tile slots (idle in phases 2 and 3)
 constexpr int XREG = (2 * XS > ATTN_BYTES) ? 2 * XS : ATTN_BYTES;
 constexpr int OFF_X = RING * UB;              // B-tile slots (offset from the 1024-aligned smem base)
-// LM head, pipelined path (SPEC-lm), NPAD <= 32: smem from the base = [XL: 8 k-chunks x XS][LM ring: LMR x UB]; overlays every other region
+// LM head, pipelined path (SPEC-lm), NPAD <= 64: smem from the base = [XL: 8 k-chunks x XS][LM ring: LMR x UB]; overlays every other region
 // (no other phase runs after the LM phase); the barriers stay behind the larger of the two layouts.
-constexpr bool LMP = MK_LMP && NPAD <= 32;
+constexpr bool LMP = MK_LMP && NPAD <= 64;
 static_assert(!LMP || MK_KU == 128, "MK_LMP needs MK_KU = 128 (8 k-chunks of 128)");
-constexpr int LMR = MK_LMR ? MK_LMR : (NPAD == 16 ? 4 : 3);   // keep in sync with build.py:lm_ring
+constexpr int LMR = MK_LMR ? MK_LMR : (NPAD == 16 ? 4 : NPAD == 32 ? 3 : 2);   // keep in sync with build.py:lm_ring
+constexpr int LM_EPI_WARPS = 4 * (NPAD / 16 < 3 ? NPAD / 16 : 3);   // epilogue warps of the LM head (accempty count)
 constexpr int LM_RING_OFF = 8 * XS;
 constexpr int LM_BYTES = LMP ? 8 * XS + LMR * UB : 0;
 constexpr int OFF_BARS = (OFF_X + XREG > LM_BYTES) ? OFF_X + XREG : LM_BYTES;   // tma bars [0, RING), mma bars at +64, tmem slot at +128

@@ -79,17 +79,17 @@ ATTN_SMEM_PLACEHOLDER = CTX * 128 * 2 + 16 * 128 * 4 + 2 * 16 * 4
 
 
 def lm_ring(npad: int, lmr: int) -> int:
-    """MK_LMR as the kernel uses it (mk_common.cuh LMR): 0 = per bucket, 4 slots at NPAD 16, 3 at NPAD 32 (job 9586)."""
-    return lmr if lmr else (4 if npad == 16 else 3)
+    """MK_LMR as the kernel uses it (mk_common.cuh LMR): 0 = per bucket, 4 slots at NPAD 16, 3 at NPAD 32 (job 9586), 2 at NPAD 64 (smem)."""
+    return lmr if lmr else {16: 4, 32: 3}.get(npad, 2)
 
 
 def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0) -> int:
     """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM; the kernel traps if the launch gives less).
-    lmp: MK_LMP (the pipelined LM head only applies at npad <= 32: smem = [8 X chunks][lmr x 32 KB ring], 384 B of barriers)."""
+    lmp: MK_LMP (the pipelined LM head only applies at npad <= 64: smem = [8 X chunks][lmr x 32 KB ring], 384 B of barriers)."""
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     off_bars = ring * ub + max(2 * xs, attn_bytes)
-    if lmp and npad <= 32:
+    if lmp and npad <= 64:
         return 1024 + max(off_bars, 8 * xs + lm_ring(npad, lmr) * ub) + 384
     return 1024 + off_bars + 256
 

@@ -90,7 +90,7 @@ def test_knob_off_sass_identical_to_stripped_source():
     assert a == b and len(a) > 10000
 
 
-@pytest.mark.parametrize("npad,lmr", [(16, 2), (16, 4), (16, 5), (32, 2), (32, 4)])
+@pytest.mark.parametrize("npad,lmr", [(16, 2), (16, 4), (16, 5), (32, 2), (32, 4), (64, 2)])
 def test_lmp_builds_compile(npad, lmr):
     """Pipelined LM head: compiles without spill; MK_EXPECT_DYN == DYN_SMEM is a static_assert, so a compile checks B.dyn_smem."""
     pytest.importorskip("cuda.bindings.nvrtc")
@@ -106,15 +106,15 @@ def test_lmp_too_many_slots_rejected():
 
 
 def test_lmp_off_sass_identical():
-    """MK_LMP=1, MK_LMR=0 is the default build (LMR 4 at NPAD 16, 3 at NPAD 32); MK_LMP=1 at NPAD >= 64 keeps the v0 LM path; MK_LMP=0 at NPAD 16 differs."""
+    """MK_LMP=1, MK_LMR=0 is the default build (LMR 4 at NPAD 16, 3 at NPAD 32); MK_LMP=1 at NPAD >= 128 keeps the v0 LM path; MK_LMP=0 at NPAD 16 differs."""
     pytest.importorskip("cuda.bindings.nvrtc")
     if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
         pytest.skip("no cuobjdump")
     assert _sass(B.compile_build(32, knobs=(("MK_LMP", 1), ("MK_LMR", 3)))[0]) == _sass(B.compile_build(32)[0])
     assert _sass(B.compile_build(16, knobs=(("MK_LMP", 1), ("MK_LMR", 4)))[0]) == _sass(B.compile_build(16)[0])
-    assert _sass(B.compile_build(64, knobs=(("MK_LMP", 0),))[0]) == _sass(B.compile_build(64)[0])
+    assert _sass(B.compile_build(128, knobs=(("MK_LMP", 0),))[0]) == _sass(B.compile_build(128)[0])
     assert _sass(B.compile_build(16, knobs=(("MK_LMP", 0),))[0]) != _sass(B.compile_build(16)[0])
-    assert B.dyn_smem(64, lmp=0) == B.dyn_smem(64)
+    assert B.dyn_smem(128, lmp=0) == B.dyn_smem(128)
 
 
 def test_stamps_build_differs_from_default():

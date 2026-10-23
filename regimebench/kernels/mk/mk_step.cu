@@ -199,7 +199,7 @@ __device__ __forceinline__ void gemm_phase(GS& g, int l, int nrows, GetF get, Ep
     }
 }
 
-// ---------------------------------------------------------------- pipelined LM head (MK_LMP, NPAD <= 32; see NOTES.md "LM head, pipelined")
+// ---------------------------------------------------------------- pipelined LM head (MK_LMP, NPAD <= 64; see NOTES.md "LM head, pipelined")
 // LM unit j of this CTA (rb = r0 + j / 8, kc = j % 8) lives in LM ring slot j % LMR, full barrier full[j % LMR].
 __device__ __forceinline__ void lm_fill(const GS& g, int r0, int j) {   // one thread
     constexpr int KCL = HID / KU;
@@ -278,16 +278,17 @@ __device__ __forceinline__ void lm_phase(GS& g, GetF get, EpiF epi) {
             mk_commit(emptyb + 8 * s);
             if (kc == KCL - 1) mk_commit(accf + 8 * b);
         }
-    } else if (warp >= 4 && (warp >> 2) - 1 < NCH) {   // epilogue: warp w = 4 .. 4 + 4 NCH - 1, quadrant q = w & 3, column chunk (w >> 2) - 1
-        const int c = (warp >> 2) - 1;
+    } else if (warp >= 4 && (warp >> 2) - 1 < NCH) {   // epilogue: warp w = 4 .. 4 + 4 min(NCH, 3) - 1, quadrant q = w & 3, column chunks (w >> 2) - 1 + 3 k
         for (int i = 0; i < nrb; ++i) {
             const int b = i & 1;
             mbar_wait(accf + 8 * b, (i / 2) & 1);
             tc_fence_after();
-            u32 v[16];
-            mk_tmem_read16(v, g.tb + b * NPAD, q, c * 16);
-            tc_wait_ld();
-            epi((r0 + i) * 128 + mk_row_of(q, lane), c * 16, v, r0 + i);
+            for (int c = (warp >> 2) - 1; c < NCH; c += 3) {   // chunks are disjoint slots: still one writer per (quadrant, slot)
+                u32 v[16];
+                mk_tmem_read16(v, g.tb + b * NPAD, q, c * 16);
+                tc_wait_ld();
+                epi((r0 + i) * 128 + mk_row_of(q, lane), c * 16, v, r0 + i);
+            }
             tc_fence_before();
             __syncwarp();
             if (lane == 0) mbar_arrive(acce + 8 * b);
@@ -363,7 +364,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
         for (int i = 0; i < RING; ++i) { mbar_init(base + OFF_BARS + 8 * i, 1); mbar_init(base + OFF_BARS + 64 + 8 * i, 1); }
         if constexpr (LMP) {
             for (int i = 0; i < LMR; ++i) { mbar_init(base + OFF_BARS + LMB_FULL + 8 * i, 1); mbar_init(base + OFF_BARS + LMB_EMPTY + 8 * i, 1); }
-            for (int b = 0; b < 2; ++b) { mbar_init(base + OFF_BARS + LMB_ACCF + 8 * b, 1); mbar_init(base + OFF_BARS + LMB_ACCE + 8 * b, 4 * (NPAD / 16)); }
+            for (int b = 0; b < 2; ++b) { mbar_init(base + OFF_BARS + LMB_ACCF + 8 * b, 1); mbar_init(base + OFF_BARS + LMB_ACCE + 8 * b, LM_EPI_WARPS); }
         }
         mbar_fence_init();
         for (int m = 0; m < NMAP; ++m) map_acquire(maps + 128 * m);
