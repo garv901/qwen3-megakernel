@@ -16,5 +16,20 @@ P3 goes first; P2 follows when v2 is in.
 - Checks: 0-line SASS diff with MK_LMP=0; SASS counts; A/B with ab.py (R0-b1, R1-b16, R1-b32, R2-b1-kv8192, R6-q4) MK_LMP 0 / 1,
   MK_LMR 2 / 4 / 6; accuracy band at every point.
 
-## Results
-(pending)
+## Results [M]
+- Build (CPU): NPAD 16 86 regs / 0 spill, dyn 165248 B (LMR 4); NPAD 32 80 regs, 165248 B (LMR 3). Off = 0-line SASS diff at all 5
+  buckets. LMR max: 5 at NPAD 16, 4 at NPAD 32 (227 KB).
+- Job 9585: trap at the first launch: `arms/mk.py` sized the launch smem without the LM knobs (my SPEC missed that call site; fixed).
+- A/B (job 9586, GPU-c098, 9 interleaved rounds), d vs MK_LMP=0 for LMR 2 / 3 / 4:
+  R0-b1 -44.5 / -58.4 / -59.9; R1-b16 -62.9 / -65.3 / -67.8; R1-b32 -60.8 / **-66.9** / -53.1; R2-b1-kv8192 -29.3 / -51.6 / -50.8;
+  R6-q4 -49.3 / -57.3 / -60.0. Accuracy unchanged. R1-b128 (same SASS in every arm) +18.8 / -2.5 / +6.2: **~20 us is the noise of
+  the same binary at b128 in one job**, so the v1 vs v0 +68 at b128 (other GPU) is not a measured regression yet.
+- **Kept, default on:** MK_LMP=1, MK_LMR=0 = 4 at NPAD 16, 3 at NPAD 32. R0-b1 734.7 us (fi 787, job 9562).
+- Check (job 9588): ALL PASS at 11 points; LM phase (stamps) 44.8 (b1) / 48.9 (b16) / 54.0 (b32) us = 6.9 / 6.4 / 5.8 TB/s
+  (was ~99 / 112). Still v0 LM path: 129 (b64) / 173 (b128) / 304 (b256) us.
+
+## Next
+- P3b: the pipelined LM head at NPAD >= 64. NPAD 64: XL = 128 KB + LMR 2 = 193 KB, fits as is. NPAD 128 / 256: X does not fit
+  (256 / 512 KB); options: X k-chunk ring (restage per k-chunk, 8 chunks, shared by all row blocks of a pass over a row group), or
+  output tiles of N = 64 tokens with the weights re-read from L2 (2 / 4 passes). Epilogue cost at b256 (logits 256 x 151936 fp32
+  = 156 MB of writes) is a floor of ~24 us by itself.
