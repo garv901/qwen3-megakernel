@@ -497,11 +497,13 @@ constexpr int TK_D = 16;
 // CTA b of an NTILE-unit phase owns [lo(b), lo(b + 1)) (the formula of geom / ts_geom); idle = owns none. rank = index of this CTA among the idle CTAs in blockIdx order, nidle = their count.
 template <int NTILE>
 __device__ __forceinline__ void idle_rank(int& rank, int& nidle) {
-    rank = -1; nidle = 0;
-    for (int b = 0; b < (int)gridDim.x; ++b) {
-        const int lo = (int)(((long long)b * NTILE) / gridDim.x), hi = (int)(((long long)(b + 1) * NTILE) / gridDim.x);
-        if (hi == lo) { if (b == (int)blockIdx.x) rank = nidle; ++nidle; }
-    }
+    // NTILE <= grid: every working CTA owns exactly one unit, so the working CTAs below b are lo(b) and the idle ones b - lo(b).
+    // Closed form (a loop over the grid with 64-bit divisions cost ~20 us per phase, job 9613).
+    static_assert(NTILE <= NB, "idle_rank: closed form needs NTILE <= grid");
+    const int b = (int)blockIdx.x, G = (int)gridDim.x;
+    const int lo = (b * NTILE) / G, hi = ((b + 1) * NTILE) / G;
+    nidle = G - NTILE;
+    rank = hi == lo ? b - lo : -1;
 }
 // All threads of an idle CTA (block-uniform; other CTAs return at once). Jobs = (rb, tt) with TT = 128 tokens: job j = rb * NTT + tt, idle CTA r takes j = r, r + nidle, ...
 // IS_O: wait tk[j] == 16, xb2[t][rb 128 ..] = bf16(x * ln2[l]) and ss2[t] += sum of x^2 over the 128 columns; else: wait tk[TK_D + j] == D_KS, xb = bf16(x * ln1[l + 1]).
