@@ -4,7 +4,7 @@ attention as a placeholder behind the A1 interface.
 Variants: ``auto`` (smallest token bucket NPAD in {16, 32, 64, 128, 256} >= total_q, CUDA graph) and ``auto-direct`` (same, no graph).
 One cooperative launch per step (total_q <= 256). Options (``load_arm("mk", **opts)``): ``stamps`` (MK_STAMPS), ``null`` (MK_NULL bitmask),
 ``ku``, ``ring``, ``ts`` (MK_TS: tile-stream QKV with B = bf16 ``xb`` by TMA at NPAD >= ts (1 = 128); default 256, 0 = off), ``tsb`` (MK_TSB, default 0: P5b, GU and D on
-the tile stream with act / xb2 buffers, the interleaved wg|wu weights and the idle-CTA finalizers; needs MK_TS on at the bucket), ``lmts`` (MK_LMTS, default 0: SPEC-P3c, the LM head on the tile stream
+the tile stream with act / xb2 buffers, the interleaved wg|wu weights and the idle-CTA finalizers; needs MK_TS on at the bucket), ``lmts`` (MK_LMTS, default 1: SPEC-P3c, the LM head on the tile stream
 at TSB buckets when n_lm == ntok and lm_tok[s] == s; else the v0 LM path), ``attn`` ("placeholder" | "splitkv" | "auto"; default "placeholder"; SPEC-P2: splitkv = A1 split-KV attention v2 (splitkv-v2)
 + combine_head in the O phase when plan.s_max > 1 (else ao is staged, no combine); q_len > 1 (<= 16) builds with -DSKV_QMAX=16; auto = splitkv when every seq has q_len == 1 and max kv >= 512, else the placeholder, chosen per workload at prepare()). The step clones the fixture KV into a packed cache with CTX zero padding rows
 (as hv2g), encodes the 8 weight tensor maps once, and ``outputs()`` gathers k_new / v_new from the cache.
@@ -210,7 +210,7 @@ class MkStep:
 class MkArm:
     name = "mk"
 
-    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 0, attn: str = "auto", **_: Any):
+    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", **_: Any):
         if attn not in ATTN_OPTIONS:
             raise ValueError(f"unknown attn {attn!r} (one of {ATTN_OPTIONS})")
         self.attn = attn

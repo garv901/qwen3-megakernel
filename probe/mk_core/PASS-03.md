@@ -47,3 +47,6 @@ P3 goes first; P2 follows when v2 is in.
   the v0 path unless lm_tok is the identity (all q_len 1 points).
 - Band [H]: b256 -150..-200, b128 -80..-100 us/step (per-CTA ingest ~6.2 / 4.1 MB at the job 9595 per-SM rate).
 - Checks: MK_LMTS 0 = 0-line SASS diff; A/B with ab.py at R1-b128 / R1-b256 (MK_LMTS 0 / 1), accuracy band at both; stamps.
+- Result (job 9701, fd67607, GPU-17dce9e8): check ALL PASS at R1-b64 / b128 / b256 (0 local bytes); A/B MK_LMTS 0 -> 1, 7 rounds:
+  b128 2670.0 -> 2573.7 (-96.4 [-98.0, -95.9]), b256 4588.2 -> 4373.3 (-215.7 [-217.7, -212.8]) [M]. **Kept, default on.**
+  (Job 9690 / 9699: void, `--wrap` ran under sh; also ab.py takes raw knob names: {"MK_LMTS": 1}, not {"lmts": 1}.)

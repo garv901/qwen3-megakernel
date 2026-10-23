@@ -55,7 +55,7 @@
 #define MK_TS 128   // 0 off; N (128 / 256): tile-stream engine (ts_phase) at NPAD >= N (1 = 128; default 128 with MK_TSB 1: job 9622 b128 -167, b256 -957 us; P5a alone was b128 +54, job 9602); the D phase writes xb = bf16(x * ln1[l+1]) (see NOTES.md)
 #endif
 #ifndef MK_LMTS
-#define MK_LMTS 0   // 1: SPEC-P3c, the LM head on the tile stream (ts_phase<PhLm, 128, 1>, A = embed, B = bf16(x * fnorm) from the last D finalize) when TSB and every lm slot s holds token s; else the v0 LM path
+#define MK_LMTS 1   // (default 1, job 9701: b128 -96, b256 -216 us) 1: SPEC-P3c, the LM head on the tile stream (ts_phase<PhLm, 128, 1>, A = embed, B = bf16(x * fnorm) from the last D finalize) when TSB and every lm slot s holds token s; else the v0 LM path
 #endif
 #ifndef MK_TSB
 #define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
