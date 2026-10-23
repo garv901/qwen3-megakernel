@@ -51,7 +51,7 @@ def timed(step, n: int = 20, rounds: int = 5) -> float:
 
 
 def check(args, dev: str) -> int:
-    arm = load_arm("mk", attn=args.attn)
+    arm = load_arm("mk", attn=args.attn, **args.knobs)
     rows, failures = [], 0
     for w in select(args.workloads.split(",") if args.workloads else DEFAULT):
         print(f"=== {w.id} (n_seq {w.n_seq}, total_q {w.total_q}, max_kv {w.max_kv})", flush=True)
@@ -103,7 +103,7 @@ def check(args, dev: str) -> int:
 
 
 def null_mode(args, dev: str) -> int:
-    full, nul = load_arm("mk", attn=args.attn), load_arm("mk", null=args.null, attn=args.attn)
+    full, nul = load_arm("mk", attn=args.attn, **args.knobs), load_arm("mk", null=args.null, attn=args.attn, **args.knobs)
     for w in select(args.workloads.split(",") if args.workloads else DEFAULT):
         inputs = make_inputs(w, args.seed, dev)
         a = full.prepare(w, inputs, "auto", dev)
@@ -116,7 +116,7 @@ def null_mode(args, dev: str) -> int:
 
 
 def stamps_mode(args, dev: str) -> int:
-    arm = load_arm("mk", stamps=1, attn=args.attn)
+    arm = load_arm("mk", stamps=1, attn=args.attn, **args.knobs)
     nbar = 1 + 6 * 28
     for w in select(args.workloads.split(",") if args.workloads else DEFAULT):
         inputs = make_inputs(w, args.seed, dev)
@@ -155,6 +155,7 @@ def main() -> int:
     ap.add_argument("--json", default=None)
     ap.add_argument("--null", type=lambda s: int(s, 0), default=None)
     ap.add_argument("--stamps", action="store_true")
+    ap.add_argument("--knobs", type=json.loads, default={}, help='MkArm options as JSON, e.g. {"ts": 256, "tsb": 0}')
     ap.add_argument("--attn", default="placeholder", help="MkArm attn option: placeholder | splitkv | auto")
     args = ap.parse_args()
     dev = "cuda"
