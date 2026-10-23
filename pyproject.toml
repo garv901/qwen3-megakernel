@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "regimebench"
+version = "0.1.0"
+description = "Qwen3-0.6B megakernel (hv2) across serving regimes vs CUDA-graph+PDL baselines and vLLM"
+requires-python = ">=3.10"
+dependencies = ["torch", "matplotlib"]
+
+[tool.setuptools.packages.find]
+include = ["regimebench*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

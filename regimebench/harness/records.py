@@ -15,11 +15,11 @@ from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
 
-SCHEMA = "megabench.sota/v1"
+SCHEMA = "regimebench/v1"
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RUNS_DIR = Path(__file__).resolve().parent / "runs"
+RUNS_DIR = REPO_ROOT / "runs"
 ENV_PREFIXES = ("FLASHINFER_", "TORCHINDUCTOR_", "VLLM_")
-ENV_NAMES = ("HF_HUB_OFFLINE", "HF_HOME", "TRITON_CACHE_DIR", "MEGABENCH_SOTA_CACHE")
+ENV_NAMES = ("HF_HUB_OFFLINE", "HF_HOME", "TRITON_CACHE_DIR")
 
 
 class RecordWriter:
@@ -65,6 +65,9 @@ def read_records(path: Path) -> list[dict]:
             if line:
                 out.append(json.loads(line))
     return out
+
+
+RECORD_TYPES = ("timing", "accuracy", "skip", "error", "probe", "env")
 
 
 def new_run_dir(tag: str) -> Path:
