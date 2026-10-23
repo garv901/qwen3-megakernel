@@ -1,6 +1,7 @@
 #!/bin/bash
 # xover3: build ts (tile-stream engine) and a3 (xover2 baseline: KU=128 XTMA=1 RING=0 CG=1, built from ../xover2/xover2.cu, not edited) with ptxas -v log;
 # unless --build-only, run both over shapes x T (JSON lines on stdout, PASS/FAIL lines on stderr).
+# env SB=1 selects the staged-B arm (P4b) for the default sweep (default SB=0). The P4b run plan is in xover3.sbatch.
 # Usage: bash run.sh [--build-only] [nph=0 (112)] [reps=5] [shape=all (QKV O GU D)] [T=0 (32 64 128 256)]
 cd "$(dirname "$0")"; mkdir -p bin logs
 NVCC=${NVCC:-/usr/local/cuda/bin/nvcc}
@@ -17,5 +18,5 @@ NPH=${1:-0}; REPS=${2:-5}; SH=${3:-all}; TS=${4:-0}
 [ "$SH" = all ] && SH="QKV O GU D"; [ "$TS" = 0 ] && TS="32 64 128 256"
 for s in $SH; do for t in $TS; do
   ./bin/a3 $NPH $REPS $s $t
-  ./bin/ts $NPH $REPS $s $t
+  ./bin/ts $NPH $REPS $s $t 0 0 ${SB:-0}
 done; done

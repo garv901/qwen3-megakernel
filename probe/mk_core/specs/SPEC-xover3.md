@@ -47,3 +47,18 @@ X is bf16 [T][K] in global (row-major, K-major operand), W bf16 [N][K]. Y fp32 [
   `probe/mk_core/xover3/logs/slurm-%j.log`. Estimate the runtime from the config count (xover2 job 9566 took about 5 min for 8 arms).
 - Report: files, build table, SASS counts, config count, the parity / first-use / overlap arguments (as in mk NOTES "LM head,
   pipelined"), and every deviation. Do not git commit.
+
+## P4b addendum: staged-B arm "sb" (same binary, runtime flag SB; default 0 = the TMA-B arm above, unchanged)
+- SB = 1: X source is fp32 Xf [T][K] (row-major) + per-token scale r[T] (fp32); B chunk of a k-step = bf16(Xf[t][k] * r[t]) for
+  the tile's TT tokens x 128 k, written by the epilogue warps (warps 4..15, all 384 threads) with generic 16 B shared stores in the
+  SW128 K-major layout of the TMA B box (same bytes as the TMA would write), then `fence.proxy.async.shared::cta`, `__syncwarp`,
+  lane 0 of each of the 12 warps arrives on full[s]. full[s] count = 1 (A expect_tx) + 12. The A boxes still come by TMA (the
+  window prefetch of A stays; B staging happens after the grid barrier, as with TMA B).
+- Staging order: the 12 warps walk the CTA's k-steps in order (wait empty[s] for reuse exactly as the producer does; f < ring
+  needs no wait), staying at most `ring` steps ahead of the MMA; at each tile end they run the epilogue of that tile (wait
+  accfull) before staging further steps of the next tile. State why this cannot deadlock (MMA of tile i needs only tile i's steps).
+  Loads: __ldcg float4 x 2 per 8 k (MK_STG-style: several 16 B chunks in flight per thread).
+- The reference uses bf16(Xf * r) as X. Check every SB = 1 config at T = 64 and 256 as before.
+- Run plan in xover3.sbatch: SB = 0 and SB = 1 for every config at T in {128, 256}, and SB = 1 at T in {32, 64} for the best
+  three SB = 0 configs per (shape, T) of job 9592 (hard-code that list; it is in PASS-04.md). Keep the a3 runs.
+- Report as before. CPU only, no commit.

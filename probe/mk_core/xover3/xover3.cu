@@ -4,7 +4,10 @@
 // Tile (rb, tt, ks): W rows 128 rb.., tokens TT tt.., k range ks*K/KS ..; t = (rb*NTT + tt)*KS + ks; CTA b owns [b*NT/148, (b+1)*NT/148).
 // Per k-step (128 k) one ring slot = A (128 x 128 bf16, 2 SW128 boxes 64x128) + B (TT x 128 bf16, 2 SW128 boxes 64 x TT), full barrier count 2
 // (arrival 1: A expect_tx, may be issued in the previous phase's barrier window; arrival 2: B expect_tx, issued after the grid barrier).
-// Run: ./bin/ts [nph=0 (112)] [reps=5] [shape=QKV|O|GU|D|all] [T=0 (32,64,128,256)] [TT=0 (all)] [KS=0 (all)]
+// P4b arm "sb" (runtime flag SB, default 0 = the TMA-B arm above, unchanged): SB = 1 takes X as fp32 Xf[T][K] + per-token scale r[T]; the B chunk of a k-step
+// bf16(Xf * r) is written by the 12 epilogue warps (generic 16 B stores, SW128 layout of the TMA box) + fence.proxy.async + one arrival per warp on full[s]
+// (full count 1 + 12 = 13). See NOTES.md "P4b: staged-B arm".
+// Run: ./bin/ts [nph=0 (112)] [reps=5] [shape=QKV|O|GU|D|all] [T=0 (32,64,128,256)] [TT=0 (all)] [KS=0 (all)] [SB=0]
 #include <cuda.h>
 #include <cudaTypedefs.h>
 #include <cuda_runtime.h>
@@ -20,6 +23,10 @@ typedef unsigned int u32;
 typedef unsigned long long ull;
 typedef __nv_bfloat16 bf16;
 constexpr int NT = 512, GRID = 148, MAXRING = 16, TMEM_COLS = 512;
+#ifndef SB_STG
+#define SB_STG 4          // SB = 1: 16 B chunks (2 x LDG.128) in flight per thread, as MK_STG in mk_common.cuh
+#endif
+constexpr int NSTG = 384;   // staging threads (warps 4..15)
 constexpr int SMEM_MAX = 227 * 1024, SMEM_FIXED = 1024 + 2048;   // 1 KB alignment slack + 2 KB (barriers, tmem slot)
 constexpr int A_BYTES = 128 * 128 * 2;                           // 32768 per k-step
 
@@ -76,7 +83,8 @@ __device__ __forceinline__ void red_add(float* p, float v) { asm volatile("red.g
 
 // TMEM layout: accumulator b (= global tile counter & 1) at columns b*TT .. b*TT+TT-1 of the 512-column allocation.
 __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMap mW, const __grid_constant__ CUtensorMap mX, float* Y, int N, int K, int T,
-                                              int TT, int KS, int nph, int phase0, long long rowsAvail, int ring, unsigned* cnt, ull* tm) {
+                                              int TT, int KS, int nph, int phase0, long long rowsAvail, int ring, unsigned* cnt, ull* tm,
+                                              const float* Xf, const float* rs, int SB) {
   extern __shared__ uint8_t smraw[];
   const u32 raw = smem_u32(smraw), base = (raw + 1023) & ~1023u;
   uint8_t* sm = smraw + (base - raw);
@@ -89,7 +97,7 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
   const ull c0 = clock64(), g0 = gt();
   if (warp == 0) tmem_alloc(smem_u32((void*)tslot), TMEM_COLS);
   if (tid == 0) {
-    for (int i = 0; i < ring; ++i) { mbar_init(fullb + 8 * i, 2); mbar_init(emptyb + 8 * i, 1); }
+    for (int i = 0; i < ring; ++i) { mbar_init(fullb + 8 * i, SB ? 13 : 2); mbar_init(emptyb + 8 * i, 1); }
     for (int b = 0; b < 2; ++b) { mbar_init(accf + 8 * b, 1); mbar_init(acce + 8 * b, 4 * NEPI); }
     mbar_fence_init();
   }
@@ -115,15 +123,85 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
     mbar_expect_tx(full, BB);
     for (int a = 0; a < 2; ++a) tma2(base + s * SLOT + A_BYTES + a * (TT * 128), &mX, kc + a * 64, tt * TT, full);
   };
-  if (tid == 0) for (int i = 0; i < min(ring, nst); ++i) { fill_a(0, i, i); fill_b(i, i); }
+  // stage_b (SB = 1, epilogue warps only): B chunk of step j (global step f, slot f % ring) = bf16(Xf[t][k] * r[t]), tokens TT tt.., k kc..kc+127, written in the
+  // SW128 K-major layout of the TMA box {64 k, TT} (k-atom a = ch >> 3 at a * TT * 128 B, token row r at r * 128 B, 16 B chunk (ch & 7) ^ (r & 7)).
+  // Called by each of the 12 warps (all 32 lanes); ends with fence.proxy.async, __syncwarp, lane 0 arrives on full[s].
+  auto stage_b = [&](int j, u32 f) {
+    const int t = t0 + j / SPT, kc = (t % KS) * KSL + (j % SPT) * 128, tt = (t / KS) % NTT, s = f % ring, w = tid - 128, CH = TT * 16;
+    uint8_t* dst = sm + s * SLOT + A_BYTES;
+    const float* xr = Xf + (size_t)(tt * TT) * K + kc;
+    for (int g0 = w; g0 < CH; g0 += SB_STG * NSTG) {
+      float4 v[SB_STG][2]; float rv[SB_STG];
+#pragma unroll
+      for (int jj = 0; jj < SB_STG; ++jj) {
+        const int c = g0 + jj * NSTG;
+        if (c < CH) {
+          const int r = c >> 4, ch = c & 15;
+          const float4* p = reinterpret_cast<const float4*>(xr + (size_t)r * K + ch * 8);
+          v[jj][0] = __ldcg(p); v[jj][1] = __ldcg(p + 1); rv[jj] = __ldcg(rs + tt * TT + r);
+        }
+      }
+#pragma unroll
+      for (int jj = 0; jj < SB_STG; ++jj) {
+        const int c = g0 + jj * NSTG;
+        if (c < CH) {
+          const int r = c >> 4, ch = c & 15;
+          const float sc = rv[jj];
+          __nv_bfloat162 h0 = __floats2bfloat162_rn(v[jj][0].x * sc, v[jj][0].y * sc), h1 = __floats2bfloat162_rn(v[jj][0].z * sc, v[jj][0].w * sc);
+          __nv_bfloat162 h2 = __floats2bfloat162_rn(v[jj][1].x * sc, v[jj][1].y * sc), h3 = __floats2bfloat162_rn(v[jj][1].z * sc, v[jj][1].w * sc);
+          uint4 o; o.x = *reinterpret_cast<u32*>(&h0); o.y = *reinterpret_cast<u32*>(&h1); o.z = *reinterpret_cast<u32*>(&h2); o.w = *reinterpret_cast<u32*>(&h3);
+          *reinterpret_cast<uint4*>(dst + (ch >> 3) * (TT * 128) + r * 128 + (((ch & 7) ^ (r & 7)) << 4)) = o;
+        }
+      }
+    }
+    fence_proxy_async();
+    __syncwarp();
+    if (lane == 0) mbar_arrive(fullb + 8 * s);
+  };
+  // epi_tile: epilogue of tile ti of the phase (accumulator b = G & 1), TMEM -> Y; used by the SB = 0 loop and by the SB = 1 stage + epilogue loop.
+  auto epi_tile = [&](int ti, u32 G0) {
+      const u32 G = G0 + ti, b = G & 1;
+      const int t = t0 + ti, rb = (t / KS) / NTT, tt = (t / KS) % NTT;
+      mbar_wait(accf + 8 * b, (G >> 1) & 1);
+      tc_fence_after();
+      float* yp = Y + (size_t)(tt * TT) * N + rb * 128 + 32 * q + lane;
+      const u32 ta = tb + ((u32)(q * 32) << 16) + b * TT;
+      for (int c = (warp >> 2) - 1; c < NCH; c += 6) {
+        const bool two = c + 3 < NCH;
+        u32 v0[16], v1[16];
+        tmem_ld16(v0, ta + c * 16);
+        if (two) tmem_ld16(v1, ta + (c + 3) * 16);
+        tc_wait_ld();
+        float* y0 = yp + (size_t)(c * 16) * N;
+        if (KS == 1) {
+#pragma unroll
+          for (int i = 0; i < 16; ++i) y0[(size_t)i * N] = __uint_as_float(v0[i]);
+          if (two) {
+#pragma unroll
+            for (int i = 0; i < 16; ++i) y0[(size_t)(48 + i) * N] = __uint_as_float(v1[i]);
+          }
+        } else {
+#pragma unroll
+          for (int i = 0; i < 16; ++i) red_add(y0 + (size_t)i * N, __uint_as_float(v0[i]));
+          if (two) {
+#pragma unroll
+            for (int i = 0; i < 16; ++i) red_add(y0 + (size_t)(48 + i) * N, __uint_as_float(v1[i]));
+          }
+        }
+      }
+      tc_fence_before();
+      __syncwarp();
+      if (lane == 0) mbar_arrive(acce + 8 * b);
+  };
+  if (tid == 0) for (int i = 0; i < min(ring, nst); ++i) { fill_a(0, i, i); if (!SB) fill_b(i, i); }
   for (int p = 0; p < nph; ++p) {
     const u32 F0 = (u32)p * nst, G0 = (u32)p * nt;                    // global step / tile counters at the start of this phase
     if (tid == 0) {                                                   // ---- producer
-      if (p > 0) for (int i = 0; i < min(ring, nst); ++i) fill_b(i, F0 + i);   // B of the window-prefetched steps, after the grid barrier
+      if (p > 0 && !SB) for (int i = 0; i < min(ring, nst); ++i) fill_b(i, F0 + i);   // B of the window-prefetched steps, after the grid barrier
       for (int j = ring; j < nst; ++j) {
         const u32 f = F0 + j, s = f % ring;
         mbar_wait(emptyb + 8 * s, ((f / ring) - 1) & 1);              // previous use (step f - ring, use number f / ring - 1) of the slot has been read by its MMAs
-        fill_a(p, j, f); fill_b(j, f);
+        fill_a(p, j, f); if (!SB) fill_b(j, f);
       }
       if (p + 1 < nph) {                                              // barrier window: A of the next phase's first steps
         const u32 F1 = F0 + nst;
@@ -151,40 +229,18 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
           if (k == SPT - 1) tc_commit(accf + 8 * b);
         }
       }
-    } else if (warp >= 4 && (warp >> 2) - 1 < NCH) {                // ---- epilogue: quadrant q = warp & 3, chunks (warp >> 2) - 1 + 3 m
+    } else if (warp >= 4 && (SB || (warp >> 2) - 1 < NCH)) {        // ---- epilogue: quadrant q = warp & 3, chunks (warp >> 2) - 1 + 3 m
+      const bool has_ch = (warp >> 2) - 1 < NCH;                      // SB = 1: warps without a chunk still stage (they never touch acce); SB = 0: always true here
       for (int ti = 0; ti < nt; ++ti) {
-        const u32 G = G0 + ti, b = G & 1;
-        const int t = t0 + ti, rb = (t / KS) / NTT, tt = (t / KS) % NTT;
-        mbar_wait(accf + 8 * b, (G >> 1) & 1);
-        tc_fence_after();
-        float* yp = Y + (size_t)(tt * TT) * N + rb * 128 + 32 * q + lane;
-        const u32 ta = tb + ((u32)(q * 32) << 16) + b * TT;
-        for (int c = (warp >> 2) - 1; c < NCH; c += 6) {
-          const bool two = c + 3 < NCH;
-          u32 v0[16], v1[16];
-          tmem_ld16(v0, ta + c * 16);
-          if (two) tmem_ld16(v1, ta + (c + 3) * 16);
-          tc_wait_ld();
-          float* y0 = yp + (size_t)(c * 16) * N;
-          if (KS == 1) {
-#pragma unroll
-            for (int i = 0; i < 16; ++i) y0[(size_t)i * N] = __uint_as_float(v0[i]);
-            if (two) {
-#pragma unroll
-              for (int i = 0; i < 16; ++i) y0[(size_t)(48 + i) * N] = __uint_as_float(v1[i]);
-            }
-          } else {
-#pragma unroll
-            for (int i = 0; i < 16; ++i) red_add(y0 + (size_t)i * N, __uint_as_float(v0[i]));
-            if (two) {
-#pragma unroll
-              for (int i = 0; i < 16; ++i) red_add(y0 + (size_t)(48 + i) * N, __uint_as_float(v1[i]));
-            }
+        if (SB) {                                                     // ---- SB = 1: stage B of every step of the tile (in order), then the epilogue of the tile
+          for (int k = 0; k < SPT; ++k) {
+            const int j = ti * SPT + k;
+            const u32 f = F0 + j;
+            if (f >= (u32)ring) mbar_wait(emptyb + 8 * (f % ring), ((f / ring) - 1) & 1);   // as the producer: step f - ring has been read by its MMAs
+            stage_b(j, f);
           }
         }
-        tc_fence_before();
-        __syncwarp();
-        if (lane == 0) mbar_arrive(acce + 8 * b);
+        if (has_ch) epi_tile(ti, G0);
       }
     }
     __threadfence();
@@ -200,6 +256,9 @@ __device__ __forceinline__ float hashf(u32 i) { u32 h = i * 2654435761u; h ^= h 
 __global__ void k_init(bf16* p, size_t n, u32 seed) { for (size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x; i < n; i += (size_t)gridDim.x * blockDim.x) p[i] = __float2bfloat16(hashf((u32)i + seed)); }
 // CUDA-core reference for phase 0 (pool rows 0..N-1), one thread per (t, n); counts violations of |d| <= 2e-3 * max(1, |ref|).
 // sampled: only 4096 rows of N (the first 2048 and the last 2048), entry index = t * 4096 + idx.
+__global__ void k_initf(float* p, size_t n, u32 seed, float scale, float off) { for (size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x; i < n; i += (size_t)gridDim.x * blockDim.x) p[i] = off + scale * hashf((u32)i + seed); }
+// Xs = bf16(Xf * r): the X the SB = 1 arm computes (same fp32 multiply + RN as the device staging), used as reference input
+__global__ void k_mkx(bf16* Xs, const float* Xf, const float* rs, int K, size_t n) { for (size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x; i < n; i += (size_t)gridDim.x * blockDim.x) Xs[i] = __float2bfloat16_rn(Xf[i] * rs[i / K]); }
 __global__ void k_ref(const bf16* pool, const bf16* X, const float* Y, int N, int K, int T, int sampled, unsigned* maxerr, unsigned* nbad) {
   const size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
   const int NS = sampled ? 4096 : N;
@@ -218,11 +277,13 @@ int main(int argc, char** argv) {
   const int nph_arg = argc > 1 ? atoi(argv[1]) : 0, reps = argc > 2 ? atoi(argv[2]) : 5;
   const char* shsel = argc > 3 ? argv[3] : "all";
   const int Tsel = argc > 4 ? atoi(argv[4]) : 0, TTsel = argc > 5 ? atoi(argv[5]) : 0, KSsel = argc > 6 ? atoi(argv[6]) : 0;
+  const int SB = argc > 7 ? atoi(argv[7]) : 0;
   int nsm = 0; CK(cudaDeviceGetAttribute(&nsm, cudaDevAttrMultiProcessorCount, 0));
   if (nsm != GRID) fprintf(stderr, "warning: %d SMs (expected %d)\n", nsm, GRID);
   const size_t POOL = 2ull << 30;
-  bf16 *pool, *X; float* Y; unsigned *cnt, *ver; ull* tm;
+  bf16 *pool, *X, *Xs; float *Y, *Xf, *rs; unsigned *cnt, *ver; ull* tm;
   CK(cudaMalloc(&pool, POOL)); CK(cudaMalloc(&X, 256ull * 3072 * 2)); CK(cudaMalloc(&Y, 256ull * 6144 * 4)); CK(cudaMalloc(&cnt, 1024));
+  CK(cudaMalloc(&Xs, 256ull * 3072 * 2)); CK(cudaMalloc(&Xf, 256ull * 3072 * 4)); CK(cudaMalloc(&rs, 256 * 4));
   CK(cudaMalloc(&ver, 64)); CK(cudaMalloc(&tm, GRID * 4 * 8));
   k_init<<<4096, 256>>>(pool, POOL / 2, 12345u); CK(cudaDeviceSynchronize());
   PFN_cuTensorMapEncodeTiled_v12000 enc; cudaDriverEntryPointQueryResult qr;
@@ -236,7 +297,9 @@ int main(int argc, char** argv) {
     if (strcmp(shsel, "all") && strcmp(shsel, sh.name)) continue;
     const int N = sh.N, K = sh.K, NRB = N / 128;
     const int nph = nph_arg ? nph_arg : 112;
-    k_init<<<256, 256>>>(X, 256ull * K, 777u); CK(cudaDeviceSynchronize());
+    k_init<<<256, 256>>>(X, 256ull * K, 777u);
+    k_initf<<<256, 256>>>(Xf, 256ull * K, 777u, 1.f, 0.f); k_initf<<<1, 256>>>(rs, 256, 4242u, 0.5f, 1.f);   // r in [0.5, 1.5)
+    k_mkx<<<256, 256>>>(Xs, Xf, rs, K, 256ull * K); CK(cudaDeviceSynchronize());
     const long long rows = (long long)(POOL / (2ull * K)), rowsAvail = rows - N;
     CUtensorMap mW;
     { cuuint64_t dims[2] = {(cuuint64_t)K, (cuuint64_t)rows}, strides[1] = {(cuuint64_t)K * 2};
@@ -270,16 +333,16 @@ int main(int argc, char** argv) {
           if (occupancy < 1) { fprintf(stderr, "ts %s T=%d TT=%d KS=%d: occupancy %d (smem %d), skipped\n", sh.name, T, TT, KS, occupancy, smem); continue; }
           auto launch = [&](int np, int p0) {
             CK(cudaMemset(cnt, 0, 1024));
-            CK(cudaLaunchKernelEx(&lc, k_ts, mW, mX, Y, N, K, T, TT, KS, np, p0, rowsAvail, ring, cnt, tm));
+            CK(cudaLaunchKernelEx(&lc, k_ts, mW, mX, Y, N, K, T, TT, KS, np, p0, rowsAvail, ring, cnt, tm, Xf, rs, SB));
           };
           int pass = -1;
           if (T == 64 || T == 256) {
             CK(cudaMemset(Y, KS == 1 ? 0xFF : 0, (size_t)T * N * 4)); CK(cudaMemset(ver, 0, 64));   // KS == 1 writes every element: NaN fill catches misses
             launch(1, 0); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
-            k_ref<<<((size_t)T * N + 255) / 256, 256>>>(pool, X, Y, N, K, T, 0, ver, ver + 1); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
+            k_ref<<<((size_t)T * N + 255) / 256, 256>>>(pool, SB ? Xs : X, Y, N, K, T, 0, ver, ver + 1); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
             unsigned hv[2]; CK(cudaMemcpy(hv, ver, 8, cudaMemcpyDeviceToHost)); float me; memcpy(&me, &hv[0], 4);
             pass = (hv[1] == 0);
-            fprintf(stderr, "%s ts %s T=%d TT=%d KS=%d max|d|=%.3e bad=%u\n", pass ? "PASS" : "FAIL", sh.name, T, TT, KS, me, hv[1]);
+            fprintf(stderr, "%s ts SB=%d %s T=%d TT=%d KS=%d max|d|=%.3e bad=%u\n", pass ? "PASS" : "FAIL", SB, sh.name, T, TT, KS, me, hv[1]);
           }
           int p0 = 0;
           for (int w = 0; w < 2; ++w) { launch(nph, p0); p0 += nph; }   // warm-up (Y is not re-zeroed for KS > 1, as xover2: values grow, timing unaffected)
@@ -293,7 +356,7 @@ int main(int argc, char** argv) {
             std::vector<double> m; for (int b = 0; b < GRID; ++b) m.push_back((double)(h[b * 4 + 1] - h[b * 4]) / (double)(h[b * 4 + 3] - h[b * 4 + 2]) * 1000.0);
             mhz.push_back(median(m));
           }
-          printf("{\"bin\":\"ts\",\"shape\":\"%s\",\"T\":%d,\"TT\":%d,\"KS\":%d,\"us_phase\":%.3f,\"us_reps\":[", sh.name, T, TT, KS, median(us));
+          printf("{\"bin\":\"ts\",\"sb\":%d,\"shape\":\"%s\",\"T\":%d,\"TT\":%d,\"KS\":%d,\"us_phase\":%.3f,\"us_reps\":[", SB, sh.name, T, TT, KS, median(us));
           for (size_t i = 0; i < us.size(); ++i) printf("%s%.3f", i ? "," : "", us[i]);
           printf("],\"mhz\":%.0f,\"pass\":%s,\"regs\":%d,\"spill\":%d,\"ring\":%d,\"nt\":%d,\"tiles_max\":%d,\"tiles_mean\":%.3f,\"steps_per_tile\":%d,\"smem\":%d}\n",
                  median(mhz), pass < 0 ? "null" : (pass ? "true" : "false"), regs, spill, ring, NTILE, tmax, (double)NTILE / GRID, SPT, smem);

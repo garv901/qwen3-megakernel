@@ -49,3 +49,14 @@ Sum of the 4 GEMM phases (us/layer), a3 -> best ts: T 32: 22.18 -> 20.49 (-1.68)
 B = bf16(x_fp32 * r[t]) staged by the epilogue warps per k-step into the ring slot (generic stores + fence.proxy.async + arrive on
 full[s]) vs B by TMA from bf16. If staged B costs < ~1 us/phase at T = 256, P5 keeps mk's fused staging; else P5 writes bf16
 copies of x / act in the producing phase.
+
+## P4b results [M] (job 9595, GPU-17dce9e8; 160 PASS / 0 FAIL)
+Best config per (shape, T), B by TMA from bf16 (SB 0) vs B staged by the epilogue warps from fp32 * r (SB 1), us per phase:
+| shape | T=32 | 64 | 128 | 256 |
+|---|---|---|---|---|
+| QKV | 5.09 / 5.17 | 5.15 / 7.03 | 5.75 / 8.11 | 7.01 / 12.03 |
+| O | 4.44 / 4.35 | 4.78 / 5.03 | 4.87 / 5.88 | 5.73 / 8.19 |
+| GU | 6.09 / 6.86 | 6.22 / 8.58 | 6.84 / 11.54 | 8.65 / 17.05 |
+| D | 4.87 / 4.85 | 5.03 / 5.88 | 5.58 / 6.89 | 6.48 / 10.30 |
+Sum T = 256: TMA-B 27.9 vs staged 47.6 (a3 39.3). **Decision: P5 uses B by TMA from bf16 copies written by the producing phase.**
+At T = 32 staging is free (+0.0..0.8); the S buckets keep their fused staging.
