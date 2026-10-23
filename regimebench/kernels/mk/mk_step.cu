@@ -44,8 +44,18 @@ struct PhLm {
     __device__ static void src(int l, int rb, int& m, int& row) { (void)l; m = 7; row = rb * 128; }
 };
 static_assert(VOCAB % 128 == 0, "LM row blocks");
+#ifdef MK_SKV
+static_assert(NW == skv::kBlock / 32, "attention header assumes 16 warps");
+static_assert(MK_KU == 128, "MK_ATTN=splitkv: the O phase stages one head per 128-k unit (combine_head); MK_KU 64 stays on the placeholder");
+static_assert(SKV_TAIL == 64 && (OFF_BARS % 1024) == 512 && (OFF_BARS - (int)skv::kBarOff) >= 0 && ((OFF_BARS - (int)skv::kBarOff) % 1024) == 0,
+              "splitkv scratch: mbarrier tail at [OFF_BARS, OFF_BARS + 64), scratch base 1024 B aligned");
+static_assert(OFF_X + XREG <= OFF_BARS && LM_BYTES <= OFF_BARS && TS_BYTES <= OFF_BARS, "all overlays (GEMM ring, B tiles, LM ring, TS ring + exchange) stay below OFF_BARS");
+static_assert(OFF_BARS - (int)skv::kBarOff + ATTN_BYTES == OFF_MB, "scratch end == start of mk's barrier block");
+static_assert(QDIM / KU == NQH && PhO::NRB * (PhO::K / KU) == 128, "O units: u = rb * 16 + kc, kc = q-head");
+#else
 static_assert(NW == SKV_NW, "attention header assumes 16 warps");
 static_assert(XREG >= ATTN_BYTES, "attention smem overlay");
+#endif
 static_assert(DYN_SMEM + 11280 <= 227 * 1024, "dynamic + static smem (11280 B: LM tables) exceed 227 KB (MK_LMR too large for this NPAD)");
 static_assert(!TS || (2 * TS_TT <= 256 && NPAD % TS_TT == 0 && TS_R >= 2), "TS: two accumulators of TS_TT columns in the 256-column TMEM allocation; ring >= 2");
 static_assert(!TS || (PhQkv::K % (TS_KS * 128) == 0), "TS: split-K factor");
@@ -139,6 +149,18 @@ __device__ __forceinline__ void stage_tile(unsigned char* xs, int kcol, int j, G
     fence_proxy_async();
 }
 
+// B-tile staging of a unit: a staging functor (stage_tile) or, under MK_SKV, nothing (SkvB: the A1 combine of the unit's head runs in the phase body before gemm_phase:
+// inlined into gemm_phase its 20-float4 merge state spills; the unit is the CTA's only one, see the static_assert on NB)
+template <class GetF>
+__device__ __forceinline__ void stage_any(unsigned char* xs, int kcol, int j, GetF& get) { stage_tile(xs, kcol, j, get); }
+#ifdef MK_SKV
+struct SkvB { int unused; };
+// Opaque pointer: the A1 calls' smem addresses are not loop-invariant for the compiler, so the invariants derived from them are not hoisted out of the layer loop (kept live across every phase)
+__device__ __forceinline__ unsigned char* mk_opaque(unsigned char* p) { asm volatile("" : "+l"(p)); return p; }
+__device__ __forceinline__ void stage_any(unsigned char*, int, int, SkvB&) {}
+static_assert(NB >= PhO::NRB * (PhO::K / KU), "MK_ATTN=splitkv: at most one O unit per CTA (grid >= 128): the combine is done once, before gemm_phase");
+#endif
+
 // One GEMM phase. Precondition: the first min(RING, n) units of this CTA were already issued (prologue / previous window prefetch).
 // get: staging functor (see stage_tile); epi(row, c0, v, rb): output of 16 token columns c0.. of accumulator row `row` (v = raw TMEM words);
 // extra(): called once by all threads while unit 0's MMA runs (small per-phase side work). nrows = token rows of the B tile.
@@ -167,7 +189,7 @@ __device__ __forceinline__ void gemm_phase(GS& g, int l, int nrows, GetF get, Ep
     if (n == 0) { extra(); return; }
     const u32 idesc = tc_idesc(128, NPAD);
     unsigned char* const xbase = g.sm + OFF_X;
-    stage_tile(xbase, (u0 % KC) * KU, 0, get);
+    stage_any(xbase, (u0 % KC) * KU, 0, get);
     __syncthreads();
     int jseg = 0;   // first unit (j) of the current row-block segment
     for (int j = 0; j < n; ++j) {
@@ -187,7 +209,7 @@ __device__ __forceinline__ void gemm_phase(GS& g, int l, int nrows, GetF get, Ep
                 mbar_wait(g.bars + 64 + 8 * ((f - 1) % RING), ((f - 1) / RING) & 1);
                 if (tid == 0 && j + RING - 1 < n) fill_unit<PH>(g, l, u0 + j + RING - 1, f + RING - 1);
             }
-            stage_tile(xbase + ((j + 1) & 1) * XS, ((u0 + j + 1) % KC) * KU, j + 1, get);
+            stage_any(xbase + ((j + 1) & 1) * XS, ((u0 + j + 1) % KC) * KU, j + 1, get);
         }
         if (j == n - 1 || (u + 1) % KC == 0) {   // row-block segment ends: TMEM -> output
             mbar_wait(g.bars + 64 + 8 * s, par);
@@ -525,6 +547,15 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
     fence_proxy_async_global();   // generic writes of xb2 / xb -> TMA reads after the grid barrier
 }
 
+#ifdef MK_SKV
+// A1 v1 parameters, rebuilt at each use from the kernel arguments (constant bank) so that no Params copy stays live across the phases
+// (q = qb as the placeholder reads it; ao: S == 1 pairs are written by attend, combine_head reads it)
+#define MK_SKV_PARAMS(SP) \
+    skv::Params SP; \
+    SP.q = qb; SP.kc = kcache; SP.vc = vcache; SP.cache_rows = cache_rows; SP.n_layers = NLAY; \
+    SP.items = skv_items; SP.items_stride = skv_items_stride; SP.item_off = nullptr; SP.pair_info = skv_pair_info; SP.part = skv_part; \
+    SP.ao = ao; SP.tmaps = skv_maps; SP.engine = skv_engine; SP.total_q = ntok
+#endif
 extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     const long long* __restrict__ token,
     const bf16_t* __restrict__ ln1, const bf16_t* __restrict__ qn, const bf16_t* __restrict__ kn,
@@ -538,7 +569,11 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     const int* __restrict__ lm_tok, const int* __restrict__ lm_seq,
     const int ntok, const int n_lm, const int cache_rows,
     bf16_t* xb, unsigned* tk,   // MK_TS: xb = bf16(x * ln1) [MAXTOK][HID] (TMA B of QKV), tk = tickets [64] (P5b; [8] in P5a); last, so that the other argument offsets do not change
-    bf16_t* xb2, float* ss2, bf16_t* act)   // MK_TSB: xb2 = bf16(x * ln2) [MAXTOK][HID] (B of GU), ss2 = sum x^2 per token [MAXTOK], act = bf16(silu * up) [MAXTOK][INTER] (B of D); tk is [64]
+    bf16_t* xb2, float* ss2, bf16_t* act   // MK_TSB: xb2 = bf16(x * ln2) [MAXTOK][HID] (B of GU), ss2 = sum x^2 per token [MAXTOK], act = bf16(silu * up) [MAXTOK][INTER] (B of D); tk is [64]
+#ifdef MK_SKV
+    , const int4* skv_items, int skv_items_stride, const int* skv_pair_info, float* skv_part, const void* skv_maps, int skv_engine   // A1 (plan.py): item records, pair_info, partials, 2 * kNumMaps tensor maps (null: LDG engine), engine
+#endif
+    )
 {
     extern __shared__ unsigned char smraw[];
     __shared__ float s_ss[MAXTOK];        // LM: sum of squares of the staged x rows (lm slot)
@@ -551,7 +586,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     const int gwarp = blockIdx.x * NW + warp, nwarps = gridDim.x * NW;
     const u32 raw = smem_u32(smraw), base = (raw + 1023) & ~1023u;
     unsigned char* sm = smraw + (base - raw);
-    volatile u32* tslot = reinterpret_cast<volatile u32*>(sm + OFF_BARS + 128);
+    volatile u32* tslot = reinterpret_cast<volatile u32*>(sm + OFF_MB + 128);
     unsigned* bar_cnt = sync;
     unsigned* ticket = sync + 2;
     unsigned bar_target = 0;
@@ -567,10 +602,10 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     __syncthreads();
     if (warp == 0) mk_tmem_alloc(smem_u32((void*)tslot));
     if (tid == 0) {
-        for (int i = 0; i < RING; ++i) { mbar_init(base + OFF_BARS + 8 * i, 1); mbar_init(base + OFF_BARS + 64 + 8 * i, 1); }
+        for (int i = 0; i < RING; ++i) { mbar_init(base + OFF_MB + 8 * i, 1); mbar_init(base + OFF_MB + 64 + 8 * i, 1); }
         if constexpr (LMP) {
-            for (int i = 0; i < LMR; ++i) { mbar_init(base + OFF_BARS + LMB_FULL + 8 * i, 1); mbar_init(base + OFF_BARS + LMB_EMPTY + 8 * i, 1); }
-            for (int b = 0; b < 2; ++b) { mbar_init(base + OFF_BARS + LMB_ACCF + 8 * b, 1); mbar_init(base + OFF_BARS + LMB_ACCE + 8 * b, LM_EPI_WARPS); }
+            for (int i = 0; i < LMR; ++i) { mbar_init(base + OFF_MB + LMB_FULL + 8 * i, 1); mbar_init(base + OFF_MB + LMB_EMPTY + 8 * i, 1); }
+            for (int b = 0; b < 2; ++b) { mbar_init(base + OFF_MB + LMB_ACCF + 8 * b, 1); mbar_init(base + OFF_MB + LMB_ACCE + 8 * b, LM_EPI_WARPS); }
         }
         mbar_fence_init();
         for (int m = 0; m < NMAP; ++m) map_acquire(maps + 128 * m);
@@ -588,8 +623,13 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     __syncthreads();
     tc_fence_after();
     GS g;
-    g.base = base; g.sm = sm; g.bars = base + OFF_BARS; g.tb = *tslot; g.maps = maps; g.F = 0;
+    g.base = base; g.sm = sm; g.bars = base + OFF_MB; g.tb = *tslot; g.maps = maps; g.F = 0;
     if (MK_DBG_EXIT == 1) return;
+#ifdef MK_SKV
+    unsigned ring_phase = 0;   // A1: bit 31 = its mbarriers are initialised, low bits = TMA stages consumed; per CTA, the same variable for every layer
+    if (tid == 0 && skv_maps != nullptr)
+        for (int m = 0; m < 2 * (int)skv::kNumMaps; ++m) map_acquire(reinterpret_cast<const unsigned char*>(skv_maps) + 128 * m);
+#endif
 
     // x[t] = embed[token[t]]; qkv and gu zeroed (their red.add targets)
     if constexpr (TS) {
@@ -628,7 +668,9 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                     if (c0 + i < ntok) red_add(qkv + (size_t)(c0 + i) * QKVN + row, __uint_as_float(v[i]));
             };
             auto extra = [&]() { rr_of_x(x, rr1, ntok); if constexpr (TSB) zero_f32(ss2, ntok); else zero_f32(gu, ntok * GUN); };
-            skv_prefetch(l, blockIdx.x, gridDim.x);
+#ifndef MK_SKV
+            skv_prefetch(l, blockIdx.x, gridDim.x);   // splitkv: A1 has no prefetch (L2 prefetch measured net <= 0)
+#endif
             if constexpr (TS) {
                 ts_phase<PhQkv, TS_TT, TS_KS, 8, mk_null(0)>(g, l, ntok, epi);   // joined by a __syncthreads inside
                 if constexpr (!mk_null(0)) extra();
@@ -636,7 +678,11 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 gemm_phase<PhQkv, mk_null(0)>(g, l, ntok, get, epi, extra);
             }
         }
+#ifdef MK_SKV
+        bar_arrive(bar_cnt);   // splitkv: attention's TMA ring overlays the weight ring: O's first units are prefetched after attend (phase 3 window)
+#else
         MK_PF_ARRIVE(prefetch_next<PhO>(g, l));   // phases 2 and 3 do not use the ring: O's first units land meanwhile
+#endif
         bar_wait(bar_cnt, bar_target);
 
         // ---- Phase 2: q/k-norm + RoPE + KV write; one warp per (token, head); head < 16: q (-> qb), else kv head ----
@@ -671,24 +717,42 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 }
             }
         }
+#ifdef MK_SKV
+        if constexpr (!mk_null(1)) fence_proxy_async_global();   // the new K / V row (generic stores) -> attend's TMA reads in other CTAs, after the grid barrier
+#endif
         bar_arrive(bar_cnt);
         bar_wait(bar_cnt, bar_target);
 
         // ---- Phase 3: attention (A1 interface; placeholder: one CTA per (token, q-head) item) -> ao ----
+#ifdef MK_SKV
+        if constexpr (!mk_null(2)) { MK_SKV_PARAMS(SP); skv::attend<NT>(SP, l, mk_opaque(sm + OFF_BARS - skv::kBarOff), ring_phase); }   // CTAs without items return early (no block barrier): bar_arrive below starts with __syncthreads
+        bar_arrive(bar_cnt);   // always arrive first (MK_PFA 0 order would race the TMA writes with other warps' last reads of attend's ring)
+        prefetch_next<PhO>(g, l);   // attend is done with the ring bytes (all its reads precede the arrive's __syncthreads): O's first units land during the barrier
+#else
         if constexpr (!mk_null(2))
             skv_attention(l, reinterpret_cast<const unsigned short*>(qb), reinterpret_cast<const unsigned short*>(kcache),
                           reinterpret_cast<const unsigned short*>(vcache), reinterpret_cast<unsigned short*>(ao), ntok, t_base, t_vis,
                           cache_rows, sm + OFF_X, blockIdx.x, gridDim.x);
         bar_arrive(bar_cnt);
+#endif
         bar_wait(bar_cnt, bar_target);
 
         // ---- Phase 4: O GEMM (K = 2048), B = ao, red.add -> x (residual); zero qkv ----
         {
+#ifdef MK_SKV
+            SkvB get{};   // the B tile of unit (rb, kc) is q-head kc: staged here by combine_head (writes the SW128 K-major slot at OFF_X, ends with fence.proxy.async); gemm_phase's __syncthreads precedes the MMA
+            if constexpr (!mk_null(2) && !mk_null(3)) {   // MK_NULL bit 2: attention (and so the combine) skipped; bit 3: the O phase has no staging
+                const Geom<PhO> ge = geom<PhO>();
+                MK_SKV_PARAMS(SP);
+                if (ge.n > 0) skv::combine_head<NPAD, NT>(SP, l, ge.u0 % (PhO::K / KU), mk_opaque(sm + OFF_X), ntok);
+            }
+#else
             skv_combine(l, ntok, reinterpret_cast<unsigned short*>(ao), blockIdx.x, gridDim.x);   // placeholder: no splits
             auto get = [&](int t, int k, int) -> uint4 {
                 if (t >= ntok) return make_uint4(0u, 0u, 0u, 0u);
                 return __ldcg(reinterpret_cast<const uint4*>(ao + (size_t)t * QDIM + k));
             };
+#endif
             auto epi = [&](int row, int c0, const u32 (&v)[16], int) {
 #pragma unroll
                 for (int i = 0; i < 16; ++i)

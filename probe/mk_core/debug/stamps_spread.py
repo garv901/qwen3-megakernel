@@ -16,7 +16,9 @@ UNITS = {0: 256, 3: 128, 4: 384, 5: 192}   # KU 128 split-K units per GEMM phase
 mask = int(sys.argv[2], 0) if len(sys.argv) > 2 else 0
 arm = load_arm("mk", stamps=1, null=mask)
 if len(sys.argv) > 3:
-    arm.knobs.update({k: int(v) for k, v in json.loads(sys.argv[3]).items()})
+    kj = json.loads(sys.argv[3])
+    arm.attn = kj.pop("attn", arm.attn)   # key "attn": MkArm option
+    arm.knobs.update({k: int(v) for k, v in kj.items()})
 for w in select(sys.argv[1].split(",")):
     inputs = make_inputs(w, 7401, "cuda")
     step = arm.prepare(w, inputs, "auto-direct", "cuda")

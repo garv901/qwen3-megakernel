@@ -25,6 +25,7 @@ SYNC_INTS = 128
 KERNEL = "mk_step"
 ATTN_PLACEHOLDER = HERE / "attn_placeholder.cuh"
 ATTN_SPLITKV = COMMON / "splitkv" / "splitkv.cuh"
+SKV_BAR_OFF, SKV_BAR_BYTES = 147968, 64   # splitkv-v1 (128 x 2 TMA ring): skv::kBarOff, skv::kBarBytes; attend scratch = kBarOff + kBarBytes = 148,032 B (compile-checked by MK_EXPECT_DYN)
 OWN_SOURCES = ("mk_common.cuh", "mk_step.cu")
 DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 256, "MK_TSB": 0}
 WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map order (kernel: maps 0..7)
@@ -127,9 +128,34 @@ def ts_ring(ts: int = 1, tt: int = TS_TT, tsb: int = 0) -> int:
     return min(8, (227 * 1024 - 11280 - 1024 - 384 - (TS_EXCH if tsb else 0)) // (32768 + tt * 256))
 
 
-def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0) -> int:
+def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placeholder", lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0) -> int:
+    """OFF_BARS of the kernel layout (mk_common.cuh): end of the overlay regions; under attn = splitkv at least kBarOff and = 512 (mod 1024)."""
+    nbox = ku // 64
+    ub, xs = nbox * 16384, nbox * npad * 128
+    lay = ring * ub + 2 * xs
+    if ts and npad >= ts_min(ts) and ku == 128:
+        tt = ts_tt(npad)
+        if tsb:
+            lay = max(lay, max(ts_ring(1, tt[p], 1) * (32768 + tt[p] * 256) for p in ("qkv", "gu", "d")) + TS_EXCH)
+        else:
+            lay = max(lay, ts_ring(1) * (32768 + TS_TT * 256))
+    elif lmp and npad <= 64 and ku == 128:
+        lay = max(lay, 8 * xs + lm_ring(npad, lmr) * ub)
+    if attn == "splitkv":
+        lay = max(lay, SKV_BAR_OFF)
+        return (lay - 512 + 1023) // 1024 * 1024 + 512
+    return lay
+
+
+def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, attn: str = "placeholder") -> int:
     """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM; the kernel traps if the launch gives less).
-    lmp: MK_LMP (the pipelined LM head only applies at npad <= 64: smem = [8 X chunks][lmr x 32 KB ring], 384 B of barriers)."""
+    lmp: MK_LMP (the pipelined LM head only applies at npad <= 64: smem = [8 X chunks][lmr x 32 KB ring], 384 B of barriers).
+    attn = "splitkv" (SPEC-P2): OFF_BARS = skv_off_bars(..) (>= skv::kBarOff, = 512 mod 1024), A1's 64 B mbarrier tail at [OFF_BARS, +64), mk's barrier block (384 / 256 B) behind it."""
+    if attn == "splitkv":
+        if ku != 128:
+            raise ValueError("MK_ATTN=splitkv needs MK_KU 128")
+        tail = 384 if ((lmp and npad <= 64) or (ts and npad >= ts_min(ts))) else 256
+        return 1024 + skv_off_bars(npad, ku, ring, attn, lmp, lmr, ts, tsb) + SKV_BAR_BYTES + tail
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     off_bars = ring * ub + max(2 * xs, attn_bytes)
@@ -154,10 +180,48 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     if stripped:
         src = strip_knobs(src)
     k = {**DEFAULT_KNOBS, **dict(knobs)}
-    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"]) if attn == "placeholder" and attn_path is None else 0
+    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
     defs = [f"NPAD={npad}", f"NB={nb}", f"MK_EXPECT_DYN={exp}", *knob_defines(dict(knobs))]
+    if attn == "splitkv":
+        defs.append("MK_SKV=1")
     cubin, log = nvrtc_compile(src, defs, arch=arch, ptxas_verbose=True, name="mk.cu")
     return cubin, parse_ptxas(log), log
+
+
+# ---- A1 (attn = splitkv) KV tensor maps: 2 * kNumMaps 3D bf16 maps (K then V), box rows 128, 64, .., 1, 128 B each ----
+SKV_STAGE_ROWS = 128
+SKV_NUM_MAPS = SKV_STAGE_ROWS.bit_length()   # log2(128) + 1 = 8 (skv::kNumMaps)
+
+
+def skv_map_specs(rows: int, n_layers: int = NL) -> list[tuple[list[int], list[int], list[int]]]:
+    """(dims, strides_bytes, box) of the 16 A1 maps in kernel order (K: box rows 128..1, then V): dims {128, 8, n_layers * rows}, strides {256, 2048} B,
+    box {128, 1, r}, no swizzle (a1bench.py tensor_maps). ``rows`` = cache rows per layer (mk: the fixture's packed rows; the CTX padding rows lie behind the last layer)."""
+    out = []
+    for _kv in range(2):
+        for rs in range(SKV_NUM_MAPS):
+            out.append(([HD, KVH, n_layers * rows], [HD * 2, KVH * HD * 2], [HD, 1, SKV_STAGE_ROWS >> rs]))
+    return out
+
+
+def encode_skv_maps(kc_ptr: int, vc_ptr: int, rows: int, n_layers: int = NL) -> bytes:
+    """16 x 128 B tensor maps over the K / V caches (device pointers); needs cuInit (a GPU host)."""
+    from cuda.bindings import driver as d
+    blob = b""
+    for i, (dims, strides, box) in enumerate(skv_map_specs(rows, n_layers)):
+        res = d.cuTensorMapEncodeTiled(
+            d.CUtensorMapDataType.CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, 3, int(kc_ptr if i < SKV_NUM_MAPS else vc_ptr),
+            [d.cuuint64_t(v) for v in dims], [d.cuuint64_t(v) for v in strides], [d.cuuint32_t(v) for v in box],
+            [d.cuuint32_t(1)] * 3, d.CUtensorMapInterleave.CU_TENSOR_MAP_INTERLEAVE_NONE, d.CUtensorMapSwizzle.CU_TENSOR_MAP_SWIZZLE_NONE,
+            d.CUtensorMapL2promotion.CU_TENSOR_MAP_L2_PROMOTION_NONE, d.CUtensorMapFloatOOBfill.CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE)
+        if int(res[0]) != 0:
+            raise RuntimeError(f"cuTensorMapEncodeTiled(skv map {i}): {res[0]}")
+        blob += struct.pack("<16Q", *[int(v) for v in res[1].opaque])
+    return blob
+
+
+def auto_attn(seqs) -> str:
+    """attn = "auto": splitkv when every sequence has q_len == 1 (A1 v1: pair_info is indexed by token), else the placeholder. ``seqs``: iterable of (kv_len, q_len)."""
+    return "splitkv" if all(int(q) == 1 for _, q in seqs) else "placeholder"
 
 
 # ---- tensor maps (host; 2D bf16 SW128, box {64 k, 128 rows}, one per weight tensor, 128 B each in global memory) ----

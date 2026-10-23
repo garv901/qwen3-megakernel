@@ -17,7 +17,8 @@ sets = json.loads(sys.argv[2])
 rounds = int(sys.argv[3]) if len(sys.argv) > 3 else 7
 arms = []
 for ks in sets:
-    a = load_arm("mk")
+    ks = dict(ks)
+    a = load_arm("mk", attn=ks.pop("attn", "placeholder"))   # key "attn": MkArm option, the rest are knobs
     a.knobs.update({k: int(v) for k, v in ks.items()})
     arms.append(a)
 

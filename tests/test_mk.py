@@ -303,3 +303,140 @@ def test_tsb_map_specs():
     assert B.workspace_map_specs(128, B.WS_ORDER)[1] == ([1024, 256], [2048], [64, 64])
     assert B.workspace_map_specs() == [([1024, 256], [2048], [64, 128])]
     assert MkArm(tsb=1).knobs["MK_TSB"] == 1 and MkArm().knobs["MK_TSB"] == 0 and B.DEFAULT_KNOBS["MK_TSB"] == 0 and B.TK_SIZE == 64
+
+
+# ---------------------------------------------------------------- attn = splitkv (A1 v1, SPEC-P2)
+HEAD_P2 = "57f8fdc"   # the last commit before SPEC-P2 (P5b); attn = placeholder must be SASS-identical to it
+def _skv_consts() -> dict:
+    """kStageRows, kStages of the imported header (defaults) -> kBarOff, kBarBytes, kSmemBytes (the formulas of splitkv.cuh)."""
+    txt = B.ATTN_SPLITKV.read_text()
+    rows = int(re.search(r"#define SKV_STAGE_ROWS (\d+)", txt).group(1))
+    stages = int(re.search(r"#define SKV_STAGES (\d+)", txt).group(1))
+    bar_off = stages * 2 * rows * 256 + 16 * 2 * 132 * 4
+    bar_bytes = max(64, 16 * stages)
+    return {"rows": rows, "stages": stages, "bar_off": bar_off, "bar_bytes": bar_bytes, "smem": bar_off + bar_bytes}
+
+
+def test_skv_header_constants_match_build_py():
+    c = _skv_consts()
+    assert (c["bar_off"], c["bar_bytes"], c["smem"]) == (B.SKV_BAR_OFF, B.SKV_BAR_BYTES, 148032)
+    assert B.SKV_STAGE_ROWS == c["rows"] and B.SKV_NUM_MAPS == 8
+
+
+def test_skv_dyn_smem_layout():
+    """OFF_BARS >= kBarOff and = 512 mod 1024 (scratch base OFF_BARS - kBarOff 1024 B aligned); mk's barriers behind A1's 64 B tail; placeholder layouts unchanged."""
+    for npad in B.BUCKETS:
+        for ts, tsb in ((0, 0), (256, 0), (256, 1), (128, 0), (128, 1)):
+            ob = B.skv_off_bars(npad, 128, 2, "splitkv", 1, 0, ts, tsb)
+            assert ob >= B.SKV_BAR_OFF and ob % 1024 == 512 and (ob - B.SKV_BAR_OFF) % 1024 == 0, (npad, ts, tsb, ob)
+            lay = B.dyn_smem(npad, ts=ts, tsb=tsb, attn="splitkv")
+            assert lay == 1024 + ob + 64 + (384 if (npad <= 64 or (ts and npad >= B.ts_min(ts))) else 256)
+    assert B.dyn_smem(256, ts=256, attn="splitkv") == 198592 and B.dyn_smem(256, ts=256, tsb=1, attn="splitkv") == 210880
+    assert B.dyn_smem(16, attn="splitkv") == 165824 and B.dyn_smem(128, attn="splitkv") == 149312
+    assert B.dyn_smem(128) == 132352 and B.dyn_smem(256, ts=256) == 198016   # placeholder unchanged
+    with pytest.raises(ValueError):
+        B.dyn_smem(64, ku=64, attn="splitkv")
+
+
+@pytest.mark.parametrize("npad", B.BUCKETS)
+@pytest.mark.parametrize("tsb", (0, 1))
+def test_skv_builds_compile(npad, tsb):
+    """attn = splitkv at every bucket x MK_TSB: compiles (MK_EXPECT_DYN == DYN_SMEM static_assert checks B.dyn_smem(attn="splitkv"); the 227 KB static_assert),
+    <= 128 regs, static + dyn smem fits. KNOWN DEVIATION (SPEC-P2 report): the 128-register kernel spills (A1's attend / combine_head peak at 128 registers);
+    the bound below guards against growth, it is not the 0-spill goal."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    _, info, _ = B.compile_build(npad, knobs=(("MK_TS", 256), ("MK_TSB", tsb)), attn="splitkv")
+    assert info["regs"] <= 128, info
+    assert info["spill_stores"] <= 1024 and info["spill_loads"] <= 1024, info
+    assert info["static_smem"] + B.dyn_smem(npad, ts=256, tsb=tsb, attn="splitkv") <= 227 * 1024
+
+
+@pytest.mark.parametrize("npad,knobs", [(16, (("MK_RING", 3),)), (32, (("MK_LMR", 4),)), (64, (("MK_LMP", 0),)), (128, (("MK_TS", 128),)), (128, (("MK_TS", 128), ("MK_TSB", 1))),
+                                       (256, (("MK_NULL", 1 << 2),)), (256, (("MK_NULL", 0x7F),)), (64, (("MK_STAMPS", 1),)), (32, (("MK_NULL", 1 << 3),))])
+def test_skv_knob_builds_compile(npad, knobs):
+    """dyn_smem host == kernel (MK_EXPECT_DYN static_assert) for splitkv at other knob sets, MK_NULL bit 2 (attend + combine skipped) and bit 3 (O phase null)."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    _, info, _ = B.compile_build(npad, knobs=knobs, attn="splitkv")
+    assert info["regs"] <= 128
+    k = {**B.DEFAULT_KNOBS, **dict(knobs)}
+    assert info["static_smem"] + B.dyn_smem(npad, 128, k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn="splitkv") <= 227 * 1024
+
+
+def test_skv_ku64_rejected():
+    pytest.importorskip("cuda.bindings.nvrtc")
+    with pytest.raises(Exception, match="MK_KU|static_assert|error"):
+        B.compile_build(64, knobs=(("MK_KU", 64),), attn="splitkv")
+
+
+def test_skv_source_defines():
+    """splitkv builds the header + mk text with MK_SKV; the placeholder build text does not mention splitkv symbols outside #ifdef MK_SKV."""
+    assert "namespace skv" in B.source("splitkv") and B.source_sha256("splitkv") != B.source_sha256("placeholder")
+    assert "MK_SKV" in B.source("placeholder")   # guarded by #ifdef: the placeholder compile does not define it
+
+
+def test_skv_plan_matches_mk_layout_on_mk_points():
+    """plan.plan row_base == mk's t_base, total_q == ntok, cache_rows == the arm's rows for every q_len == 1 point of --workloads mk; R6 (q > 1) is the placeholder under auto."""
+    from regimebench.kernels.common.splitkv import plan as P
+    from regimebench.workload import select
+    pts = select(["mk"])
+    assert len(pts) >= 20
+    arm = MkArm(attn="auto")
+    used = {}
+    for w in pts:
+        used[w.id] = arm.resolve_attn(w)
+        if all(s.q_len == 1 for s in w.seqs):
+            pl = P.plan([(s.kv_len, s.q_len) for s in w.seqs], n_cta=B.GRID)
+            d = B.build_descriptors([(s.kv_len, s.q_len) for s in w.seqs], B.MAXTOK)
+            assert list(pl.row_base) == list(d.t_base) and pl.total_q == w.total_q == d.chunks[0].ntok and pl.cache_rows == d.cache_rows == w.cache_tokens, w.id
+            assert pl.s_max <= 32 and pl.stride >= 1 and pl.engine in (0, 1)
+            assert (pl.items[:, :, 7] <= pl.stride).all()
+            assert all(len(w2) == 1 for w2 in [pl.cta_positions[:1]])
+        else:
+            assert used[w.id] == "placeholder", w.id
+    assert all(v == "splitkv" for k, v in used.items() if "-q" not in k) and all(used[k] == "placeholder" for k in used if "-q" in k)
+    assert sum(v == "splitkv" for v in used.values()) == len(pts) - 4
+
+
+def test_skv_attn_option_and_supports():
+    assert MkArm().attn == "placeholder"
+    with pytest.raises(ValueError):
+        MkArm(attn="nope")
+    w1 = Workload("t", "R1", tuple(Seq(128, 1) for _ in range(8)))
+    wq = Workload("t2", "R6", (Seq(1024, 4),))
+    assert MkArm(attn="auto").resolve_attn(w1) == "splitkv" and MkArm(attn="auto").resolve_attn(wq) == "placeholder"
+    assert MkArm(attn="auto", ku=64).resolve_attn(w1) == "placeholder"
+    assert MkArm(attn="splitkv").supports(w1, "auto") is None
+    assert "q_len == 1" in MkArm(attn="splitkv").supports(wq, "auto")
+    assert "MK_KU" in MkArm(attn="splitkv", ku=64).supports(w1, "auto")
+    assert MkArm(attn="placeholder").supports(wq, "auto") is None and B.auto_attn([(128, 1), (5, 1)]) == "splitkv" and B.auto_attn([(128, 1), (5, 2)]) == "placeholder"
+
+
+def test_skv_map_specs():
+    """16 maps: K then V, box rows 128, 64, .., 1; dims {128, 8, 28 * rows}, strides {256, 2048} B (a1bench.py tensor_maps)."""
+    sp = B.skv_map_specs(1000)
+    assert len(sp) == 16
+    assert [s[2][2] for s in sp[:8]] == [128, 64, 32, 16, 8, 4, 2, 1] and [s[2][2] for s in sp[8:]] == [128, 64, 32, 16, 8, 4, 2, 1]
+    assert all(s[0] == [128, 8, 28 * 1000] and s[1] == [256, 2048] and s[2][:2] == [128, 1] for s in sp)
+
+
+def test_skv_placeholder_sass_identical_to_head(tmp_path):
+    """attn = placeholder (the default) == the sources of HEAD_P2 (the P5b commit) at every bucket, MK_TS 0 / 256 x MK_TSB 0 / 1 (the full 20-config sweep ran in the P2 report;
+    here one config per bucket class). Skipped when the commit is not in the repo."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
+        pytest.skip("no cuobjdump")
+    root = Path(__file__).resolve().parents[1]
+    arc = subprocess.run(["git", "-C", str(root), "archive", HEAD_P2, "regimebench"], capture_output=True)
+    if arc.returncode != 0:
+        pytest.skip(f"commit {HEAD_P2} not available")
+    subprocess.run(["tar", "-x", "-C", str(tmp_path)], input=arc.stdout, check=True)
+    cfgs = ((16, 256, 0), (64, 256, 0), (256, 256, 1))
+    code = ("import sys,re,subprocess,tempfile,pathlib;from regimebench.kernels.mk import build as B\n"
+            "for npad,ts,tsb in %r:\n"
+            " c=B.compile_build(npad,knobs=(('MK_TS',ts),('MK_TSB',tsb)))[0];p=pathlib.Path(tempfile.mkdtemp())/'k.cubin';p.write_bytes(c)\n"
+            " o=subprocess.run(['/usr/local/cuda/bin/cuobjdump','-sass',str(p)],capture_output=True,text=True,check=True).stdout\n"
+            " print('@@',npad,ts,tsb);print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))\n" % (cfgs,))
+    env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
+    head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
+    mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b)))[0]) + "\n" for n, t, b in cfgs)
+    assert head.strip() == mine.strip() and len(head) > 30000

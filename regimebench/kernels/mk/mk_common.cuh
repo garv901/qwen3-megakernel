@@ -12,6 +12,7 @@
 //   MK_TS     N: tile-stream engine at NPAD >= N (0 off, 1 = 128, default 256) (SPEC-P5a; NOTES.md "Tile-stream QKV"): QKV phase with B = bf16 xb by TMA (NPAD >= 128, MK_KU 128 only; else no effect).
 //   MK_TSB    1: P5b (SPEC-P5b) on top of MK_TS: GU and D on the tile stream (B = bf16 xb2 / act by TMA, A = interleaved wg|wu), act written by the GU epilogue,
 //             bf16 conversions (xb2 + ss2 after O, xb after D) done by idle CTAs on tickets. Default 0 = the P5a build (SASS identical).
+//   MK_SKV    (defined by build.py for attn = splitkv, SPEC-P2): attention = skv::attend + skv::combine_head (O-phase B tile); needs MK_KU 128.
 //   MK_NULL   bitmask, bit p-1 = phase p (1..6), bit 6 = LM head: the phase keeps its barrier(s), weight TMAs and ring waits and skips
 //             staging, MMA, TMEM read and output (wrong outputs by design; null-work oracle).
 #ifndef NPAD
@@ -86,8 +87,14 @@ constexpr int NMAP = TSB ? 12 : TS ? 9 : 8;
 constexpr int KU = MK_KU, NBOX = KU / 64, RING = MK_RING;
 constexpr int UB = NBOX * 16384;              // bytes of one weight unit in the ring (128 rows x KU k bf16)
 constexpr int XS = NBOX * NPAD * 128;         // bytes of one B-tile slot (NBOX k-atoms of NPAD rows x 128 B)
+#ifdef MK_SKV   // attn = splitkv (A1 v1, SPEC-P2): the scratch is skv::kSmemBytes ending at OFF_BARS + kBarBytes (its mbarrier tail), see OFF_BARS below
+constexpr int ATTN_BYTES = (int)skv::attend_smem_bytes();
+constexpr int SKV_TAIL = (int)skv::kBarBytes;   // A1's mbarriers [OFF_BARS, OFF_BARS + SKV_TAIL): never written by mk; mk's own barrier block starts behind them
+constexpr int XREG = 2 * XS;                    // the attention scratch is not part of the overlay regions: it is anchored at OFF_BARS - kBarOff
+#else
 constexpr int ATTN_BYTES = SKV_SMEM_BYTES;    // attention scratch, overlaid on the B-tile slots (idle in phases 2 and 3)
 constexpr int XREG = (2 * XS > ATTN_BYTES) ? 2 * XS : ATTN_BYTES;
+#endif
 constexpr int OFF_X = RING * UB;              // B-tile slots (offset from the 1024-aligned smem base)
 // LM head, pipelined path (SPEC-lm), NPAD <= 64: smem from the base = [XL: 8 k-chunks x XS][LM ring: LMR x UB]; overlays every other region
 // (no other phase runs after the LM phase); the barriers stay behind the larger of the two layouts.
@@ -116,8 +123,18 @@ constexpr int TS_RING_BYTES = TS_RING_A > TS_RING_B ? TS_RING_A : TS_RING_B;   /
 constexpr int TS_XOFF = TS_RING_BYTES;                      // GU exchange region offset (after the ring, below OFF_BARS)
 constexpr int TS_BYTES = TS ? TS_RING_BYTES + TS_EXCH : 0;
 constexpr int mk_max3(int a, int b, int c) { return a > b ? (a > c ? a : c) : (b > c ? b : c); }
+#ifdef MK_SKV
+// OFF_BARS: >= kBarOff (the scratch base OFF_BARS - kBarOff must be >= 0) and >= every layout; OFF_BARS % 1024 == 512 (= kBarOff % 1024), so the scratch base is 1024 B aligned
+constexpr int OFF_LAY = mk_max3(OFF_X + XREG, LM_BYTES, TS_BYTES);
+constexpr int OFF_MIN = OFF_LAY > (int)skv::kBarOff ? OFF_LAY : (int)skv::kBarOff;
+constexpr int OFF_BARS = (OFF_MIN - 512 + 1023) / 1024 * 1024 + 512;
+constexpr int OFF_MB = OFF_BARS + SKV_TAIL;   // mk's barrier block: tma bars [0, RING), mma bars at +64, tmem slot at +128 (+ LM / TS barriers)
+constexpr int BARS_BYTES = ((LMP || TS) ? 384 : 256) + SKV_TAIL;
+#else
 constexpr int OFF_BARS = mk_max3(OFF_X + XREG, LM_BYTES, TS_BYTES);   // tma bars [0, RING), mma bars at +64, tmem slot at +128
+constexpr int OFF_MB = OFF_BARS;
 constexpr int BARS_BYTES = (LMP || TS) ? 384 : 256;
+#endif
 constexpr int DYN_SMEM = 1024 + OFF_BARS + BARS_BYTES;
 constexpr int N_BARRIERS = 1 + 6 * NLAY;      // grid barriers per launch
 #if MK_STAMPS

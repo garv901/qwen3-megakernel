@@ -4,7 +4,8 @@ attention as a placeholder behind the A1 interface.
 Variants: ``auto`` (smallest token bucket NPAD in {16, 32, 64, 128, 256} >= total_q, CUDA graph) and ``auto-direct`` (same, no graph).
 One cooperative launch per step (total_q <= 256). Options (``load_arm("mk", **opts)``): ``stamps`` (MK_STAMPS), ``null`` (MK_NULL bitmask),
 ``ku``, ``ring``, ``ts`` (MK_TS: tile-stream QKV with B = bf16 ``xb`` by TMA at NPAD >= ts (1 = 128); default 256, 0 = off), ``tsb`` (MK_TSB, default 0: P5b, GU and D on
-the tile stream with act / xb2 buffers, the interleaved wg|wu weights and the idle-CTA finalizers; needs MK_TS on at the bucket), ``attn`` ("placeholder" | "splitkv"). The step clones the fixture KV into a packed cache with CTX zero padding rows
+the tile stream with act / xb2 buffers, the interleaved wg|wu weights and the idle-CTA finalizers; needs MK_TS on at the bucket), ``attn`` ("placeholder" | "splitkv" | "auto"; default "placeholder"; SPEC-P2: splitkv = A1 v1 split-KV attention
++ combine_head in the O phase, q_len == 1 workloads only; auto = splitkv when every seq has q_len == 1, else the placeholder, chosen per workload at prepare()). The step clones the fixture KV into a packed cache with CTX zero padding rows
 (as hv2g), encodes the 8 weight tensor maps once, and ``outputs()`` gathers k_new / v_new from the cache.
 """
 
@@ -19,6 +20,7 @@ from ..workload import Workload
 BASE_VARIANTS = ("auto",)
 VARIANTS = ("auto", "auto-direct")
 # kernel weight arguments, in kernel order (the weight tensors that are read through pointers; GEMM weights go through the tensor maps)
+ATTN_OPTIONS = ("placeholder", "splitkv", "auto")
 VEC_WEIGHTS = ("ln1", "qn", "kn", "ln2", "fnorm", "embed")
 
 
@@ -29,6 +31,7 @@ def _parse(variant: str) -> tuple[str, bool]:
 
 class _Loaded:
     def __init__(self, npad: int, knobs: tuple, attn: str, device):
+        self.attn = attn
         import torch
         torch.cuda.init()
         torch.zeros(1, device=device)
@@ -37,7 +40,7 @@ class _Loaded:
         cubin, info, _ = B.compile_build(npad, self.nb, knobs, attn=attn)
         self.ptxas = info
         self.knobs = d
-        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"], tsb=d["MK_TSB"])
+        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"], tsb=d["MK_TSB"], attn=attn)
         self.kernel = CoopKernel(cubin, B.KERNEL, self.dyn)
         self.regs, self.static_smem = self.kernel.regs, self.kernel.static_smem
         self.local_bytes, self.dyn_smem = self.kernel.local_bytes, self.kernel.dyn_smem
@@ -54,7 +57,8 @@ class MkStep:
         self.npad = B.bucket_for(w.total_q)
         g = w.model
         dev = torch.device(device)
-        ld = arm._kernel(self.npad, dev)
+        self.attn = arm.resolve_attn(w)   # "placeholder" | "splitkv" (auto resolved per workload)
+        ld = arm._kernel(self.npad, dev, self.attn)
         self.kern = ld
         self.nb = ld.nb
         self.desc = d = B.build_descriptors([(s.kv_len, s.q_len) for s in w.seqs], B.MAXTOK)
@@ -89,6 +93,24 @@ class MkStep:
             self.act = torch.zeros(M * B.INTER, dtype=torch.bfloat16, device=dev)
             self.wgu = arm._wgu(inputs["wg"], inputs["wu"])
         self.sync = torch.zeros(B.SYNC_INTS, dtype=torch.int32, device=dev)
+        skv_args: tuple = ()
+        if self.attn == "splitkv":   # A1: plan once per prepare (every replay attends over the same visible lengths: the cache does not grow between replays)
+            from ..kernels.common.splitkv import plan as skv_plan
+            assert ld.knobs["MK_KU"] == 128, "attn=splitkv needs MK_KU 128"
+            pl = skv_plan.plan([(s.kv_len, s.q_len) for s in w.seqs], n_cta=self.nb)
+            assert list(pl.row_base) == list(d.t_base), "A1 row_base != mk t_base (fixture packs seq s at the sum of the previous kv_len + 1)"
+            assert pl.total_q == c.ntok == w.total_q and pl.cache_rows == rows
+            self.plan = pl
+            t = pl.to_torch(dev)
+            self.skv_items, self.skv_pair = t["items"], t["pair_info"]
+            self.skv_part = torch.empty(max(pl.part_floats, 4), dtype=torch.float32, device=dev)
+            self.skv_maps = None
+            if pl.engine == 1:   # TMA engine: 16 KV maps (K, V x box rows 128 .. 1) in a separate 64 B aligned device buffer
+                blob = B.encode_skv_maps(self.kc.data_ptr(), self.vc.data_ptr(), rows, g.layers)
+                self.skv_maps = torch.frombuffer(bytearray(blob), dtype=torch.uint8).to(dev)
+                assert self.skv_maps.data_ptr() % 64 == 0
+            skv_args = (self.skv_items.data_ptr(), i32(pl.stride), self.skv_pair.data_ptr(), self.skv_part.data_ptr(),
+                        self.skv_maps.data_ptr() if self.skv_maps is not None else 0, i32(pl.engine))
         self.pkey = torch.zeros(self.nb * M, dtype=torch.int32, device=dev)
         self.pidx = torch.zeros(self.nb * M, dtype=torch.int32, device=dev)
         self.rope = B.rope_table(d.max_pos).to(dev)
@@ -112,12 +134,13 @@ class MkStep:
                           self.pkey.data_ptr(), self.pidx.data_ptr(), self.rope.data_ptr(), self.t_base.data_ptr(),
                           self.t_vis.data_ptr(), self.lm_tok.data_ptr(), self.lm_seq.data_ptr(),
                           i32(c.ntok), i32(len(c.lm_tok)), i32(self.rows), self.xb.data_ptr(), self.tk.data_ptr(),
-                          *((self.xb2.data_ptr(), self.ss2.data_ptr(), self.act.data_ptr()) if self.tsb else (0, 0, 0))])   # xb, tk, xb2, ss2, act: last kernel arguments
+                          *((self.xb2.data_ptr(), self.ss2.data_ptr(), self.act.data_ptr()) if self.tsb else (0, 0, 0)),
+                          *skv_args])   # xb, tk, xb2, ss2, act, then (attn=splitkv) items, items_stride, pair_info, part, skv_maps, engine: last kernel arguments
         self.config: dict[str, Any] = {
             "kernel": B.KERNEL, "npad": self.npad, "graph": not direct, "proxy": False, "launches_per_step": 1,
             "grid": self.nb, "block": 512, "dyn_smem": ld.dyn_smem, "regs": ld.regs, "static_smem": ld.static_smem,
-            "local_bytes": ld.local_bytes, "ptxas": ld.ptxas, "attn": arm.attn, "knobs": {**B.DEFAULT_KNOBS, **arm.knobs},
-            "source_sha256": B.source_sha256(arm.attn),
+            "local_bytes": ld.local_bytes, "ptxas": ld.ptxas, "attn": self.attn, "attn_option": arm.attn, "skv_engine": getattr(getattr(self, "plan", None), "engine_name", None), "knobs": {**B.DEFAULT_KNOBS, **arm.knobs},
+            "source_sha256": B.source_sha256(self.attn),
         }
         self._graph = None
         if not direct:
@@ -175,7 +198,7 @@ class MkStep:
         self._graph = None
         self.args = None
         for n in ("kc", "vc", "kview", "vview", "logits", "next_token", "x", "qkv", "qb", "ao", "gu", "rr", "xb", "tk", "xb2", "ss2", "act", "wgu", "sync", "pkey", "pidx",
-                  "rope", "t_base", "t_vis", "lm_tok", "lm_seq", "maps"):
+                  "rope", "t_base", "t_vis", "lm_tok", "lm_seq", "maps", "skv_items", "skv_pair", "skv_part", "skv_maps", "plan"):
             if hasattr(self, n):
                 delattr(self, n)
         self._weights = {}
@@ -185,6 +208,8 @@ class MkArm:
     name = "mk"
 
     def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 256, tsb: int = 0, attn: str = "placeholder", **_: Any):
+        if attn not in ATTN_OPTIONS:
+            raise ValueError(f"unknown attn {attn!r} (one of {ATTN_OPTIONS})")
         self.attn = attn
         self.knobs = {"MK_STAMPS": int(stamps), "MK_NULL": int(null), "MK_KU": int(ku), "MK_RING": int(ring), "MK_TS": int(ts), "MK_TSB": int(tsb)}
         self._loaded: dict[tuple, _Loaded] = {}
@@ -210,12 +235,25 @@ class MkArm:
             return "empty step"
         if w.total_q > B.BUCKETS[-1]:
             return f"mk handles 1..{B.BUCKETS[-1]} tokens per step (total_q {w.total_q})"
+        if self.attn == "splitkv":
+            if any(s.q_len != 1 for s in w.seqs):
+                return "attn=splitkv (A1 v1) supports q_len == 1 only"
+            if self.knobs["MK_KU"] != 128:
+                return "attn=splitkv needs MK_KU 128"
         return None
 
-    def _kernel(self, npad: int, device) -> _Loaded:
-        key = (npad, str(device))
+    def resolve_attn(self, w: Workload) -> str:
+        """The attention build of a workload: the option, with "auto" = splitkv iff every sequence has q_len == 1 (A1 v1 limit), else the placeholder.
+        splitkv also needs MK_KU 128 (the O phase stages one q-head per unit); auto falls back to the placeholder at MK_KU 64."""
+        if self.attn == "auto":
+            return B.auto_attn([(s.kv_len, s.q_len) for s in w.seqs]) if self.knobs["MK_KU"] == 128 else "placeholder"
+        return self.attn
+
+    def _kernel(self, npad: int, device, attn: str | None = None) -> _Loaded:
+        attn = attn or self.attn
+        key = (npad, str(device), attn)
         if key not in self._loaded:
-            self._loaded[key] = _Loaded(npad, tuple(sorted(self.knobs.items())), self.attn, device)
+            self._loaded[key] = _Loaded(npad, tuple(sorted(self.knobs.items())), attn, device)
         return self._loaded[key]
 
     def prepare(self, w: Workload, inputs: dict, variant: str, device: str) -> MkStep:
