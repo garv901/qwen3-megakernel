@@ -54,6 +54,9 @@
 #ifndef MK_TS
 #define MK_TS 128   // 0 off; N (128 / 256): tile-stream engine (ts_phase) at NPAD >= N (1 = 128; default 128 with MK_TSB 1: job 9622 b128 -167, b256 -957 us; P5a alone was b128 +54, job 9602); the D phase writes xb = bf16(x * ln1[l+1]) (see NOTES.md)
 #endif
+#ifndef MK_LMTS
+#define MK_LMTS 0   // 1: SPEC-P3c, the LM head on the tile stream (ts_phase<PhLm, 128, 1>, A = embed, B = bf16(x * fnorm) from the last D finalize) when TSB and every lm slot s holds token s; else the v0 LM path
+#endif
 #ifndef MK_TSB
 #define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
 #endif
@@ -65,6 +68,7 @@ static_assert(MK_KU == 128 || MK_KU == 64, "MK_KU");
 static_assert(MK_RING >= 2 && MK_RING <= 4, "MK_RING");
 static_assert(MK_TS == 0 || MK_TS == 1 || MK_TS == 128 || MK_TS == 256, "MK_TS");
 static_assert(MK_TSB == 0 || MK_TSB == 1, "MK_TSB");
+static_assert(MK_LMTS == 0 || MK_LMTS == 1, "MK_LMTS");
 static_assert(MK_LMP == 0 || MK_LMP == 1, "MK_LMP");
 static_assert(MK_LMR == 0 || (MK_LMR >= 2 && MK_LMR <= 8), "MK_LMR");
 static_assert(MK_XTMA == 0, "MK_XTMA = 1 (O-phase B tile by TMA) is not implemented in v0");
@@ -81,6 +85,7 @@ constexpr float EPS = 1e-6f;
 constexpr int TS_MIN = MK_TS == 1 ? 128 : MK_TS;   // smallest NPAD bucket on the tile stream (keep in sync with build.py:ts_min)
 constexpr bool TS = MK_TS && NPAD >= TS_MIN && MK_KU == 128;   // tile-stream QKV (SPEC-P5a)
 constexpr bool TSB = TS && MK_TSB;
+constexpr bool LMTS = TSB && MK_LMTS;   // SPEC-P3c: tile-stream LM head (run time: lm_ident)
 // tensor maps: wq, wk, wv, wo, wg, wu, wd, embed (+ xb when TS) (+ xb2, wgu, act when TSB: maps 9, 10, 11), 128 B each, in global memory
 constexpr int NMAP = TSB ? 12 : TS ? 9 : 8;
 

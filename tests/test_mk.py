@@ -448,3 +448,52 @@ def test_skv_placeholder_sass_identical_to_head(tmp_path):
     head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
     mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b)))[0]) + "\n" for n, t, b in cfgs)
     assert head.strip() == mine.strip() and len(head) > 30000
+
+
+# ---------------------------------------------------------------- LM head on the tile stream (MK_LMTS, SPEC-P3c)
+HEAD_P3C = "737b8ef"   # the last commit before SPEC-P3c; MK_LMTS 0 (the default) must be SASS-identical to it
+
+
+def test_lmts_off_sass_identical_to_head(tmp_path):
+    """MK_LMTS 0 == the sources of HEAD_P3C at the 5 buckets (default knobs) and at NPAD 256 with MK_TS 256 / MK_TSB 0. Skipped when the commit is not in the repo."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
+        pytest.skip("no cuobjdump")
+    root = Path(__file__).resolve().parents[1]
+    arc = subprocess.run(["git", "-C", str(root), "archive", HEAD_P3C, "regimebench"], capture_output=True)
+    if arc.returncode != 0:
+        pytest.skip(f"commit {HEAD_P3C} not available")
+    subprocess.run(["tar", "-x", "-C", str(tmp_path)], input=arc.stdout, check=True)
+    cfgs = tuple((n, ()) for n in B.BUCKETS) + ((256, (("MK_TS", 256), ("MK_TSB", 0))),)
+    code = ("import sys,re,subprocess,tempfile,pathlib;from regimebench.kernels.mk import build as B\n"
+            "for npad,kn in %r:\n"
+            " c=B.compile_build(npad,knobs=kn)[0];p=pathlib.Path(tempfile.mkdtemp())/'k.cubin';p.write_bytes(c)\n"
+            " o=subprocess.run(['/usr/local/cuda/bin/cuobjdump','-sass',str(p)],capture_output=True,text=True,check=True).stdout\n"
+            " print('@@',npad,kn);print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))\n" % (cfgs,))
+    env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
+    head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
+    mine = "".join(f"@@ {n} {kn}\n" + _sass(B.compile_build(n, knobs=kn)[0]) + "\n" for n, kn in cfgs)
+    assert head.strip() == mine.strip() and len(head) > 100000
+
+
+@pytest.mark.parametrize("npad", (128, 256))
+def test_lmts_builds_compile(npad):
+    """MK_LMTS 1 builds at the TSB buckets; no spills and no stack (regs / local bytes are reported in NOTES.md)."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    info0 = B.compile_build(npad)[1]
+    info1 = B.compile_build(npad, knobs=(("MK_LMTS", 1),))[1]
+    assert info1["regs"] <= 128 and info1["stack"] == 0, info1
+    assert info1["spill_stores"] <= info0["spill_stores"] and info1["spill_loads"] <= info0["spill_loads"], (info0, info1)
+
+
+@pytest.mark.parametrize("npad", (16, 32, 64))
+def test_lmts_off_below_tsb_buckets_sass_identical(npad):
+    """LMTS = TSB && MK_LMTS: at NPAD <= 64 (TS off) MK_LMTS 1 is the MK_LMTS 0 build."""
+    pytest.importorskip("cuda.bindings.nvrtc")
+    if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
+        pytest.skip("no cuobjdump")
+    assert _sass(B.compile_build(npad, knobs=(("MK_LMTS", 1),))[0]) == _sass(B.compile_build(npad)[0])
+
+
+def test_lmts_knob_default_and_arm():
+    assert B.DEFAULT_KNOBS["MK_LMTS"] == 0 and MkArm().knobs["MK_LMTS"] == 0 and MkArm(lmts=1).knobs["MK_LMTS"] == 1

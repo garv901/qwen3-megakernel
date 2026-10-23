@@ -513,7 +513,7 @@ __device__ __forceinline__ void idle_rank(int& rank, int& nidle) {
 // All threads of an idle CTA (block-uniform; other CTAs return at once). Jobs = (rb, tt) with TT = 128 tokens: job j = rb * NTT + tt, idle CTA r takes j = r, r + nidle, ...
 // IS_O: wait tk[j] == 16, xb2[t][rb 128 ..] = bf16(x * ln2[l]) and ss2[t] += sum of x^2 over the 128 columns; else: wait tk[TK_D + j] == D_KS, xb = bf16(x * ln1[l + 1]).
 // Ends with fence.proxy.async.global in every writing thread (the caller then arrives at the grid barrier).
-template <bool IS_O, int NTILE>
+template <bool IS_O, int NTILE, bool SS = IS_O>
 __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw, bf16_t* out, float* ss2, unsigned* tk, int ntok) {
     constexpr int NTT = NPAD / 128, TARGET = IS_O ? PhO::K / KU : D_KS;
     int rank, nidle;
@@ -543,7 +543,7 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
                 a = __ldcg(reinterpret_cast<const float4*>(xp)); b = __ldcg(reinterpret_cast<const float4*>(xp + 4));
             }
             if (ok) *reinterpret_cast<uint4*>(out + (size_t)t * HID + rb * 128 + cg * 8) = pack_xw(a, b, __ldg(reinterpret_cast<const uint4*>(lw + cg * 8)));
-            if constexpr (IS_O) {
+            if constexpr (SS) {
                 float sq = a.x * a.x + a.y * a.y + a.z * a.z + a.w * a.w + b.x * b.x + b.y * b.y + b.z * b.z + b.w * b.w;
 #pragma unroll
                 for (int o = 8; o; o >>= 1) sq += __shfl_xor_sync(0xffffffffu, sq, o);   // the 16 lanes of one token (16 consecutive i)
@@ -620,14 +620,18 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
         mk_sk_n = 0;
 #endif  // MK_STAMPS
     }
+    bool lm_ident = false;   // LMTS: n_lm == ntok and lm_tok[s] == s (the tile-stream LM reads B row s = token s of xb); block- and grid-uniform
+    bool lmi_ok = true;
     for (int i = tid; i < MAXTOK; i += NT) {
         s_ss[i] = 0.f;
         s_lmtok[i] = i < n_lm ? __ldg(lm_tok + i) : 0;
+        if constexpr (LMTS) lmi_ok = lmi_ok && (i >= n_lm || s_lmtok[i] == i);
         s_lmseq[i] = i < n_lm ? __ldg(lm_seq + i) : 0;
 #pragma unroll
         for (int qq = 0; qq < 4; ++qq) { s_bk[qq][i] = 0u; s_bi[qq][i] = 0x7fffffff; }
     }
-    __syncthreads();
+    if constexpr (LMTS) lm_ident = __syncthreads_and(lmi_ok) && n_lm == ntok;
+    else __syncthreads();
     tc_fence_after();
     GS g;
     g.base = base; g.sm = sm; g.bars = base + OFF_MB; g.tb = *tslot; g.maps = maps; g.F = 0;
@@ -674,7 +678,8 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 for (int i = 0; i < 16; ++i)
                     if (c0 + i < ntok) red_add(qkv + (size_t)(c0 + i) * QKVN + row, __uint_as_float(v[i]));
             };
-            auto extra = [&]() { rr_of_x(x, rr1, ntok); if constexpr (TSB) zero_f32(ss2, ntok); else zero_f32(gu, ntok * GUN); };
+            const bool zssf = LMTS && l == NLAY - 1;   // ssf: sums of squares of the last layer's x (MAXTOK-sized, MAXTOK % 4 == 0); constant false (not captured) without LMTS
+            auto extra = [&]() { rr_of_x(x, rr1, ntok); if constexpr (TSB) { zero_f32(ss2, ntok); if (zssf) zero_f32(ss2 + MAXTOK, (ntok + 3) & ~3); } else zero_f32(gu, ntok * GUN); };
 #ifndef MK_SKV
             skv_prefetch(l, blockIdx.x, gridDim.x);   // splitkv: A1 has no prefetch (L2 prefetch measured net <= 0)
 #endif
@@ -869,7 +874,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 // P5b: D on the tile stream (A = wd, B = act by TMA, KS = D_KS); each tile's CTA adds 1 to its D ticket after the join, the idle CTAs convert x -> xb for the next QKV
                 ts_phase<PhD, D_TT, D_KS, 11, mk_null(5)>(g, l, ntok, epi);   // epi: the v0 D red.add into x; joined by a __syncthreads inside
                 if constexpr (!mk_null(5)) {
-                    if (l + 1 < NLAY) {   // block-uniform; the last layer has no next QKV: no tickets, no conversion
+                    if (l + 1 < NLAY || (LMTS && lm_ident)) {   // block-uniform; the last layer has no next QKV: no tickets, no conversion (LMTS: the finalizer writes xb = bf16(x * fnorm) and ssf for the LM head)
                         if (tid == 0) {
                             const TsGeom ge = ts_geom<PhD, D_TT, D_KS>();
                             if (ge.nt > 0) {
@@ -877,7 +882,12 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                                 for (int ti = 0; ti < ge.nt; ++ti) atomicAdd(tk + TK_D + (ge.t0 + ti) / D_KS, 1u);
                             }
                         }
-                        idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE>(x, ln1 + (size_t)(l + 1) * HID, xb, ss2, tk, ntok);
+                        if constexpr (LMTS) {
+                            if (l + 1 < NLAY) idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE>(x, ln1 + (size_t)(l + 1) * HID, xb, ss2, tk, ntok);
+                            else idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE, true>(x, fnorm, xb, ss2 + MAXTOK, tk, ntok);
+                        } else {
+                            idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE>(x, ln1 + (size_t)(l + 1) * HID, xb, ss2, tk, ntok);
+                        }
                     }
                 }
             } else if constexpr (TS) {
@@ -914,7 +924,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 gemm_phase<PhD, mk_null(5)>(g, l, ntok, get, epi, extra);
             }
         }
-        MK_PF_ARRIVE(if (l + 1 < NLAY) { if constexpr (TS) ts_first<PhQkv, TS_TT, TS_KS>(g, l + 1); else prefetch_next<PhQkv>(g, l + 1); } else lm_first(g));
+        MK_PF_ARRIVE(if (l + 1 < NLAY) { if constexpr (TS) ts_first<PhQkv, TS_TT, TS_KS>(g, l + 1); else prefetch_next<PhQkv>(g, l + 1); } else { if constexpr (LMTS) { if (lm_ident) ts_first<PhLm, 128, 1>(g, 0); else lm_first(g); } else lm_first(g); });
         bar_wait(bar_cnt, bar_target);
     }
 
@@ -960,8 +970,19 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             }
         };
         auto extra = [&]() {};
-        if constexpr (LMP) lm_phase<mk_null(6)>(g, get, epi);
-        else gemm_phase<PhLm, mk_null(6)>(g, 0, n_lm, get, epi, extra);
+        if constexpr (LMTS) {
+            if (lm_ident) {   // SPEC-P3c: B = xb (fnorm rows, written by the last D finalize), ssf = raw sums of squares; epi as above (it applies rsqrt(s_ss / HID + EPS))
+                for (int t = tid; t < n_lm; t += NT) s_ss[t] = __ldcg(ss2 + MAXTOK + t);   // s_ss is zero for t >= n_lm (prologue, GU re-zero)
+                __syncthreads();
+                ts_phase<PhLm, 128, 1, 8, mk_null(6)>(g, 0, n_lm, epi);
+            } else {
+                if constexpr (LMP) lm_phase<mk_null(6)>(g, get, epi);
+                else gemm_phase<PhLm, mk_null(6)>(g, 0, n_lm, get, epi, extra);
+            }
+        } else {
+            if constexpr (LMP) lm_phase<mk_null(6)>(g, get, epi);
+            else gemm_phase<PhLm, mk_null(6)>(g, 0, n_lm, get, epi, extra);
+        }
     }
     __syncthreads();
     tc_fence_after();

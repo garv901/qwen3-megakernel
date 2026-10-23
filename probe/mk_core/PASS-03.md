@@ -39,3 +39,11 @@ P3 goes first; P2 follows when v2 is in.
   (256 / 512 KB); options: X k-chunk ring (restage per k-chunk, 8 chunks, shared by all row blocks of a pass over a row group), or
   output tiles of N = 64 tokens with the weights re-read from L2 (2 / 4 passes). Epilogue cost at b256 (logits 256 x 151936 fp32
   = 156 MB of writes) is a floor of ~24 us by itself.
+
+## P3c (2026-10-23, before the build): LM head on the tile stream at NPAD 128 / 256 (SPEC-P3c.md)
+- Phase isolated: LM head at NPAD >= 128. Still the v0 path: 173 (b128) / 304 (b256) us per step (job 9588 stamps); fi 59-70 (job 9564).
+- Change: knob MK_LMTS (TSB buckets): the last layer's idle D finalizers write xb = bf16(x * fnorm) + ssf; the LM runs as
+  ts_phase<PhLm, TT 128, KS 1> with A = embed, B = xb by TMA (map 8), the existing logits + argmax epilogue. Run-time fallback to
+  the v0 path unless lm_tok is the identity (all q_len 1 points).
+- Band [H]: b256 -150..-200, b128 -80..-100 us/step (per-CTA ingest ~6.2 / 4.1 MB at the job 9595 per-SM rate).
+- Checks: MK_LMTS 0 = 0-line SASS diff; A/B with ab.py at R1-b128 / R1-b256 (MK_LMTS 0 / 1), accuracy band at both; stamps.
