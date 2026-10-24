@@ -60,6 +60,9 @@
 #ifndef MK_TSB
 #define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
 #endif
+#ifndef MK_FIN
+#define MK_FIN 0   // P7: idle-CTA finalizers (O -> xb2 / ss2, D -> xb): 0 = one load round per 512 items; 1 = all loads first; 2 = 1 + each job split over nidle / njobs idle CTAs
+#endif
 #ifndef MK_GU_TT
 #define MK_GU_TT 0   // P6: GU token tile override (0 = 96 at NPAD 256 (job 9757: -59.6 us vs 128), 48 at 128 (job 9758: -42.3 us vs 64)); multiple of 16, <= 128 (two accumulators in 256 TMEM columns). xover4 job 9756: GU T=256 TT 96 8.45 vs TT 128 8.85 us
 #endif

@@ -527,6 +527,7 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
     idle_rank<NTILE>(rank, nidle);
     if (rank < 0) return;   // not an idle CTA (block-uniform)
     const int tid = threadIdx.x;
+    if constexpr (MK_FIN == 0) {
     for (int job = rank; job < 8 * NTT; job += nidle) {
         const int rb = job / NTT, tt = job % NTT;
         unsigned* tick = tk + (IS_O ? 0 : TK_D) + job;
@@ -557,6 +558,55 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
                 if (ok && cg == 0) atomicAdd(ss2 + t, sq);
             }
         }
+    }
+    } else {
+    // MK_FIN 1: every thread issues all its loads (<= 4 items of 16 B x 2) before its stores (one L2 round trip per job instead of up to 4).
+    // MK_FIN 2: also split each job over nsub = nidle / NJOB idle CTAs by token rows (part p: tokens tt 128 + p pr ..); the last of the nsub CTAs that saw the
+    // target resets the ticket (and the seen counter tk[32 + (IS_O ? 0 : 16) + job]).
+    constexpr int NJOB = 8 * NTT, MI = (128 * 16 + NT - 1) / NT;
+    const int nsub = MK_FIN >= 2 ? max(1, nidle / NJOB) : 1, pr = (128 + nsub - 1) / nsub;
+    for (int w = rank; w < NJOB * nsub; w += nidle) {
+        const int job = w % NJOB, part = w / NJOB, rb = job / NTT, tt = job % NTT;
+        unsigned* tick = tk + (IS_O ? 0 : TK_D) + job;
+        if (tid == 0) {
+            unsigned v;
+            do {
+                asm volatile("ld.acquire.gpu.global.u32 %0, [%1];" : "=r"(v) : "l"(tick) : "memory");
+                if (v != TARGET) __nanosleep(64);
+            } while (v != TARGET);
+            if (nsub == 1) atomicExch(tick, 0u);
+            else {
+                unsigned* seen = tk + 32 + (IS_O ? 0 : 16) + job;
+                if (atomicAdd(seen, 1u) == (unsigned)nsub - 1) { atomicExch(seen, 0u); atomicExch(tick, 0u); }   // every sub CTA has seen the target
+            }
+        }
+        __syncthreads();
+        const int ntl = min(ntok - tt * 128, 128), p0 = part * pr, np = max(0, min(ntl - p0, pr)), items = np * 16;
+        const bf16_t* lw = lnw + rb * 128;
+        float4 a[MI], b[MI];
+#pragma unroll
+        for (int m = 0; m < MI; ++m) {
+            const int i = m * NT + tid, t = tt * 128 + p0 + (i >> 4), cg = i & 15;
+            a[m] = make_float4(0.f, 0.f, 0.f, 0.f); b[m] = a[m];
+            if (i < items) {
+                const float* xp = x + (size_t)t * HID + rb * 128 + cg * 8;
+                a[m] = __ldcg(reinterpret_cast<const float4*>(xp)); b[m] = __ldcg(reinterpret_cast<const float4*>(xp + 4));
+            }
+        }
+#pragma unroll
+        for (int m = 0; m < MI; ++m) {
+            if (m * NT >= items) break;   // block-uniform (the shuffles below need all lanes)
+            const int i = m * NT + tid, t = tt * 128 + p0 + (i >> 4), cg = i & 15;
+            const bool ok = i < items;
+            if (ok) *reinterpret_cast<uint4*>(out + (size_t)t * HID + rb * 128 + cg * 8) = pack_xw(a[m], b[m], __ldg(reinterpret_cast<const uint4*>(lw + cg * 8)));
+            if constexpr (SS) {
+                float sq = a[m].x * a[m].x + a[m].y * a[m].y + a[m].z * a[m].z + a[m].w * a[m].w + b[m].x * b[m].x + b[m].y * b[m].y + b[m].z * b[m].z + b[m].w * b[m].w;
+#pragma unroll
+                for (int o = 8; o; o >>= 1) sq += __shfl_xor_sync(0xffffffffu, sq, o);
+                if (ok && cg == 0) atomicAdd(ss2 + t, sq);
+            }
+        }
+    }
     }
     fence_proxy_async_global();   // generic writes of xb2 / xb -> TMA reads after the grid barrier
 }
