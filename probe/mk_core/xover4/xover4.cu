@@ -25,7 +25,10 @@ static_assert(CG == 1 || CG == 2, "CG");
 typedef unsigned int u32;
 typedef unsigned long long ull;
 typedef __nv_bfloat16 bf16;
-constexpr int NT = 512, GRID = 148, MAXRING = 16, TMEM_COLS = 512;
+#ifndef GRID_N
+#define GRID_N 148   // grid size (CTAs, one per SM); < 148 = the GEMM on a subset of the SMs (nano-batch overlap question, MK-attn 2026-10-23)
+#endif
+constexpr int NT = 512, GRID = GRID_N, MAXRING = 16, TMEM_COLS = 512;
 constexpr int SMEM_MAX = 227 * 1024, SMEM_FIXED = 1024 + 2048;   // 1 KB alignment slack + 2 KB (barriers, tmem slot)
 constexpr int A_BYTES = 128 * 128 * 2;                           // 32768 per k-step and CTA
 
