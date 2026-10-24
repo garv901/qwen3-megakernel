@@ -412,7 +412,8 @@ def test_skv_tune_per_bucket():
     h64 = (("SKV_STAGES", 4), ("SKV_STAGE_ROWS", 64))
     assert B.skv_tune(16, 1, [(128, 1)] * 16) == (("SKV_HALVES", 1), ("SKV_KV_EVICT_FIRST", 0), ("SKV_MERGE_CHUNK", 20), *h64)
     assert B.skv_tune(32, 1, [(1024, 1)] * 32) == (("SKV_HALVES", 1), ("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), *h64, ("SKV_TAIL_LDG", 1))
-    assert B.skv_tune(64, 1, [(128, 1)] * 64) == (("SKV_HALVES", 1), ("SKV_KV_EVICT_FIRST", 1), *h64, ("SKV_TAIL_LDG", 1)) == B.skv_tune(256, 1, [(128, 1)] * 256)
+    assert B.skv_tune(64, 1, [(128, 1)] * 64) == (("SKV_GROUPS", 4), ("SKV_HALVES", 1), ("SKV_KV_EVICT_FIRST", 1), ("SKV_STAGES", 8), ("SKV_STAGE_ROWS", 32), ("SKV_TAIL_LDG", 1)) == B.skv_tune(256, 1, [(128, 1)] * 256)
+    assert B.skv_bar_bytes(dict(B.SKV_G4A)) == 128 and B.skv_bar_bytes({}) == 64 and B.skv_stage_units(dict(B.SKV_G4A)) == 2
     assert B.skv_stage_units(dict(h64)) == 2 and len(B.skv_map_specs(1000, extra=B.skv_knob_defines(dict(h64)))) == 14
     assert B.skv_tune(16, 16, [(1024, 2)]) == (("SKV_KV_EVICT_FIRST", 0),) and B.skv_tune(16, 1, []) == ()
 

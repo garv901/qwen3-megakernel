@@ -50,3 +50,12 @@
 ## Decision
 - h64 in skv_tune at NPAD >= 32 (q_len 1), and at NPAD 16 with >= 16 sequences (no 1-item-per-CTA plans).
 - MK_FIN default -1 = per bucket: 1 at NPAD 128, else 0. Commit 5d436ab; e2e v12 = job 9772.
+
+## Batched-load finalizer, second try [M]
+- Job 9773: split jobs + all loads of a part before its stores, with no early exit (every MI round runs, guarded per item).
+  It hangs again at b128 (smoke killed at 240 s).
+- So the hang follows the batched loads themselves, not the `break`. Not root-caused. **Closed**; MK_FIN stays 0 / 1.
+
+## splitkv-v9 g4a (MK-attn P11)
+- Imported in 17aa954. mk now accepts a splitkv mbarrier tail of any 64 B multiple (g4a: 8 stages, 128 B).
+- In-mk A/B: job 9775.
