@@ -309,6 +309,9 @@ SKV_H64 = (("SKV_HALVES", 1), ("SKV_STAGES", 4), ("SKV_STAGE_ROWS", 64))
 SKV_G4A = (("SKV_GROUPS", 4), ("SKV_HALVES", 1), ("SKV_STAGES", 8), ("SKV_STAGE_ROWS", 32))
 # splitkv-v10 8 merge-free groups of 2 warps, 16-row stages x 16 (MK-attn P12). Job 9782 (vs g4a, MK_FIN 2): b256 -63.0, b128 +13.7 -> NPAD 256 only
 SKV_G8 = (("SKV_GROUPS", 8), ("SKV_HALVES", 1), ("SKV_STAGES", 16), ("SKV_STAGE_ROWS", 16))
+# splitkv-v11 SKV_TMA_FUSE 1 (one 4D box per tensor per full stage, MK-attn P13). Job 9792 (vs the tune without it): b256 g8f -101.0, b128 g4af -54.6
+# (g8f -25.0), b64 g4af -12.8 (g8f +15.6), R3-b32-kv1K h64f -24.3, R1-b32-kv128 h64f +9.7 -> NPAD >= 64, and NPAD 32 at kv >= 1K; NPAD 16 not measured
+SKV_FUSE_MIN_KV_32 = 1024
 
 
 def skv_tune(npad: int, qmax: int, seqs) -> tuple:
@@ -329,9 +332,10 @@ def skv_tune(npad: int, qmax: int, seqs) -> tuple:
     if qmax != 1:
         return (("SKV_KV_EVICT_FIRST", 0),)
     if npad > 32:
-        return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *(SKV_G8 if npad == 256 else SKV_G4A), ("SKV_TAIL_LDG", 1))))
+        return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *(SKV_G8 if npad == 256 else SKV_G4A), ("SKV_TAIL_LDG", 1), ("SKV_TMA_FUSE", 1))))
     if npad > 16:
-        return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *SKV_H64, ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1))))
+        fuse = (("SKV_TMA_FUSE", 1),) if max(k for k, _ in seqs) >= SKV_FUSE_MIN_KV_32 else ()
+        return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *SKV_H64, ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1), *fuse)))
     kv = max(k for k, _ in seqs)
     if len(seqs) == 1 and kv <= SKV_LDG_MAX_KV:
         return (("SKV_FORCE_ENGINE", 0),)

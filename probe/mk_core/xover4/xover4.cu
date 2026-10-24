@@ -110,7 +110,7 @@ __device__ __forceinline__ u32 cluster_rank() { u32 r; asm volatile("mov.u32 %0,
 
 // TMEM layout: accumulator b (= global tile counter & 1) at columns b*TT .. b*TT+TT-1 of the 512-column allocation.
 __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMap mW, const __grid_constant__ CUtensorMap mX, float* Y, int N, int K, int T,
-                                              int TT, int KS, int nph, int phase0, long long rowsAvail, int ring, unsigned* cnt, ull* tm) {
+                                              int TT, int KS, int nph, int phase0, long long rowsAvail, int ring, unsigned* cnt, ull* tm, int orc) {   // orc (oracle): bit 0 no MMA (commits kept), bit 1 no epilogue stores (TMEM reads kept)
   extern __shared__ uint8_t smraw[];
   const u32 raw = smem_u32(smraw), base = (raw + 1023) & ~1023u;
   uint8_t* sm = smraw + (base - raw);
@@ -179,6 +179,7 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
         if (two) tmem_ld16(v1, ta + (c + 3) * 16);
         tc_wait_ld();
         float* y0 = yp + (size_t)(c * 16) * N;
+        if (orc & 2) { if (__uint_as_float(v0[0]) == 1234.5f) y0[0] = 0.f; continue; }   // oracle: no stores (one never-taken store keeps the TMEM reads live)
         if (KS == 1) {
 #pragma unroll
           for (int i = 0; i < 16; ++i) y0[(size_t)i * N] = __uint_as_float(v0[i]);
@@ -228,6 +229,7 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
           const u32 sa = base + s * SLOT, sb = sa + A_BYTES;
 #pragma unroll
           for (int kk = 0; kk < 8; ++kk) {
+            if (orc & 1) break;
             const int a = kk >> 2, off = (kk & 3) * 32;
             const u32 acc = (k > 0 || kk > 0) ? 1u : 0u;
             if (CG == 2) mma_tc2(tb + b * TT, sdesc(sa + a * 16384 + off), sdesc(sb + a * (BR * 128) + off), idesc, acc);
@@ -271,6 +273,7 @@ int main(int argc, char** argv) {
   const int nph_arg = argc > 1 ? atoi(argv[1]) : 0, reps = argc > 2 ? atoi(argv[2]) : 5;
   const char* shsel = argc > 3 ? argv[3] : "all";
   const int Tsel = argc > 4 ? atoi(argv[4]) : 0, TTsel = argc > 5 ? atoi(argv[5]) : 0, KSsel = argc > 6 ? atoi(argv[6]) : 0;
+  const int orc = argc > 7 ? atoi(argv[7]) : 0, ringcap = argc > 8 ? atoi(argv[8]) : 0;   // oracle bits (k_ts orc); ring depth cap (0: as many slots as fit)
   int nsm = 0; CK(cudaDeviceGetAttribute(&nsm, cudaDevAttrMultiProcessorCount, 0));
   if (nsm != GRID) fprintf(stderr, "warning: %d SMs (expected %d)\n", nsm, GRID);
   const size_t POOL = 2ull << 30;
@@ -312,7 +315,7 @@ int main(int argc, char** argv) {
                            CU_TENSOR_MAP_SWIZZLE_128B, CU_TENSOR_MAP_L2_PROMOTION_L2_128B, CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
           if (r != CUDA_SUCCESS) { fprintf(stderr, "X tensor map encode failed %d\n", (int)r); return 1; } }
         const int slotB = A_BYTES + (TT / CG) * 256;
-        const int ring = std::min(MAXRING, (SMEM_MAX - SMEM_FIXED) / slotB);
+        const int ring = std::min(ringcap ? ringcap : MAXRING, std::min(MAXRING, (SMEM_MAX - SMEM_FIXED) / slotB));
         const int smem = SMEM_FIXED + ring * slotB;
         for (int KS : KSs) {
           if (KSsel && KS != KSsel) continue;
@@ -331,10 +334,10 @@ int main(int argc, char** argv) {
           if (occupancy < (CG == 1 ? 1 : GRID / 2)) { fprintf(stderr, "ts%d %s T=%d TT=%d KS=%d: occupancy %d too low (smem %d), skipped\n", CG, sh.name, T, TT, KS, occupancy, smem); continue; }
           auto launch = [&](int np, int p0) {
             CK(cudaMemset(cnt, 0, 1024));
-            CK(cudaLaunchKernelEx(&lc, k_ts, mW, mX, Y, N, K, T, TT, KS, np, p0, rowsAvail, ring, cnt, tm));
+            CK(cudaLaunchKernelEx(&lc, k_ts, mW, mX, Y, N, K, T, TT, KS, np, p0, rowsAvail, ring, cnt, tm, orc));
           };
           int pass = -1;
-          if (T == 64 || T == 256) {
+          if (!orc && (T == 64 || T == 256)) {
             CK(cudaMemset(Y, KS == 1 ? 0xFF : 0, (size_t)T * N * 4)); CK(cudaMemset(ver, 0, 64));   // KS == 1 writes every element: NaN fill catches misses
             launch(1, 0); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
             k_ref<<<((size_t)T * N + 255) / 256, 256>>>(pool, X, Y, N, K, T, 0, ver, ver + 1); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
@@ -354,7 +357,7 @@ int main(int argc, char** argv) {
             std::vector<double> m; for (int b = 0; b < GRID; ++b) m.push_back((double)(h[b * 4 + 1] - h[b * 4]) / (double)(h[b * 4 + 3] - h[b * 4 + 2]) * 1000.0);
             mhz.push_back(median(m));
           }
-          printf("{\"bin\":\"ts\",\"cg\":%d,\"shape\":\"%s\",\"T\":%d,\"TT\":%d,\"KS\":%d,\"us_phase\":%.3f,\"us_reps\":[", CG, sh.name, T, TT, KS, median(us));
+          printf("{\"bin\":\"ts\",\"orc\":%d,\"cg\":%d,\"shape\":\"%s\",\"T\":%d,\"TT\":%d,\"KS\":%d,\"us_phase\":%.3f,\"us_reps\":[", orc, CG, sh.name, T, TT, KS, median(us));
           for (size_t i = 0; i < us.size(); ++i) printf("%s%.3f", i ? "," : "", us[i]);
           printf("],\"mhz\":%.0f,\"pass\":%s,\"regs\":%d,\"spill\":%d,\"ring\":%d,\"nt\":%d,\"ntile\":%d,\"tiles_max\":%d,\"tiles_mean\":%.3f,\"steps_per_tile\":%d,\"smem\":%d}\n",
                  median(mhz), pass < 0 ? "null" : (pass ? "true" : "false"), regs, spill, ring, NTILE, NTILE, tmax, (double)NTILE / NOWN, SPT, smem);
