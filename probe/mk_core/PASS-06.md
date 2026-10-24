@@ -43,3 +43,25 @@ User-approved (2026-10-23): "go ahead with the 2-CTA gate/up kernel".
 
 ## Budget
 - Step 1: 0.5 GPU-h. Steps 3+: ~1.5 GPU-h.
+
+## Result, step 1 (xover4, job 9756) [M]
+- All 175 configs PASS vs the CUDA-core reference. This includes ragged tiles with partly OOB TMA boxes (expect_tx = full box bytes works).
+- Best us/phase per engine (CG 1 / CG 2, TT / KS):
+
+  | shape, T | CG 1 | CG 2 | CG 2 - CG 1 |
+  |---|---|---|---|
+  | QKV 128 | 5.64 (128/4) | 6.06 (128/4) | +0.42 |
+  | QKV 256 | 6.88 (128/2) | 7.34 (128/2) | +0.46 |
+  | O 128 | 4.81 (64/8) | 5.14 (128/16) | +0.33 |
+  | O 256 | 5.60 (128/8) | 5.80 (128/8) | +0.20 |
+  | GU 128 | 6.95 (128/2) | 7.41 (128/2) | +0.46 |
+  | GU 256 | 8.45 (96/1) | 9.04 (256/2) | +0.59 |
+  | D 128 | 5.51 (128/12) | 5.94 (128/12) | +0.43 |
+  | D 256 | 6.37 (128/8) | 6.73 (128/8) | +0.36 |
+
+- GU KS 1 only (the in-epilogue SiLU needs KS 1):
+  - T = 256: CG 1 TT 96 8.45, TT 128 8.85; CG 2 TT 96 9.13, TT 128 9.20.
+  - T = 128: CG 1 TT 64 8.13 (today's config) < TT 96 8.30 < TT 48 8.54; CG 2 TT 48 8.84.
+- **The hypothesis is falsified:** per-CTA bytes do not set the phase time. CG 2 TT 96 (352 KB per CTA, 144 CTAs) is slower than CG 1 TT 128 (512 KB, 96 CTAs).
+- **Decision:** cta_group::2 loses at every shape and T by 0.2-0.6 us/phase. Under the step-2 rule the 2-CTA path is closed: no MK_CG = 2 build.
+- The only gain is CG 1 GU TT 96 at NPAD 256 (-0.40 us/phase standalone). It is plumbed as knob MK_GU_TT (2f55c92; default SASS identical) and tested in e2e A/B job 9757.

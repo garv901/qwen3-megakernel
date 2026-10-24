@@ -229,7 +229,7 @@ def test_tsb_builds_compile(npad, ts, knobs):
 
 def test_tsb_dyn_smem_and_rings():
     """Ring slots 32 KB + TT * 256 B; the GU exchange region (12 KB) sits after the largest ring and below OFF_BARS."""
-    assert B.ts_tt(256) == {"qkv": 128, "gu": 128, "d": 128} and B.ts_tt(128) == {"qkv": 128, "gu": 64, "d": 128}
+    assert B.ts_tt(256) == {"qkv": 128, "gu": 96, "d": 128} and B.ts_tt(128) == {"qkv": 128, "gu": 64, "d": 128}
     assert B.ts_ks(256) == {"qkv": 2, "gu": 1, "d": 8} and B.ts_ks(128) == {"qkv": 4, "gu": 1, "d": 12}
     assert B.ts_ring(1, 128, 1) == 3 and B.ts_ring(1, 64, 1) == 4
     assert B.dyn_smem(128, ts=1, tsb=1) == B.dyn_smem(256, ts=1, tsb=1) == 1024 + 3 * 65536 + 12288 + 384 == 210304
@@ -305,7 +305,7 @@ def test_interleave_gu_formula():
 def test_tsb_map_specs():
     """Maps 9, 10, 11: xb2 {HID, MAXTOK} box {64, TT_GU}; wgu {HID, NL * 6144} box {64, 128}; act {INTER, MAXTOK} box {64, TT_D}; maps 8..11 are encoded per bucket."""
     assert B.TSB_MAPS == ("xb2", "wgu", "act") and B.WS_ORDER == ("xb", "xb2", "wgu", "act")
-    assert B.workspace_map_specs(256, B.WS_ORDER) == [([1024, 256], [2048], [64, 128]), ([1024, 256], [2048], [64, 128]),
+    assert B.workspace_map_specs(256, B.WS_ORDER) == [([1024, 256], [2048], [64, 128]), ([1024, 256], [2048], [64, 96]),
                                                       ([1024, 28 * 6144], [2048], [64, 128]), ([3072, 256], [6144], [64, 128])]
     assert B.workspace_map_specs(128, B.WS_ORDER)[1] == ([1024, 256], [2048], [64, 64])
     assert B.workspace_map_specs() == [([1024, 256], [2048], [64, 128])]
@@ -494,7 +494,7 @@ def test_skv_placeholder_sass_identical_to_head(tmp_path):
             " print('@@',npad,ts,tsb);print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))\n" % (cfgs,))
     env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
     head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
-    mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b), ("MK_LMTS", 0)))[0]) + "\n" for n, t, b in cfgs)
+    mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b), ("MK_LMTS", 0), ("MK_GU_TT", 128 if n == 256 else 0)))[0]) + "\n" for n, t, b in cfgs)
     assert head.strip() == mine.strip() and len(head) > 30000
 
 
@@ -519,7 +519,7 @@ def test_placeholder_sass_identical_to_head_p2b(tmp_path):
             " print('@@',npad,ts,tsb);print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))\n" % (cfgs,))
     env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
     head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
-    mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b), ("MK_LMTS", 0)))[0]) + "\n" for n, t, b in cfgs)
+    mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b), ("MK_LMTS", 0), ("MK_GU_TT", 128 if n == 256 else 0)))[0]) + "\n" for n, t, b in cfgs)
     assert head.strip() == mine.strip() and len(head) > 100000
 
 
@@ -545,7 +545,7 @@ def test_lmts_off_sass_identical_to_head(tmp_path):
             " print('@@',npad,kn);print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))\n" % (cfgs,))
     env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
     head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
-    mine = "".join(f"@@ {n} {kn}\n" + _sass(B.compile_build(n, knobs=(*kn, ("MK_LMTS", 0)))[0]) + "\n" for n, kn in cfgs)
+    mine = "".join(f"@@ {n} {kn}\n" + _sass(B.compile_build(n, knobs=(*kn, ("MK_LMTS", 0), ("MK_GU_TT", 128 if n == 256 else 0)))[0]) + "\n" for n, kn in cfgs)
     assert head.strip() == mine.strip() and len(head) > 100000
 
 

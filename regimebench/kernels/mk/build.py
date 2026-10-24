@@ -40,7 +40,7 @@ TK_SIZE = 64      # u32 tickets: O at [0, 16), D at [16, 32) (mk_step.cu TK_D)
 
 def ts_tt(npad: int, gu_tt: int = 0) -> dict:
     """Token tile TT per tile-stream phase (mk_common.cuh TS_TT, GU_TT, D_TT): the box rows of the B maps xb, xb2, act. gu_tt: MK_GU_TT (0 = per-bucket default)."""
-    return {"qkv": TS_TT, "gu": gu_tt or (128 if npad == 256 else 64), "d": 128}
+    return {"qkv": TS_TT, "gu": gu_tt or (96 if npad == 256 else 64), "d": 128}
 
 
 def ts_ks(npad: int) -> dict:
