@@ -99,7 +99,7 @@ def strip_knobs(src: str) -> str:
 
 
 # splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8), item prefetch (P9), merge chunk (P4), KV evict_first + 1-row tail by LDG (v5)
-SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG")
+SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF")
 
 
 def knob_defines(knobs: dict | None) -> list[str]:
@@ -284,13 +284,18 @@ def skv_tune(npad: int, qmax: int, seqs) -> tuple:
     Job 9714 (v4, us/step vs the header default, 1 GPU x 7 rounds): at NPAD <= 32, q_len 1:
     - one sequence with kv <= SKV_LDG_MAX_KV: LDG-only (SKV_FORCE_ENGINE 0): b1 kv1K -21.8, 2K -30.0, 4K -9.1, 8K -4.5, 16K -16.6 (kv32K +4.5);
     - else SKV_MERGE_CHUNK 20 (one merge round at S = 19..20; 0 spill at NPAD 16 / 32 TMA-only only): b1 kv32K -1.9, R3-b8-kv4K -15.2, R3-b32-kv1K -6.7.
+    Job 9725 (v5, vs the above): TMA builds add SKV_TAIL_LDG 1 (1-row item tail by LDG) + SKV_KV_EVICT_FIRST 1 (KV loads L2 evict_first: the GEMM
+    phases after attend recover most of their run-time loss): b64 -61.7, b128 -216.3, b256 -424.0, R3-b32-kv1K -32.7 (on chunk 20); EF on the
+    LDG-only b1 build: kv1K +1.7, kv16K +14.7 (not used there).
     ``seqs``: iterable of (kv_len, q_len)."""
     seqs = [(int(k), int(q)) for k, q in seqs]
-    if qmax != 1 or npad > 32 or not seqs:
+    if qmax != 1 or not seqs:
         return ()
+    if npad > 32:
+        return (("SKV_KV_EVICT_FIRST", 1), ("SKV_TAIL_LDG", 1))
     if len(seqs) == 1 and seqs[0][0] <= SKV_LDG_MAX_KV:
         return (("SKV_FORCE_ENGINE", 0),)
-    return (("SKV_MERGE_CHUNK", 20),)
+    return (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1))
 
 
 SKV_LDG_MAX_KV = 16384   # job 9714: LDG-only wins at b1 kv1K..16K, loses at 32K

@@ -405,10 +405,13 @@ def test_skv_plan_matches_mk_layout_on_mk_points():
 
 
 def test_skv_tune_per_bucket():
-    """Job 9714: LDG-only at b1 kv <= 16K, SKV_MERGE_CHUNK 20 at the other NPAD 16 / 32 points; nothing at NPAD >= 64 or in the R6 build."""
+    """Jobs 9714 / 9725: LDG-only at b1 kv <= 16K; chunk 20 + tail LDG + evict_first at the other NPAD 16 / 32 points; tail LDG + evict_first at NPAD >= 64; nothing in the R6 build."""
+    ef_tail = (("SKV_KV_EVICT_FIRST", 1), ("SKV_TAIL_LDG", 1))
+    small = (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1))
     assert B.skv_tune(16, 1, [(1024, 1)]) == (("SKV_FORCE_ENGINE", 0),) == B.skv_tune(16, 1, [(16384, 1)])
-    assert B.skv_tune(16, 1, [(32768, 1)]) == (("SKV_MERGE_CHUNK", 20),) == B.skv_tune(16, 1, [(4096, 1)] * 8) == B.skv_tune(32, 1, [(1024, 1)] * 32)
-    assert B.skv_tune(64, 1, [(128, 1)] * 64) == () == B.skv_tune(16, 16, [(1024, 2)]) == B.skv_tune(16, 1, [])
+    assert B.skv_tune(16, 1, [(32768, 1)]) == small == B.skv_tune(16, 1, [(4096, 1)] * 8) == B.skv_tune(32, 1, [(1024, 1)] * 32)
+    assert B.skv_tune(64, 1, [(128, 1)] * 64) == ef_tail == B.skv_tune(256, 1, [(128, 1)] * 256)
+    assert B.skv_tune(16, 16, [(1024, 2)]) == () == B.skv_tune(16, 1, [])
 
 
 def test_skv_attn_option_and_supports():
