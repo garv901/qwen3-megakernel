@@ -408,9 +408,12 @@ def test_skv_tune_per_bucket():
     """Jobs 9714 / 9725 / 9748: per-bucket splitkv header knobs."""
     assert B.skv_tune(16, 1, [(1024, 1)]) == (("SKV_FORCE_ENGINE", 0),) == B.skv_tune(16, 1, [(16384, 1)])
     assert B.skv_tune(16, 1, [(32768, 1)]) == (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20)) == B.skv_tune(16, 1, [(4096, 1)] * 8)
-    assert B.skv_tune(16, 1, [(1024, 1)] * 8) == (("SKV_KV_EVICT_FIRST", 0), ("SKV_MERGE_CHUNK", 20)) == B.skv_tune(16, 1, [(128, 1)] * 16)
-    assert B.skv_tune(32, 1, [(1024, 1)] * 32) == (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1))
-    assert B.skv_tune(64, 1, [(128, 1)] * 64) == (("SKV_KV_EVICT_FIRST", 1), ("SKV_TAIL_LDG", 1)) == B.skv_tune(256, 1, [(128, 1)] * 256)
+    assert B.skv_tune(16, 1, [(1024, 1)] * 8) == (("SKV_KV_EVICT_FIRST", 0), ("SKV_MERGE_CHUNK", 20))
+    h64 = (("SKV_STAGES", 4), ("SKV_STAGE_ROWS", 64))
+    assert B.skv_tune(16, 1, [(128, 1)] * 16) == (("SKV_HALVES", 1), ("SKV_KV_EVICT_FIRST", 0), ("SKV_MERGE_CHUNK", 20), *h64)
+    assert B.skv_tune(32, 1, [(1024, 1)] * 32) == (("SKV_HALVES", 1), ("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), *h64, ("SKV_TAIL_LDG", 1))
+    assert B.skv_tune(64, 1, [(128, 1)] * 64) == (("SKV_HALVES", 1), ("SKV_KV_EVICT_FIRST", 1), *h64, ("SKV_TAIL_LDG", 1)) == B.skv_tune(256, 1, [(128, 1)] * 256)
+    assert B.skv_stage_units(dict(h64)) == 2 and len(B.skv_map_specs(1000, extra=B.skv_knob_defines(dict(h64)))) == 14
     assert B.skv_tune(16, 16, [(1024, 2)]) == (("SKV_KV_EVICT_FIRST", 0),) and B.skv_tune(16, 1, []) == ()
 
 
@@ -494,7 +497,7 @@ def test_skv_placeholder_sass_identical_to_head(tmp_path):
             " print('@@',npad,ts,tsb);print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))\n" % (cfgs,))
     env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
     head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
-    mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b), ("MK_LMTS", 0), ("MK_GU_TT", {256: 128, 128: 64}.get(n, 0))))[0]) + "\n" for n, t, b in cfgs)
+    mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b), ("MK_LMTS", 0), ("MK_GU_TT", {256: 128, 128: 64}.get(n, 0)), ("MK_FIN", 0)))[0]) + "\n" for n, t, b in cfgs)
     assert head.strip() == mine.strip() and len(head) > 30000
 
 
@@ -519,7 +522,7 @@ def test_placeholder_sass_identical_to_head_p2b(tmp_path):
             " print('@@',npad,ts,tsb);print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))\n" % (cfgs,))
     env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
     head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
-    mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b), ("MK_LMTS", 0), ("MK_GU_TT", {256: 128, 128: 64}.get(n, 0))))[0]) + "\n" for n, t, b in cfgs)
+    mine = "".join(f"@@ {n} {t} {b}\n" + _sass(B.compile_build(n, knobs=(("MK_TS", t), ("MK_TSB", b), ("MK_LMTS", 0), ("MK_GU_TT", {256: 128, 128: 64}.get(n, 0)), ("MK_FIN", 0)))[0]) + "\n" for n, t, b in cfgs)
     assert head.strip() == mine.strip() and len(head) > 100000
 
 
@@ -545,7 +548,7 @@ def test_lmts_off_sass_identical_to_head(tmp_path):
             " print('@@',npad,kn);print('\\n'.join(re.sub(r'/\\*[0-9a-f]+\\*/','',l).strip() for l in o.splitlines() if not l.strip().startswith('code for')))\n" % (cfgs,))
     env = {**__import__("os").environ, "PYTHONPATH": str(tmp_path), "CUDA_CACHE_DISABLE": "1"}
     head = subprocess.run([__import__("sys").executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=True).stdout
-    mine = "".join(f"@@ {n} {kn}\n" + _sass(B.compile_build(n, knobs=(*kn, ("MK_LMTS", 0), ("MK_GU_TT", {256: 128, 128: 64}.get(n, 0))))[0]) + "\n" for n, kn in cfgs)
+    mine = "".join(f"@@ {n} {kn}\n" + _sass(B.compile_build(n, knobs=(*kn, ("MK_LMTS", 0), ("MK_GU_TT", {256: 128, 128: 64}.get(n, 0)), ("MK_FIN", 0)))[0]) + "\n" for n, kn in cfgs)
     assert head.strip() == mine.strip() and len(head) > 100000
 
 

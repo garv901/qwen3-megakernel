@@ -527,7 +527,7 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
     idle_rank<NTILE>(rank, nidle);
     if (rank < 0) return;   // not an idle CTA (block-uniform)
     const int tid = threadIdx.x;
-    if constexpr (MK_FIN == 0) {
+    if constexpr (FIN == 0) {
     for (int job = rank; job < 8 * NTT; job += nidle) {
         const int rb = job / NTT, tt = job % NTT;
         unsigned* tick = tk + (IS_O ? 0 : TK_D) + job;

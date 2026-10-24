@@ -28,7 +28,7 @@ ATTN_SPLITKV = COMMON / "splitkv" / "splitkv.cuh"
 SKV_STAGE_BYTES = 128 * 512   # one 128-row K + V ring stage of the q_len 1 build
 SKV_BAR_OFF, SKV_BAR_BYTES = 147968, 64   # splitkv-v1 (128 x 2 TMA ring): skv::kBarOff, skv::kBarBytes; attend scratch = kBarOff + kBarBytes = 148,032 B (compile-checked by MK_EXPECT_DYN)
 OWN_SOURCES = ("mk_common.cuh", "mk_step.cu")
-DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 128, "MK_TSB": 1, "MK_LMTS": 1, "MK_DBG_NOATT": 0, "MK_GU_TT": 0, "MK_FIN": 0}
+DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 128, "MK_TSB": 1, "MK_LMTS": 1, "MK_DBG_NOATT": 0, "MK_GU_TT": 0, "MK_FIN": -1}
 WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map order (kernel: maps 0..7)
 WORKSPACE_MAPS = ("xb",)   # kernel map 8 (MK_TS): bf16 [MAXTOK_MK][H] workspace of the tile-stream QKV (B tiles by TMA)
 TSB_MAPS = ("xb2", "wgu", "act")   # kernel maps 9, 10, 11 (MK_TSB): xb2 bf16 [MAXTOK][H] (B of GU), wgu bf16 [NL * 6144][H] (A of GU), act bf16 [MAXTOK][INTER] (B of D)
@@ -292,6 +292,11 @@ SKV_AUTO_MIN_KV = 512   # job 9702: kv512 -67 us (b1)
 SKV_AUTO_MIN_SEQ = 16   # job 9702: kv128 b16 -1.3, b8 +81 us
 
 
+# splitkv-v8 half-CTA consumers with 64-row stages (MK-attn P10). Job 9771 (vs the tune without it, 1 GPU x 7 rounds): b256 -417.6, b128 -179.8, b64 -75.6,
+# R3-b32-kv1K -84.0, b16-kv128 -38.7. Not at 1-item-per-CTA plans (MK-attn job 9770: b1 kv32K +6.5 us/layer) -> NPAD 16 only with >= 16 sequences.
+SKV_H64 = (("SKV_HALVES", 1), ("SKV_STAGES", 4), ("SKV_STAGE_ROWS", 64))
+
+
 def skv_tune(npad: int, qmax: int, seqs) -> tuple:
     """Per-bucket splitkv header knobs of a workload (MkArm skvtune=1), as sorted (name, value) pairs; knobs set on the arm win.
     Job 9714 (v4, us/step vs the header default, 1 GPU x 7 rounds): at NPAD <= 32, q_len 1:
@@ -310,13 +315,13 @@ def skv_tune(npad: int, qmax: int, seqs) -> tuple:
     if qmax != 1:
         return (("SKV_KV_EVICT_FIRST", 0),)
     if npad > 32:
-        return (("SKV_KV_EVICT_FIRST", 1), ("SKV_TAIL_LDG", 1))
+        return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *SKV_H64, ("SKV_TAIL_LDG", 1))))
     if npad > 16:
-        return (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1))
+        return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *SKV_H64, ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1))))
     kv = max(k for k, _ in seqs)
     if len(seqs) == 1 and kv <= SKV_LDG_MAX_KV:
         return (("SKV_FORCE_ENGINE", 0),)
-    return (("SKV_KV_EVICT_FIRST", int(kv >= SKV_EF_MIN_KV)), ("SKV_MERGE_CHUNK", 20))
+    return tuple(sorted((("SKV_KV_EVICT_FIRST", int(kv >= SKV_EF_MIN_KV)), ("SKV_MERGE_CHUNK", 20), *(SKV_H64 if len(seqs) >= 16 else ()))))
 
 
 SKV_EF_MIN_KV = 4096   # job 9748, NPAD 16 TMA builds: EF wins at kv 4K / 32K, loses at kv128 / 1K
