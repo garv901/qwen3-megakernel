@@ -119,6 +119,18 @@ __device__ __forceinline__ void cluster_sync_all() { asm volatile("barrier.clust
 __device__ __forceinline__ u32 cluster_rank() { u32 r; asm volatile("mov.u32 %0, %%cluster_ctarank;" : "=r"(r)); return r; }
 
 // TMEM layout: accumulator b (= global tile counter & 1) at columns b*TT .. b*TT+TT-1 of the 512-column allocation.
+#ifndef WU
+#define WU 0   // 1: producer / issuer roles as whole warps (lane 0 works, lanes 1..31 wait at __syncwarp) instead of single threads
+#endif
+#ifndef EV
+#define EV 0
+#endif
+#if EV   // per-role globaltimer events of phase nph / 2 (CTA b: g_ev[b * 32 + i]); 0: issuer after full wait k (1 + k), producer after empty wait j (12 + j), epilogue (24, 25), tid 0 before / after gbar (26, 27), phase start (0)
+__device__ ull g_ev[GRID_N * 32];
+#define EVT(i) do { if (cur_p == nph / 2) g_ev[blockIdx.x * 32 + (i)] = gt(); } while (0)
+#else
+#define EVT(i) do { } while (0)
+#endif
 __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMap mW, const __grid_constant__ CUtensorMap mX, float* Y, int N, int K, int T,
                                               int TT, int KS, int nph, int phase0, long long rowsAvail, int ring, unsigned* cnt, ull* tm, int orc) {   // orc (oracle): bit 0 no MMA (commits kept), bit 1 no epilogue stores (TMEM reads kept), bit 2 no B loads, bit 3 no A loads, bit 4 no TMEM reads, bit 5 plain arrives for commits, bit 6 grid barrier only
   extern __shared__ uint8_t smraw[];
@@ -180,10 +192,12 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
     }
   };
   // epi_tile: epilogue of tile ti of the phase (accumulator b = G & 1), TMEM -> Y; CTA r's TMEM lane 32 q + l = W row rb * 128 CG + 128 rank + 32 q + l, column c = token tt * TT + c.
+  int cur_p = 0;
   auto epi_tile = [&](int ti, u32 G0) {
       const u32 G = G0 + ti, b = G & 1;
       const int t = t0 + ti, rb = (t / KS) / NTT, tt = (t / KS) % NTT;
       mbar_wait(accf + 8 * b, (G >> 1) & 1);
+      if (warp == 4 && lane == 0 && ti == 0) EVT(24);
       tc_fence_after();
       float* yp = Y + (size_t)(tt * TT) * N + rb * (128 * CG) + 128 * rank + 32 * q + lane;
       const u32 ta = tb + ((u32)(q * 32) << 16) + b * TT;
@@ -216,17 +230,20 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
       }
       tc_fence_before();
       __syncwarp();
+      if (warp == 4 && lane == 0 && ti == 0) EVT(25);
       if (lane == 0) { if (CG == 2 && rank == 1) mbar_arrive_rank0(acce + 8 * b); else mbar_arrive(acce + 8 * b); }
   };
   if (tid == 0) for (int i = 0; i < min(ring, nst); ++i) { fill_a(0, i, i); fill_b(i, i); }
   for (int p = 0; p < nph; ++p) {
+    cur_p = p;
+    if (tid == 0) EVT(0);
     const u32 F0 = (u32)p * nst, G0 = (u32)p * nt;                    // global step / tile counters at the start of this phase
     if (orc & 64) {                                                   // oracle: grid barrier only (the window prefetch of phase 0 is never consumed)
-    } else if (tid == 0) {                                            // ---- producer (both ranks for CG = 2, own empty[s])
+    } else if (WU ? warp == 0 : tid == 0) { if (!WU || lane == 0) {   // ---- producer (both ranks for CG = 2, own empty[s])
       if (p > 0) for (int i = 0; i < min(ring, nst); ++i) fill_b(i, F0 + i);   // B of the window-prefetched steps, after the grid barrier
       for (int j = ring; j < nst; ++j) {
         const u32 f = F0 + j, s = f % ring;
-        mbar_wait(emptyb + 8 * s, ((f / ring) - 1) & 1);              // previous use (step f - ring, use number f / ring - 1) of the slot has been read by its MMAs
+        mbar_wait(emptyb + 8 * s, ((f / ring) - 1) & 1); if (j < 12) EVT(12 + j);              // previous use (step f - ring, use number f / ring - 1) of the slot has been read by its MMAs
         fill_a(p, j, f); fill_b(j, f);
       }
       if (p + 1 < nph) {                                              // barrier window: A of the next phase's first steps
@@ -237,13 +254,14 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
           fill_a(p + 1, i, f);
         }
       }
-    } else if (tid == 32 && rank == 0) {                              // ---- MMA issuer (rank 0 only for CG = 2: pair MMA, M = 256)
+    } if (WU) __syncwarp(); } else if (WU ? (warp == 1 && rank == 0) : (tid == 32 && rank == 0)) { if (!WU || lane == 0) {   // ---- MMA issuer (rank 0 only for CG = 2: pair MMA, M = 256)
       for (int ti = 0; ti < nt; ++ti) {
         const u32 G = G0 + ti, b = G & 1;
         if (G >= 2) { if (CG == 2) mbar_wait_cluster(acce + 8 * b, ((G >> 1) - 1) & 1); else mbar_wait(acce + 8 * b, ((G >> 1) - 1) & 1); }   // epilogue(s) done with accumulator b (use G / 2 - 1)
         for (int k = 0; k < SPT; ++k) {
           const u32 f = F0 + ti * SPT + k, s = f % ring;
           mbar_wait(fullb + 8 * s, (f / ring) & 1);
+          if (ti == 0 && k < 11) EVT(1 + k);
           tc_fence_after();
           const u32 sa = base + s * SLOT, sb = sa + A_BYTES;
 #pragma unroll
@@ -259,11 +277,13 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
           else { tc_commit(emptyb + 8 * s); if (k == SPT - 1) tc_commit(accf + 8 * b); }
         }
       }
-    } else if (warp >= 4 && (warp >> 2) - 1 < NCH) {                  // ---- epilogue (both ranks): quadrant q = warp & 3, chunks (warp >> 2) - 1 + 3 m
+    } if (WU) __syncwarp(); } else if (warp >= 4 && (warp >> 2) - 1 < NCH) {                  // ---- epilogue (both ranks): quadrant q = warp & 3, chunks (warp >> 2) - 1 + 3 m
       for (int ti = 0; ti < nt; ++ti) epi_tile(ti, G0);
     }
+    if (tid == 0) EVT(26);
     __threadfence();
     gbar(cnt, p + 1);
+    if (tid == 0) EVT(27);
   }
   __syncthreads();
   if (CG == 2) cluster_sync_all();   // no CTA frees TMEM / exits while its peer's MMAs, TMAs or remote arrivals may still be in flight
@@ -287,6 +307,9 @@ __global__ void k_ref(const bf16* pool, const bf16* X, const float* Y, int N, in
   if (!(d <= 2e-3f * fmaxf(1.f, fabsf(acc)))) atomicAdd(nbad, 1u);
 }
 
+#if EV
+static void* g_ev_ptr() { void* p; CK(cudaGetSymbolAddress(&p, g_ev)); return p; }
+#endif
 static double median(std::vector<double> v) { std::sort(v.begin(), v.end()); return v[v.size() / 2]; }
 
 int main(int argc, char** argv) {
@@ -377,6 +400,15 @@ int main(int argc, char** argv) {
             std::vector<double> m; for (int b = 0; b < GRID; ++b) m.push_back((double)(h[b * 4 + 1] - h[b * 4]) / (double)(h[b * 4 + 3] - h[b * 4 + 2]) * 1000.0);
             mhz.push_back(median(m));
           }
+#if EV
+          { static ull hev[GRID_N * 32]; CK(cudaMemcpyFromSymbol(hev, g_ev, sizeof(hev)));
+            const char* nm[32] = {}; std::vector<double> med(32, -1);
+            for (int i = 1; i < 32; ++i) { std::vector<double> v; for (int b = 0; b < GRID; ++b) { ull e = hev[b * 32 + i], z = hev[b * 32]; if (e > z && e - z < 1000000) v.push_back((double)(e - z) / 1000.0); } if (!v.empty()) med[i] = median(v); }
+            printf("{\"ev\":\"%s T=%d TT=%d KS=%d orc=%d\",\"us\":[", sh.name, T, TT, KS, orc);
+            for (int i = 0; i < 32; ++i) printf("%s%.3f", i ? "," : "", med[i]);
+            printf("]}\n"); (void)nm;
+            CK(cudaMemset(g_ev_ptr(), 0, sizeof(hev))); }
+#endif
           printf("{\"bin\":\"ts\",\"orc\":%d,\"cg\":%d,\"shape\":\"%s\",\"T\":%d,\"TT\":%d,\"KS\":%d,\"us_phase\":%.3f,\"us_reps\":[", orc, CG, sh.name, T, TT, KS, median(us));
           for (size_t i = 0; i < us.size(); ++i) printf("%s%.3f", i ? "," : "", us[i]);
           printf("],\"mhz\":%.0f,\"pass\":%s,\"regs\":%d,\"spill\":%d,\"ring\":%d,\"nt\":%d,\"ntile\":%d,\"tiles_max\":%d,\"tiles_mean\":%.3f,\"steps_per_tile\":%d,\"smem\":%d}\n",

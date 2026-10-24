@@ -60,6 +60,9 @@
 #ifndef MK_TSB
 #define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
 #endif
+#ifndef MK_WU
+#define MK_WU 0   // P14: 1 = tile-stream producer / MMA issuer as whole warps 0 / 1 (lane 0 works, lanes 1..31 wait at __syncwarp) instead of tid 0 / 32 with the rest of the warp at the join barrier (xover4 job 9802: GU / D / QKV T 256 -0.55 / -0.58 / -0.65 us/phase)
+#endif
 #ifndef MK_L2PF
 #define MK_L2PF 0   // P11: L2 prefetch (cp.async.bulk.prefetch.tensor) of this CTA's GU (bit 0) / D (bit 1) weight boxes before attend (TSB + splitkv)
 #endif
