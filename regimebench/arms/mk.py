@@ -42,7 +42,7 @@ class _Loaded:
         cubin, info, _ = B.compile_build(npad, self.nb, knobs, attn=attn, skv_qmax=qmax)
         self.ptxas = info
         self.knobs = d
-        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"], tsb=d["MK_TSB"], attn=attn, skv_stages=d.get("SKV_STAGES", 2))
+        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"], tsb=d["MK_TSB"], attn=attn, skv_stages=d.get("SKV_STAGES", 2), gu_tt=d["MK_GU_TT"])
         self.kernel = CoopKernel(cubin, B.KERNEL, self.dyn)
         self.regs, self.static_smem = self.kernel.regs, self.kernel.static_smem
         self.local_bytes, self.dyn_smem = self.kernel.local_bytes, self.kernel.dyn_smem
@@ -129,7 +129,7 @@ class MkStep:
         ws = {"xb": self.xb.data_ptr()} if ts else None   # map 8 = xb (128 B more) only for MK_TS builds
         if self.tsb:   # maps 9, 10, 11 = xb2, wgu, act
             ws.update({"xb2": self.xb2.data_ptr(), "wgu": self.wgu.data_ptr(), "act": self.act.data_ptr()})
-        blob = B.encode_maps(self._weights, {k: self._weights[k].data_ptr() for k in B.WEIGHT_MAPS}, workspace=ws, npad=self.npad)
+        blob = B.encode_maps(self._weights, {k: self._weights[k].data_ptr() for k in B.WEIGHT_MAPS}, workspace=ws, npad=self.npad, gu_tt=ld.knobs["MK_GU_TT"])
         self.maps = torch.frombuffer(bytearray(blob), dtype=torch.uint8).to(dev)
         assert self.maps.data_ptr() % 128 == 0
         wp = [self._weights[k].data_ptr() for k in VEC_WEIGHTS]

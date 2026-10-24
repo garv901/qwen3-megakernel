@@ -60,6 +60,9 @@
 #ifndef MK_TSB
 #define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
 #endif
+#ifndef MK_GU_TT
+#define MK_GU_TT 0   // P6: GU token tile override (0 = 128 at NPAD 256, 64 at 128); multiple of 16, <= 128 (two accumulators in 256 TMEM columns). xover4 job 9756: GU T=256 TT 96 8.45 vs TT 128 8.85 us
+#endif
 #ifndef MK_DBG_NOATT
 #define MK_DBG_NOATT 0   // debug (MK_SKV builds): 1 = attend is compiled in but skipped at run time (guard ntok < 0): separates its code-gen cost from its run-time cost; output is wrong
 #endif
@@ -119,7 +122,7 @@ constexpr int TS_TT = 128;                                  // tokens per tile (
 constexpr int TS_KS = (NPAD == 256) ? 2 : 4;                // split-K factor of the tile stream (job 9592 best per bucket)
 constexpr int TS_SLOT = 32768 + TS_TT * 256;                // ring slot bytes: A (128 rows x 128 k bf16) + B (TS_TT x 128 k bf16)
 // P5b phase configs (TT tokens per tile / KS split-K): GU 128 / 1 (NPAD 256), 64 / 1 (NPAD 128); D 128 / 8 (256), 128 / 12 (128). QKV = (TS_TT, TS_KS).
-constexpr int GU_TT = NPAD == 256 ? 128 : 64, GU_KS = 1;
+constexpr int GU_TT = MK_GU_TT ? MK_GU_TT : (NPAD == 256 ? 128 : 64), GU_KS = 1;   // MK_GU_TT: ragged tiles allowed (NTT = ceil(NPAD / TT); B rows past MAXTOK are TMA OOB zero fill)
 constexpr int D_TT = 128, D_KS = NPAD == 256 ? 8 : 12;
 constexpr int TS_EXCH = TSB ? 12288 : 0;                    // GU exchange region: [3 groups][2 quadrant pairs][16 tokens][32 lanes] fp32
 constexpr int TS_SMEM_AVAIL = 227 * 1024 - 11280 - 1024 - 384 - TS_EXCH;   // dyn smem budget after static smem, alignment slack, barriers and the exchange region

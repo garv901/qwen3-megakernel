@@ -28,7 +28,7 @@ ATTN_SPLITKV = COMMON / "splitkv" / "splitkv.cuh"
 SKV_STAGE_BYTES = 128 * 512   # one 128-row K + V ring stage of the q_len 1 build
 SKV_BAR_OFF, SKV_BAR_BYTES = 147968, 64   # splitkv-v1 (128 x 2 TMA ring): skv::kBarOff, skv::kBarBytes; attend scratch = kBarOff + kBarBytes = 148,032 B (compile-checked by MK_EXPECT_DYN)
 OWN_SOURCES = ("mk_common.cuh", "mk_step.cu")
-DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 128, "MK_TSB": 1, "MK_LMTS": 1, "MK_DBG_NOATT": 0}
+DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 128, "MK_TSB": 1, "MK_LMTS": 1, "MK_DBG_NOATT": 0, "MK_GU_TT": 0}
 WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map order (kernel: maps 0..7)
 WORKSPACE_MAPS = ("xb",)   # kernel map 8 (MK_TS): bf16 [MAXTOK_MK][H] workspace of the tile-stream QKV (B tiles by TMA)
 TSB_MAPS = ("xb2", "wgu", "act")   # kernel maps 9, 10, 11 (MK_TSB): xb2 bf16 [MAXTOK][H] (B of GU), wgu bf16 [NL * 6144][H] (A of GU), act bf16 [MAXTOK][INTER] (B of D)
@@ -38,9 +38,9 @@ TS_EXCH = 12288   # MK_TSB: GU exchange region after the ring (mk_common.cuh TS_
 TK_SIZE = 64      # u32 tickets: O at [0, 16), D at [16, 32) (mk_step.cu TK_D)
 
 
-def ts_tt(npad: int) -> dict:
-    """Token tile TT per tile-stream phase (mk_common.cuh TS_TT, GU_TT, D_TT): the box rows of the B maps xb, xb2, act."""
-    return {"qkv": TS_TT, "gu": 128 if npad == 256 else 64, "d": 128}
+def ts_tt(npad: int, gu_tt: int = 0) -> dict:
+    """Token tile TT per tile-stream phase (mk_common.cuh TS_TT, GU_TT, D_TT): the box rows of the B maps xb, xb2, act. gu_tt: MK_GU_TT (0 = per-bucket default)."""
+    return {"qkv": TS_TT, "gu": gu_tt or (128 if npad == 256 else 64), "d": 128}
 
 
 def ts_ks(npad: int) -> dict:
@@ -133,14 +133,14 @@ def ts_ring(ts: int = 1, tt: int = TS_TT, tsb: int = 0) -> int:
     return min(8, (227 * 1024 - 11280 - 1024 - 384 - (TS_EXCH if tsb else 0)) // (32768 + tt * 256))
 
 
-def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placeholder", lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, skv_stages: int = 2) -> int:
+def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placeholder", lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, skv_stages: int = 2, gu_tt: int = 0) -> int:
     """OFF_BARS of the kernel layout (mk_common.cuh): end of the overlay regions; under attn = splitkv at least kBarOff and = 512 (mod 1024).
     ``skv_stages``: SKV_STAGES of a q_len 1 build (128-row stages, 64 KB each: kBarOff = SKV_BAR_OFF + (stages - 2) * 64 KB)."""
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     lay = ring * ub + 2 * xs
     if ts and npad >= ts_min(ts) and ku == 128:
-        tt = ts_tt(npad)
+        tt = ts_tt(npad, gu_tt)
         if tsb:
             lay = max(lay, max(ts_ring(1, tt[p], 1) * (32768 + tt[p] * 256) for p in ("qkv", "gu", "d")) + TS_EXCH)
         else:
@@ -153,7 +153,7 @@ def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placehold
     return lay
 
 
-def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, attn: str = "placeholder", skv_stages: int = 2) -> int:
+def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, attn: str = "placeholder", skv_stages: int = 2, gu_tt: int = 0) -> int:
     """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM; the kernel traps if the launch gives less).
     lmp: MK_LMP (the pipelined LM head only applies at npad <= 64: smem = [8 X chunks][lmr x 32 KB ring], 384 B of barriers).
     attn = "splitkv" (SPEC-P2): OFF_BARS = skv_off_bars(..) (>= skv::kBarOff, = 512 mod 1024), A1's 64 B mbarrier tail at [OFF_BARS, +64), mk's barrier block (384 / 256 B) behind it."""
@@ -161,12 +161,12 @@ def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SME
         if ku != 128:
             raise ValueError("MK_ATTN=splitkv needs MK_KU 128")
         tail = 384 if ((lmp and npad <= 64) or (ts and npad >= ts_min(ts))) else 256
-        return 1024 + skv_off_bars(npad, ku, ring, attn, lmp, lmr, ts, tsb, skv_stages) + SKV_BAR_BYTES + tail
+        return 1024 + skv_off_bars(npad, ku, ring, attn, lmp, lmr, ts, tsb, skv_stages, gu_tt) + SKV_BAR_BYTES + tail
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     off_bars = ring * ub + max(2 * xs, attn_bytes)
     if ts and npad >= ts_min(ts) and ku == 128:   # MK_TS: tile-stream ring overlays the other regions; 384 B of barriers
-        tt = ts_tt(npad)
+        tt = ts_tt(npad, gu_tt)
         if tsb:   # MK_TSB: ring bytes = the largest over the phases (QKV / D at TT 128, GU at TT 128 or 64), then the GU exchange region
             ring_b = max(ts_ring(1, tt[p], 1) * (32768 + tt[p] * 256) for p in ("qkv", "gu", "d"))
             return 1024 + max(off_bars, ring_b + TS_EXCH) + 384
@@ -186,7 +186,7 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     if stripped:
         src = strip_knobs(src)
     k = {**DEFAULT_KNOBS, **dict(knobs)}
-    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn, skv_stages=k.get("SKV_STAGES", 2)) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
+    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn, skv_stages=k.get("SKV_STAGES", 2), gu_tt=k["MK_GU_TT"]) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
     defs = [f"NPAD={npad}", f"NB={nb}", f"MK_EXPECT_DYN={exp}", *knob_defines(dict(knobs))]
     defs += os.environ.get("MK_EXTRA_DEFINES", "").split()   # debug only (e.g. SKV_DEBUG_WAIT=1); not part of the knob set
     if attn == "splitkv":
@@ -326,10 +326,10 @@ def map_specs(weights: dict) -> list[tuple[list[int], list[int], list[int]]]:
     return out
 
 
-def workspace_map_specs(npad: int = 256, names: tuple = WORKSPACE_MAPS) -> list[tuple[list[int], list[int], list[int]]]:
+def workspace_map_specs(npad: int = 256, names: tuple = WORKSPACE_MAPS, gu_tt: int = 0) -> list[tuple[list[int], list[int], list[int]]]:
     """(dims, strides_bytes, box) of the workspace maps ``names`` (default map 8 ``xb``: bf16 [MAXTOK_MK][H], dims {H, MAXTOK_MK}, box {64 k, TS_TT tokens}, SW128).
     MK_TSB: ``xb2`` {H, MAXTOK_MK} box {64, TT_GU}; ``wgu`` {H, NL * 6144} box {64, 128}; ``act`` {INTER, MAXTOK_MK} box {64, TT_D}. TT per bucket: ts_tt(npad)."""
-    tt = ts_tt(npad)
+    tt = ts_tt(npad, gu_tt)
     spec = {"xb": ([H, MAXTOK_MK], [H * 2], [64, tt["qkv"]]),
             "xb2": ([H, MAXTOK_MK], [H * 2], [64, tt["gu"]]),
             "wgu": ([H, NL * 2 * INTER], [H * 2], [64, 128]),
@@ -337,7 +337,7 @@ def workspace_map_specs(npad: int = 256, names: tuple = WORKSPACE_MAPS) -> list[
     return [spec[n] for n in names]
 
 
-def encode_maps(weights: dict, ptrs: dict, workspace: dict | None = None, npad: int = 256) -> bytes:
+def encode_maps(weights: dict, ptrs: dict, workspace: dict | None = None, npad: int = 256, gu_tt: int = 0) -> bytes:
     """128 B x 8 tensor maps with the real device addresses (+ 128 B per workspace map of ``workspace`` = {"xb": device ptr, and with MK_TSB "xb2", "wgu", "act"},
     appended in WS_ORDER = maps 8, 9, 10, 11). Needs cuInit (a GPU host)."""
     from cuda.bindings import driver as d
@@ -347,7 +347,7 @@ def encode_maps(weights: dict, ptrs: dict, workspace: dict | None = None, npad: 
     if workspace is not None:
         wn = tuple(n for n in WS_ORDER if n in workspace)
         names += list(wn)
-        specs += workspace_map_specs(npad, wn)
+        specs += workspace_map_specs(npad, wn, gu_tt)
         ptrs = {**ptrs, **workspace}
     for name, (dims, strides, box) in zip(names, specs):
         res = d.cuTensorMapEncodeTiled(

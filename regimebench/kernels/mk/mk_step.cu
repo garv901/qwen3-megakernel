@@ -60,7 +60,7 @@ static_assert(XREG >= ATTN_BYTES, "attention smem overlay");
 static_assert(DYN_SMEM + 11280 <= 227 * 1024, "dynamic + static smem (11280 B: LM tables) exceed 227 KB (MK_LMR too large for this NPAD)");
 static_assert(!TS || (2 * TS_TT <= 256 && NPAD % TS_TT == 0 && TS_R >= 2), "TS: two accumulators of TS_TT columns in the 256-column TMEM allocation; ring >= 2");
 static_assert(!TS || (PhQkv::K % (TS_KS * 128) == 0), "TS: split-K factor");
-static_assert(!TSB || (2 * GU_TT <= 256 && 2 * D_TT <= 256 && NPAD % GU_TT == 0 && NPAD % D_TT == 0 && ts_ringn(GU_TT) >= 2 && ts_ringn(D_TT) >= 2), "TSB: TMEM columns / ring depth per phase");
+static_assert(!TSB || (2 * GU_TT <= 256 && 2 * D_TT <= 256 && GU_TT % 16 == 0 && NPAD % D_TT == 0 && ts_ringn(GU_TT) >= 2 && ts_ringn(D_TT) >= 2), "TSB: TMEM columns / ring depth per phase");
 static_assert(!TSB || (PhGu::K % (GU_KS * 128) == 0 && PhD::K % (D_KS * 128) == 0 && PhGu::NRB == 48 && PhD::NRB == 8), "TSB: split-K factors");
 static_assert(!TSB || ts_ringn(D_TT) == ts_ringn(TS_TT), "TSB: D shares the QKV ring depth (TS_RING_A)");
 static_assert(!TSB || NB > PhO::NRB * (PhO::K / KU), "TSB: the idle-CTA finalizers need CTAs without an O unit (grid > 128); no last-arriver fallback is built");
@@ -343,7 +343,7 @@ __device__ __forceinline__ void lm_phase(GS& g, GetF get, EpiF epi) {
 // Tile t = (rb * NTT + tt) * KS + ks: W rows 128 rb .., tokens TT tt .., k range ks * K / KS ..; CTA b owns [b NTILE / grid, (b + 1) NTILE / grid). A step = 128 k = one ring
 // slot [A: 128 rows x 128 k | B: TT tokens x 128 k]; the B boxes come from the bf16 xb map (map 8). Barrier indices are LOCAL to the phase (re-initialised in ts_first).
 template <class PH, int TT, int KS> struct TsC {
-    static constexpr int NTT = NPAD >= TT ? NPAD / TT : 1, NTILE = PH::NRB * NTT * KS, SPT = PH::K / (KS * 128), KSL = PH::K / KS, NCH = TT / 16;
+    static constexpr int NTT = NPAD >= TT ? (NPAD + TT - 1) / TT : 1, NTILE = PH::NRB * NTT * KS, SPT = PH::K / (KS * 128), KSL = PH::K / KS, NCH = TT / 16;
     static constexpr int R = ts_ringn(TT), SLOT = ts_slot(TT);   // ring depth and slot bytes of this phase (QKV: TS_R, TS_SLOT)
 };
 struct TsGeom { int t0, nt, nst; };
