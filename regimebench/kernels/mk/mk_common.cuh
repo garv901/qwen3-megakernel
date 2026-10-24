@@ -60,6 +60,9 @@
 #ifndef MK_TSB
 #define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
 #endif
+#ifndef MK_PFE
+#define MK_PFE 0   // P9: 1 = issue the next phase's first weight units (ts_first) before the O / D finalizer instead of after the barrier arrive
+#endif
 #ifndef MK_FIN
 #define MK_FIN -1   // P7: idle-CTA finalizers (O -> xb2 / ss2, D -> xb): 0 = one CTA per (rb, tt) job; 1 = each job split by token rows over nidle / njobs idle CTAs (seen counters tk[32, 64)); 2 = 1 over all CTAs after their own tickets;
                      // -1 = per bucket: 2 at NPAD >= 128 (job 9778 on g4a: b128 -37.9 vs 1, b256 -30.0 vs 0), else 0 (job 9771: 1 at b64 +5.7)

@@ -69,6 +69,8 @@ static_assert(!TS || DYN_SMEM + 11280 <= 227 * 1024, "TS: dynamic + static smem 
 static_assert(MK_EXPECT_DYN == DYN_SMEM, "host dyn_smem (build.py) != kernel DYN_SMEM");
 #endif
 
+// MK_PFE 1 (TSB): the GU / next-QKV first weight units are issued before the O / D finalizer (ts_first fills A only; the finalizer uses no smem)
+constexpr bool PFE_O = MK_PFE && TSB && !mk_null(3), PFE_D = MK_PFE && TSB && TS && !mk_null(5);
 // next-phase weight prefetch vs grid-barrier arrive: MK_PFA 0 = prefetch, then arrive (v0); 1 = arrive, then prefetch (the TMA issue
 // overlaps the barrier latency and cannot delay the arrive's release fence). The prefetch writes only ring slots whose MMAs completed.
 #if MK_PFA
@@ -835,13 +837,15 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                     }
                 };
                 gemm_phase<PhO, mk_null(3)>(g, l, ntok, get, epi, extra, fin);
-                if constexpr (!mk_null(3))
+                if constexpr (!mk_null(3)) {
+                    if constexpr (PFE_O) ts_first<PhGu, GU_TT, GU_KS>(g, l);   // MK_PFE: GU's first weight units land during the finalizer
                     idle_finalize<true, PhO::NRB * (PhO::K / KU)>(x, ln2 + (size_t)l * HID, xb2, ss2, tk, ntok);
+                }
             } else {
                 gemm_phase<PhO, mk_null(3)>(g, l, ntok, get, epi, extra);
             }
         }
-        MK_PF_ARRIVE(if constexpr (TSB) ts_first<PhGu, GU_TT, GU_KS>(g, l); else prefetch_next<PhGu>(g, l));
+        MK_PF_ARRIVE(if constexpr (TSB) { if constexpr (!PFE_O) ts_first<PhGu, GU_TT, GU_KS>(g, l); } else prefetch_next<PhGu>(g, l));
         bar_wait(bar_cnt, bar_target);
 
         // ---- Phase 5: GU GEMM, B = bf16(x * ln2), red.add -> gu (rows 0..3071 gate, 3072.. up); rr2 ----
@@ -936,6 +940,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                                 for (int ti = 0; ti < ge.nt; ++ti) atomicAdd(tk + TK_D + (ge.t0 + ti) / D_KS, 1u);
                             }
                         }
+                        if constexpr (PFE_D) if (l + 1 < NLAY) ts_first<PhQkv, TS_TT, TS_KS>(g, l + 1);   // MK_PFE: next QKV's first weight units land during the finalizer
                         if constexpr (LMTS) {
                             if (l + 1 < NLAY) idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE>(x, ln1 + (size_t)(l + 1) * HID, xb, ss2, tk, ntok);
                             else idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE, true>(x, fnorm, xb, ss2 + MAXTOK, tk, ntok);
@@ -978,7 +983,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 gemm_phase<PhD, mk_null(5)>(g, l, ntok, get, epi, extra);
             }
         }
-        MK_PF_ARRIVE(if (l + 1 < NLAY) { if constexpr (TS) ts_first<PhQkv, TS_TT, TS_KS>(g, l + 1); else prefetch_next<PhQkv>(g, l + 1); } else { if constexpr (LMTS) { if (lm_ident) ts_first<PhLm, 128, 1>(g, 0); else lm_first(g); } else lm_first(g); });
+        MK_PF_ARRIVE(if (l + 1 < NLAY) { if constexpr (TS) { if constexpr (!PFE_D) ts_first<PhQkv, TS_TT, TS_KS>(g, l + 1); } else prefetch_next<PhQkv>(g, l + 1); } else { if constexpr (LMTS) { if (lm_ident) ts_first<PhLm, 128, 1>(g, 0); else lm_first(g); } else lm_first(g); });
         bar_wait(bar_cnt, bar_target);
     }
 
