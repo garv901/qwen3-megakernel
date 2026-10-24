@@ -303,6 +303,8 @@ SKV_H64 = (("SKV_HALVES", 1), ("SKV_STAGES", 4), ("SKV_STAGE_ROWS", 64))
 # splitkv-v9 quarter-CTA consumers, 32-row stages x 8 (MK-attn P11). Job 9775 (vs h64): b256 -49.0, b128 -91.4, b64 -34.7. It loses at <= 2 items per CTA
 # (MK-attn job 9774: R3-b32-kv1K +10.9, b16-kv128 +1.6 us/layer) -> NPAD >= 64 only.
 SKV_G4A = (("SKV_GROUPS", 4), ("SKV_HALVES", 1), ("SKV_STAGES", 8), ("SKV_STAGE_ROWS", 32))
+# splitkv-v10 8 merge-free groups of 2 warps, 16-row stages x 16 (MK-attn P12). Job 9782 (vs g4a, MK_FIN 2): b256 -63.0, b128 +13.7 -> NPAD 256 only
+SKV_G8 = (("SKV_GROUPS", 8), ("SKV_HALVES", 1), ("SKV_STAGES", 16), ("SKV_STAGE_ROWS", 16))
 
 
 def skv_tune(npad: int, qmax: int, seqs) -> tuple:
@@ -323,7 +325,7 @@ def skv_tune(npad: int, qmax: int, seqs) -> tuple:
     if qmax != 1:
         return (("SKV_KV_EVICT_FIRST", 0),)
     if npad > 32:
-        return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *SKV_G4A, ("SKV_TAIL_LDG", 1))))
+        return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *(SKV_G8 if npad == 256 else SKV_G4A), ("SKV_TAIL_LDG", 1))))
     if npad > 16:
         return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *SKV_H64, ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1))))
     kv = max(k for k, _ in seqs)
