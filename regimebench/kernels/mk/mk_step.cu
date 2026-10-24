@@ -718,7 +718,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
 #ifdef MK_SKV
     unsigned ring_phase = 0;   // A1: bit 31 = its mbarriers are initialised, low bits = TMA stages consumed; per CTA, the same variable for every layer
     if (tid == 0 && skv_maps != nullptr)
-        for (int m = 0; m < 2 * (int)skv::kNumMaps; ++m) map_acquire(reinterpret_cast<const unsigned char*>(skv_maps) + 128 * m);
+        for (int m = 0; m < (int)skv::kNumTmaps; ++m) map_acquire(reinterpret_cast<const unsigned char*>(skv_maps) + 128 * m);
 #endif
 
     // x[t] = embed[token[t]]; qkv and gu zeroed (their red.add targets)

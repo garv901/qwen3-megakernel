@@ -100,6 +100,12 @@
 #error "SKV_HALVES needs SKV_TMA_MMA 1, SKV_IFACE 1, SKV_QMAX 1, SKV_FORCE_ENGINE 1, SKV_TICKET 0, SKV_TMA_RELEASE 1, SKV_PROF_NOCOMP 0, SKV_ITEM_PREFETCH 1"
 #endif
 
+#ifndef SKV_TMA_FUSE
+#define SKV_TMA_FUSE 0      // (P13, default 0, opt-in) 1 = a full stage's K (and V) is one 4D TMA box (64 dims, rows, 2 halves, 1) instead of two 3D half boxes; partial stages keep the per-half boxes. Needs SKV_HALVES 1; host adds 2 fused maps
+#endif
+#if SKV_TMA_FUSE && !SKV_HALVES
+#error "SKV_TMA_FUSE needs SKV_HALVES 1 (and so SKV_TMA_MMA 1)"
+#endif
 #ifndef SKV_GROUPS
 #define SKV_GROUPS 2        // (P11) number of independent consumer groups of SKV_HALVES mode: 2 (half CTAs, P10), 4 (quarter CTAs) or 8 (P12: 2 warps per group, 16-row stages, no merge; needs SKV_STAGE_ROWS 16, SKV_STAGES 16)
 #endif
@@ -127,6 +133,9 @@ static_assert(kStages >= 2 && kStages <= 8, "SKV_STAGES must be 2..8");
 constexpr int kU = (kStageRows < 32 ? 32 : kStageRows) / 32;               // positions per row slot per stage (one online-softmax rescale per kU positions)
 constexpr int kStageBytes = 2 * kStageRows * 256; // K half then V half
 constexpr int kNumMaps = (kStageRows == 16 ? 5 : kStageRows == 32 ? 6 : kStageRows == 64 ? 7 : 8);   // box rows kStageRows, /2, .., 1 per K / V: tmaps[kv * kNumMaps + log2(kStageRows / rows)]
+// P13: with SKV_TMA_FUSE the table has 2 more maps after the 2 * kNumMaps: [2 * kNumMaps] = K fused 4D, [2 * kNumMaps + 1] = V fused 4D
+// (dims (64, L * cache_rows, 2, 8), strides of dims 1..3 (2048, 128, 256) B, box (64, kStageRows, 2, 1), SWIZZLE_128B; coordinates {0, row, 0, kvh})
+constexpr int kNumTmaps = 2 * kNumMaps + (SKV_TMA_FUSE ? 2 : 0);
 constexpr int kMergeChunk = SKV_MERGE_CHUNK;                   // combine: partial float4 loads in flight per lane
 constexpr float kQScale = 0.08838834764831845f * 1.4426950408889634f;   // 1/sqrt(128) * log2(e)
 constexpr int kRingOff = 0, kMrgOff = kStages * kStageBytes, kMrgBytes = 16 * 2 * kPartStride * 4;
@@ -266,6 +275,18 @@ __device__ __forceinline__ void tma3d(unsigned dst, const void* map, int c0, int
                ::"r"(dst), "l"(map), "r"(c0), "r"(c1), "r"(c2), "r"(b) : "memory");
 #endif
 }
+
+#if SKV_TMA_FUSE
+__device__ __forceinline__ void tma4d(unsigned dst, const void* map, int c0, int c1, int c2, int c3, unsigned b) {
+#if SKV_KV_EVICT_FIRST
+  asm volatile("cp.async.bulk.tensor.4d.shared::cluster.global.mbarrier::complete_tx::bytes.L2::cache_hint [%0], [%1, {%2, %3, %4, %5}], [%6], %7;"
+               ::"r"(dst), "l"(map), "r"(c0), "r"(c1), "r"(c2), "r"(c3), "r"(b), "l"(kv_policy()) : "memory");
+#else
+  asm volatile("cp.async.bulk.tensor.4d.shared::cluster.global.mbarrier::complete_tx::bytes [%0], [%1, {%2, %3, %4, %5}], [%6];"
+               ::"r"(dst), "l"(map), "r"(c0), "r"(c1), "r"(c2), "r"(c3), "r"(b) : "memory");
+#endif
+}
+#endif
 
 // per-slot online-softmax state: two q-heads, m / l replicated over the 16 lanes of a half-warp, o = this lane's 8 dims
 struct St { float m0, m1, l0, l1, o0[8], o1[8]; };
@@ -1045,6 +1066,12 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
     const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
     mb_expect(bar, (unsigned)n * 512u);
     int off = 0, rc = (int)(prow + pp);
+#if SKV_TMA_FUSE
+    if (n == kStageRows) {   // P13: one 4D box per tensor covers both 64-dim halves (K lo | K hi, V lo | V hi)
+      tma4d(dst, (const char*)p.tmaps + (2 * kNumMaps + 0) * 128, 0, rc, 0, pkvh, bar);
+      tma4d(dst + 2 * kHalfBytes, (const char*)p.tmaps + (2 * kNumMaps + 1) * 128, 0, rc, 0, pkvh, bar);
+    } else
+#endif
 #pragma unroll
     for (int rs = 0; rs < kNumMaps; ++rs) {
       const int rows = kStageRows >> rs;
@@ -1290,6 +1317,12 @@ __device__ __forceinline__ void run_items_g8(const Params& p, int layer, unsigne
     const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
     mb_expect(bar, (unsigned)n * 512u);
     int off = 0, rc = (int)(prow + pp);
+#if SKV_TMA_FUSE
+    if (n == kStageRows) {   // P13: one 4D box per tensor covers both 64-dim halves (K lo | K hi, V lo | V hi)
+      tma4d(dst, (const char*)p.tmaps + (2 * kNumMaps + 0) * 128, 0, rc, 0, pkvh, bar);
+      tma4d(dst + 2 * kHalfBytes, (const char*)p.tmaps + (2 * kNumMaps + 1) * 128, 0, rc, 0, pkvh, bar);
+    } else
+#endif
 #pragma unroll
     for (int rs = 0; rs < kNumMaps; ++rs) {
       const int rows = kStageRows >> rs;

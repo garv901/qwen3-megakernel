@@ -126,3 +126,12 @@
 ## splitkv-v10 (P12 result, job 9781)
 - `SKV_HALVES=1,SKV_GROUPS=8,SKV_TAIL_LDG=1,SKV_STAGE_ROWS=16,SKV_STAGES=16` (g8): b256kv128 32.06 -> 27.27, b128kv128 17.75 -> 16.16 us/layer vs g4a. Slower at b64kv128 (+0.9),
   long items (b64kv4096 +48) and <= 2 items per CTA. attend smem 148,224 B (kBarBytes 256).
+
+- 2026-10-23 (P13, opt-in `SKV_TMA_FUSE=1`, default 0, SASS of every build without it unchanged): with SKV_HALVES=1 a full stage
+  (n == kStageRows) issues 2 TMA boxes (K, V) instead of 4: 4D bf16 SWIZZLE_128B maps, dims (64, NL * cache_rows, 2, 8), strides of dims
+  1..3 (2048, 128, 256) B, box (64, kStageRows, 2, 1), coordinates {0, row, 0, kvh}; smem layout unchanged. Partial stages keep the
+  per-half 3D boxes. Map table: the 2 fused maps (K, V) follow the 2 * kNumMaps maps (`kNumTmaps`). mk's host side must append them.
+
+## splitkv-v11 (P13 result, job 9790)
+- SKV_TMA_FUSE=1 on the group builds: g8 b256kv128 27.22 -> 26.55, g4a 32.08 -> 30.23, b128 g4a 17.73 -> 16.93, b64 g8 11.41 -> 10.37 us/layer; faster at every timed point.
+  Host: 2 more maps after the 2 * kNumMaps (K then V fused 4D, see kNumTmaps).

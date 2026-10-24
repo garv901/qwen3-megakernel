@@ -101,7 +101,7 @@ def strip_knobs(src: str) -> str:
 
 # splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8), item prefetch (P9), merge chunk (P4), KV evict_first + 1-row tail by LDG (v5),
 # half-CTA consumers + stage geometry (splitkv-v8 P10)
-SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS", "SKV_GROUPS")
+SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS", "SKV_GROUPS", "SKV_TMA_FUSE")
 
 
 def skv_stage_units(knobs: dict) -> int:
@@ -260,6 +260,8 @@ def skv_map_specs(rows: int, n_layers: int = NL, qmax: int = 1, extra=()) -> lis
     for _kv in range(2):
         for rs in range(stage_rows.bit_length()):
             out.append(([HD, KVH, n_layers * rows], [HD * 2, KVH * HD * 2], [64, 1, stage_rows >> rs]))
+    if "SKV_TMA_FUSE=1" in extra:   # splitkv-v11 P13: 2 more 4D maps (K then V fused), dims (64, rows, 2 halves, 8 kv heads), strides of dims 1..3 (2048, 128, 256) B (a1bench.py fused_map_params)
+        out += [([64, n_layers * rows, 2, KVH], [KVH * HD * 2, 128, HD * 2], [64, stage_rows, 2, 1])] * 2
     return out
 
 
@@ -268,11 +270,13 @@ def encode_skv_maps(kc_ptr: int, vc_ptr: int, rows: int, n_layers: int = NL, qma
     from cuda.bindings import driver as d
     blob = b""
     specs = skv_map_specs(rows, n_layers, qmax, extra)
+    nk = (len(specs) - (2 if "SKV_TMA_FUSE=1" in extra else 0)) // 2   # 3D maps per tensor; the fused maps (if any) follow as K, V
     for i, (dims, strides, box) in enumerate(specs):
+        is_k = i < nk if i < 2 * nk else i == 2 * nk
         res = d.cuTensorMapEncodeTiled(
-            d.CUtensorMapDataType.CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, 3, int(kc_ptr if i < len(specs) // 2 else vc_ptr),
+            d.CUtensorMapDataType.CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, len(dims), int(kc_ptr if is_k else vc_ptr),
             [d.cuuint64_t(v) for v in dims], [d.cuuint64_t(v) for v in strides], [d.cuuint32_t(v) for v in box],
-            [d.cuuint32_t(1)] * 3, d.CUtensorMapInterleave.CU_TENSOR_MAP_INTERLEAVE_NONE, d.CUtensorMapSwizzle.CU_TENSOR_MAP_SWIZZLE_128B,
+            [d.cuuint32_t(1)] * len(dims), d.CUtensorMapInterleave.CU_TENSOR_MAP_INTERLEAVE_NONE, d.CUtensorMapSwizzle.CU_TENSOR_MAP_SWIZZLE_128B,
             d.CUtensorMapL2promotion.CU_TENSOR_MAP_L2_PROMOTION_NONE, d.CUtensorMapFloatOOBfill.CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE)
         if int(res[0]) != 0:
             raise RuntimeError(f"cuTensorMapEncodeTiled(skv map {i}): {res[0]}")
