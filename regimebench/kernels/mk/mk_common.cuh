@@ -62,7 +62,7 @@
 #endif
 #ifndef MK_FIN
 #define MK_FIN -1   // P7: idle-CTA finalizers (O -> xb2 / ss2, D -> xb): 0 = one CTA per (rb, tt) job; 1 = each job split by token rows over nidle / njobs idle CTAs (seen counters tk[32, 64)); 2 = 1 over all CTAs after their own tickets;
-                     // -1 = per bucket: 1 at NPAD 128 (job 9771: b128 -94.3 alone, -65.6 on h64), else 0 (b256 +49.2 on h64, b64 +5.7)
+                     // -1 = per bucket: 2 at NPAD >= 128 (job 9778 on g4a: b128 -37.9 vs 1, b256 -30.0 vs 0), else 0 (job 9771: 1 at b64 +5.7)
 #endif
 #ifndef MK_GU_TT
 #define MK_GU_TT 0   // P6: GU token tile override (0 = 96 at NPAD 256 (job 9757: -59.6 us vs 128), 48 at 128 (job 9758: -42.3 us vs 64)); multiple of 16, <= 128 (two accumulators in 256 TMEM columns). xover4 job 9756: GU T=256 TT 96 8.45 vs TT 128 8.85 us
@@ -126,7 +126,7 @@ constexpr int TS_TT = 128;                                  // tokens per tile (
 constexpr int TS_KS = (NPAD == 256) ? 2 : 4;                // split-K factor of the tile stream (job 9592 best per bucket)
 constexpr int TS_SLOT = 32768 + TS_TT * 256;                // ring slot bytes: A (128 rows x 128 k bf16) + B (TS_TT x 128 k bf16)
 // P5b phase configs (TT tokens per tile / KS split-K): GU 96 / 1 (NPAD 256, ragged: 96 + 96 + 64), 48 / 1 (NPAD 128, 48 + 48 + 32); D 128 / 8 (256), 128 / 12 (128). QKV = (TS_TT, TS_KS).
-constexpr int FIN = MK_FIN >= 0 ? MK_FIN : (NPAD == 128);
+constexpr int FIN = MK_FIN >= 0 ? MK_FIN : (NPAD >= 128 ? 2 : 0);
 constexpr int GU_TT = MK_GU_TT ? MK_GU_TT : (NPAD == 256 ? 96 : 48), GU_KS = 1;   // MK_GU_TT: ragged tiles allowed (NTT = ceil(NPAD / TT); B rows past MAXTOK are TMA OOB zero fill)
 constexpr int D_TT = 128, D_KS = NPAD == 256 ? 8 : 12;
 constexpr int TS_EXCH = TSB ? 12288 : 0;                    // GU exchange region: [3 groups][2 quadrant pairs][16 tokens][32 lanes] fp32
