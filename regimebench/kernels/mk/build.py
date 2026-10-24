@@ -98,8 +98,8 @@ def strip_knobs(src: str) -> str:
     return re.sub(r"mk_null\(\d+\)", "false", src)
 
 
-# splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8), item prefetch (P9), merge chunk (P4)
-SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK")
+# splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8), item prefetch (P9), merge chunk (P4), KV evict_first + 1-row tail by LDG (v5)
+SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG")
 
 
 def knob_defines(knobs: dict | None) -> list[str]:

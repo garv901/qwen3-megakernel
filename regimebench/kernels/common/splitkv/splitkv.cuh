@@ -79,6 +79,16 @@
 #endif
 #endif
 
+#ifndef SKV_KV_EVICT_FIRST
+#define SKV_KV_EVICT_FIRST 0 // (default 0, opt-in for MK-core's A/B) 1 = every KV load (TMA boxes of both consumers, LDG engine) carries an L2 evict_first cache policy:
+#endif                       // KV is read once per step, so it should not displace the caller's weights / activations in L2
+#ifndef SKV_TAIL_LDG
+#define SKV_TAIL_LDG 0      // (default 0, opt-in; P9d) 1 = q_len 1 TMA mma path: an item whose length is == 1 (mod kStageRows) (and > 1) streams only its first len - 1 positions by TMA
+#endif                      // (whole stages); the last position is read by LDG (warp 0) and merged as a parked single-position state, as the iface 2 new row
+#if SKV_TAIL_LDG && !(SKV_IFACE == 1 && SKV_QMAX == 1 && SKV_TMA_MMA)
+#error "SKV_TAIL_LDG needs SKV_IFACE 1, SKV_QMAX 1, SKV_TMA_MMA 1"
+#endif
+
 namespace skv {
 
 typedef unsigned short bf16;   // raw bf16 bits (hv2g does the same; no cuda_bf16 dependency)
@@ -140,9 +150,21 @@ __device__ __forceinline__ unsigned short f2bf(float f) {   // RNE
 __device__ __forceinline__ unsigned pack2(float a, float b) { return (unsigned)f2bf(a) | ((unsigned)f2bf(b) << 16); }
 __device__ __forceinline__ float neg_inf() { return __int_as_float(0xff800000); }
 __device__ __forceinline__ float ex2(float x) { float y; asm("ex2.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x)); return y; }
+__device__ __forceinline__ unsigned long long kv_policy() {   // SKV_KV_EVICT_FIRST: L2 evict_first policy for KV loads (non-volatile: the compiler may hoist / CSE it)
+  unsigned long long pol;
+  asm("createpolicy.fractional.L2::evict_first.b64 %0, 1.0;" : "=l"(pol));
+  return pol;
+}
 __device__ __forceinline__ uint4 ldg_nc(const void* p) {   // KV stream load; SKV_KV_NC 1: non-coherent (LDG...CONSTANT), 0: coherent weak load
   uint4 v;
+#if SKV_KV_EVICT_FIRST
+  const unsigned long long pol = kv_policy();
 #if SKV_KV_NC
+  asm volatile("ld.global.nc.L1::no_allocate.L2::cache_hint.v4.u32 {%0,%1,%2,%3}, [%4], %5;" : "=r"(v.x), "=r"(v.y), "=r"(v.z), "=r"(v.w) : "l"(p), "l"(pol));
+#else
+  asm volatile("ld.global.L1::no_allocate.L2::cache_hint.v4.u32 {%0,%1,%2,%3}, [%4], %5;" : "=r"(v.x), "=r"(v.y), "=r"(v.z), "=r"(v.w) : "l"(p), "l"(pol));
+#endif
+#elif SKV_KV_NC
   asm volatile("ld.global.nc.L1::no_allocate.v4.u32 {%0,%1,%2,%3}, [%4];" : "=r"(v.x), "=r"(v.y), "=r"(v.z), "=r"(v.w) : "l"(p));
 #else
   asm volatile("ld.global.L1::no_allocate.v4.u32 {%0,%1,%2,%3}, [%4];" : "=r"(v.x), "=r"(v.y), "=r"(v.z), "=r"(v.w) : "l"(p));
@@ -187,8 +209,13 @@ __device__ __forceinline__ void mb_wait_dbg(unsigned b, unsigned parity, int lay
 }
 #endif
 __device__ __forceinline__ void tma3d(unsigned dst, const void* map, int c0, int c1, int c2, unsigned b) {
+#if SKV_KV_EVICT_FIRST
+  asm volatile("cp.async.bulk.tensor.3d.shared::cluster.global.mbarrier::complete_tx::bytes.L2::cache_hint [%0], [%1, {%2, %3, %4}], [%5], %6;"
+               ::"r"(dst), "l"(map), "r"(c0), "r"(c1), "r"(c2), "r"(b), "l"(kv_policy()) : "memory");
+#else
   asm volatile("cp.async.bulk.tensor.3d.shared::cluster.global.mbarrier::complete_tx::bytes [%0], [%1, {%2, %3, %4}], [%5];"
                ::"r"(dst), "l"(map), "r"(c0), "r"(c1), "r"(c2), "r"(b) : "memory");
+#endif
 }
 
 // per-slot online-softmax state: two q-heads, m / l replicated over the 16 lanes of a half-warp, o = this lane's 8 dims
@@ -409,6 +436,7 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
   const size_t layer_row = (size_t)layer * p.cache_rows;
   const int4 zero4 = make_int4(0, 0, 0, 0);
   constexpr bool kMma = TMA && kMmaOn;
+  constexpr bool kTail = (SKV_TAIL_LDG != 0) && kMma;           // P9d: 1-row item tails by LDG
 #if SKV_TMA_MMA && (defined(SKV_DEBUG_WAIT) || defined(SKV_DEBUG_ALIGN))
   if (TMA && threadIdx.x == 0 && (sbase & 1023u)) { printf("SKV_TMA_MMA: smem base %u is not 1024 B aligned\n", sbase); __trap(); }
 #endif
@@ -431,6 +459,7 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
 #if SKV_IFACE == 2
       if (it.w == rec[2 * pk + 1].w) --pend;                   // the piece ending at vis owns the new row: not written yet, the stream stops at vis - 1
 #endif
+      if (kTail && it.w - it.z > 1 && (it.w - it.z) % kStageRows == 1) --pend;   // P9d tail item (same rule as the consumer): the stream stops at p1 - 1, the last row is read by LDG
     }
     const int n = min(kStageRows, pend - pp);
     const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
@@ -485,6 +514,13 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
     const bf16* qp = p.q + (size_t)(tok * kQHeads + 2 * (a.y & 15)) * kDim + l16 * 8;
     x = ldg_cg4(qp); y = ldg_cg4(qp + kDim);
   };
+  // P9d: the tail row (position p1 - 1) of item `a`, warp 0 only: lanes 0..15 = 16 B of the K row each, lanes 16..31 = V row (same address math as the LDG engine)
+  auto load_tail = [&](const int4& a, uint4& t) {
+    t = make_uint4(0, 0, 0, 0);
+    if (warp == 0 && a.w - a.z > 1 && (a.w - a.z) % kStageRows == 1)
+      t = ldg_nc((const char*)(lane < 16 ? p.kc : p.vc) + item_off(a) + (size_t)(a.w - 1) * 2048);
+  };
+  uint4 tra = make_uint4(0, 0, 0, 0), trb = tra;                // current item's / next item's tail row (kTail only)
   constexpr bool kPre = (SKV_LDG_DB != 0);                     // single-buffered LDG loads inside the step loop: nothing to issue ahead
   // Register budget (LDG engine at 128 regs): only the NEXT item's first record half (4 words) and its tok0 are carried through an item; the current item's
   // second record half (part_slot, S) is re-read from the record (L1 hit, issued before the merge) when the merge needs it.
@@ -496,6 +532,7 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
   if (SKV_ITEM_PREFETCH) {                                     // (prefetch 0: every item loads its own record, q and first K / V at the top of its iteration)
     load_q(ra, rec[1].z, qa, qb);
     if (!TMA && kPre) ldg_first(ra);
+    if (kTail) load_tail(ra, tra);
   }
 
   for (int k = 0; k < ni; ++k) {
@@ -515,9 +552,11 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
       ra = rec[2 * k];
       load_q(ra, rec[2 * k + 1].z, qa, qb);
       if (!TMA && kPre) ldg_first(ra);
+      if (kTail) load_tail(ra, tra);
     }
 #endif
     const int kvh = ra.y & 15, p0 = ra.z, p1 = ra.w;
+    const bool tail = kTail && p1 - p0 > 1 && (p1 - p0) % kStageRows == 1;   // P9d (warp- and CTA-uniform): the last position is the LDG tail row
     int4 na = zero4;
     int ntok = 0;
     uint4 nqa = make_uint4(0, 0, 0, 0), nqb = nqa;
@@ -570,6 +609,30 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
     unpack8(qa, q0); unpack8(qb, q1);
 #pragma unroll
     for (int j = 0; j < 8; ++j) { q0[j] *= kQScale; q1[j] *= kQScale; }
+    if (tail && warp == 0) {
+      // P9d: park the tail row's single-position state (v, m = score * kQScale per head, l = 1) for the end-of-item merge. Scores use the raw bf16 q and the fp32 dot
+      // then * kQScale, exactly like the mma consumer (which scales the fp32 scores). Ordering: the previous item's merge reads of this slot (tid < 256, after its first
+      // __syncthreads) are complete because every thread passed that item's second __syncthreads before reaching this point; this slot is read by the end-of-item merge
+      // only after the first __syncthreads of THIS item, which follows these writes by every thread of warp 0. Exactly one merge: the slot is consumed once, by `tail` of this item.
+      float qr0[8], qr1[8], kf[8], vf[8];
+      unpack8(qa, qr0); unpack8(qb, qr1);
+      unpack8(tra, kf);                                          // lanes < 16: K row dims l16 * 8 ..; lanes >= 16: V row (their dot is ignored)
+      float d0 = 0.f, d1 = 0.f;
+#pragma unroll
+      for (int j = 0; j < 8; ++j) { d0 = fmaf(kf[j], qr0[j], d0); d1 = fmaf(kf[j], qr1[j], d1); }
+#pragma unroll
+      for (int o = 1; o <= 8; o <<= 1) { d0 += __shfl_xor_sync(0xffffffffu, d0, o); d1 += __shfl_xor_sync(0xffffffffu, d1, o); }   // within each half-warp
+      uint4 vn;
+      vn.x = __shfl_xor_sync(0xffffffffu, tra.x, 16); vn.y = __shfl_xor_sync(0xffffffffu, tra.y, 16);
+      vn.z = __shfl_xor_sync(0xffffffffu, tra.z, 16); vn.w = __shfl_xor_sync(0xffffffffu, tra.w, 16);   // lanes < 16 get the V row
+      if (lane < 16) {
+        unpack8(vn, vf);
+        float* nb = mrg + kMmaNew;
+        *reinterpret_cast<float4*>(nb + l16 * 8) = make_float4(vf[0], vf[1], vf[2], vf[3]);
+        *reinterpret_cast<float4*>(nb + l16 * 8 + 4) = make_float4(vf[4], vf[5], vf[6], vf[7]);
+        if (lane == 0) { nb[128] = d0 * kQScale; nb[129] = d1 * kQScale; }
+      }
+    }
 #endif
     St st;
     st_init(st);
@@ -599,7 +662,7 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
       }
     }
 #endif
-    const int len = p1 - p0;
+    const int len = p1 - p0 - (tail ? 1 : 0);                   // (P9d: the TMA stream of a tail item stops at p1 - 1; the producer applies the same rule)
     if (!TMA) {
       // ---- LDG engine: slot r takes positions p0 + r + 32 j; 4 positions per step -> 8 LDG.128 in flight
       const size_t ioff = item_off(ra);
@@ -766,7 +829,7 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
 #endif
       }
     }
-    if (TMA && SKV_ITEM_PREFETCH && k + 1 < ni) load_q(na, ntok, nqa, nqb);
+    if (TMA && SKV_ITEM_PREFETCH && k + 1 < ni) { load_q(na, ntok, nqa, nqb); if (kTail) load_tail(na, trb); }
     const int4 rb = rec[2 * k + 1];                             // {part_slot, S [| n_items << 8 in iface 2], tok0, n_items | vis}
     // ---- end of item: xor-16 merge inside the warp, 16 warp states through smem, partial / normalised store
     {
@@ -819,6 +882,8 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
         M = neg_inf();
 #if SKV_IFACE == 2
         if (own) M = nb[128 + hq];
+#elif SKV_TAIL_LDG
+        if (tail) M = nb[128 + hq];
 #endif
 #pragma unroll
         for (int t = 0; t < kMmaT; ++t) M = fmaxf(M, b[t * 2 * kMmaMS + kMmaDW]);
@@ -832,6 +897,8 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
         }
 #if SKV_IFACE == 2
         if (own) { const float a = ex2(nb[128 + hq] - Mc); L += a; O = fmaf(a, nb[d], O); }
+#elif SKV_TAIL_LDG
+        if (tail) { const float a = ex2(nb[128 + hq] - Mc); L += a; O = fmaf(a, nb[d], O); }
 #endif
       } else {
       const float* b = mrg + hq * kPartStride;
@@ -864,7 +931,7 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
     // S > 1: the partial stores of every thread precede this barrier; thread 0's fence + release add publish them (cumulatively) on the pair's ticket. Nothing waits here.
     if (tid == 0 && rec_splits(rb) > 1) { __threadfence(); red_release_gpu(p.tickets + ticket_pair(ra.y)); }
 #endif
-    if (SKV_ITEM_PREFETCH) { ra = na; qa = nqa; qb = nqb; }
+    if (SKV_ITEM_PREFETCH) { ra = na; qa = nqa; qb = nqb; if (kTail) tra = trb; }
   }
 }
 

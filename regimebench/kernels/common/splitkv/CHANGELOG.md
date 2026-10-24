@@ -77,3 +77,13 @@
   b1 kv <= 2K (0.1-0.2 us/layer) and b256 kv128 (1.4); `-1` restores the runtime choice.
 - 2026-10-23 (P9b, job 9711, tag splitkv-v4): `SKV_ITEM_PREFETCH` default 1 for iface 1 / SKV_QMAX 1 builds (item k+1's record + q are
   loaded during item k). b256 kv128 -5.2, b128 -1.2 us/layer; b1 +0.05..+0.08. No interface change.
+
+- P9d (opt-in, `-DSKV_TAIL_LDG=1`, default 0, no change to the default build): q_len 1 TMA mma path (iface 1, QMAX 1). An item with
+  `len % kStageRows == 1 && len > 1` streams only `len - 1` positions by TMA (producer and consumer apply the same rule); the last
+  position is read by warp 0 with LDG, scored (raw bf16 q, fp32 dot * kQScale, as the mma consumer), parked in the kMmaNew slot and
+  merged once in the end-of-item merge (as the iface 2 new row). Params, records, planner, smem (148,032) unchanged.
+  Job 9720 (tag splitkv-v5): b256 kv128 -10.8, b128 -3.9, b64 -2.0 us/layer; +0.08..+0.40 at points with no tail item (b1 / b4 / b8 / b16).
+  Use it per bucket (NPAD >= 64, q_len 1); the default stays 0.
+- `SKV_KV_EVICT_FIRST` (opt-in, default 0): every KV load (TMA `cp.async.bulk.tensor` and LDG `ld.global`) carries an L2 evict_first
+  cache hint (`createpolicy.fractional.L2::evict_first`, fraction 1.0). Purpose: KV bytes do not push mk's weights out of L2. Standalone
+  (job 9720) neutral within +-0.4 us/layer; the test that matters is in mk (MK-core).
