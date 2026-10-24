@@ -41,7 +41,17 @@ __device__ __forceinline__ void mbar_fence_init() { asm volatile("fence.mbarrier
 __device__ __forceinline__ void mbar_wait(u32 a, u32 parity) {
   u32 ok;
   while (true) {
+#ifndef TW
+#define TW 0
+#endif
+#ifndef PROWH
+#define PROWH 0
+#endif
+#if TW   // spin on the non-blocking test_wait (no try_wait suspend window)
+    asm volatile("{\n\t.reg .pred P;\n\tmbarrier.test_wait.parity.acquire.cta.shared::cta.b64 P, [%1], %2;\n\tselp.u32 %0, 1, 0, P;\n\t}" : "=r"(ok) : "r"(a), "r"(parity) : "memory");
+#else
     asm volatile("{\n\t.reg .pred P;\n\tmbarrier.try_wait.parity.acquire.cta.shared::cta.b64 P, [%1], %2;\n\tselp.u32 %0, 1, 0, P;\n\t}" : "=r"(ok) : "r"(a), "r"(parity) : "memory");
+#endif
     if (ok) break;
   }
 }
@@ -110,7 +120,7 @@ __device__ __forceinline__ u32 cluster_rank() { u32 r; asm volatile("mov.u32 %0,
 
 // TMEM layout: accumulator b (= global tile counter & 1) at columns b*TT .. b*TT+TT-1 of the 512-column allocation.
 __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMap mW, const __grid_constant__ CUtensorMap mX, float* Y, int N, int K, int T,
-                                              int TT, int KS, int nph, int phase0, long long rowsAvail, int ring, unsigned* cnt, ull* tm, int orc) {   // orc (oracle): bit 0 no MMA (commits kept), bit 1 no epilogue stores (TMEM reads kept)
+                                              int TT, int KS, int nph, int phase0, long long rowsAvail, int ring, unsigned* cnt, ull* tm, int orc) {   // orc (oracle): bit 0 no MMA (commits kept), bit 1 no epilogue stores (TMEM reads kept), bit 2 no B loads, bit 3 no A loads, bit 4 no TMEM reads, bit 5 plain arrives for commits, bit 6 grid barrier only
   extern __shared__ uint8_t smraw[];
   const u32 raw = smem_u32(smraw), base = (raw + 1023) & ~1023u;
   uint8_t* sm = smraw + (base - raw);
@@ -138,12 +148,18 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
   const int t0 = (int)((long long)own * NTILE / (GRID / CG)), t1 = (int)((long long)(own + 1) * NTILE / (GRID / CG));
   const int nt = t1 - t0, nst = nt * SPT;                             // tiles / k-steps of this CTA per phase
   const u32 idesc = tc_idesc(128 * CG, TT);
+#if PROWH   // prow of phases p and p + 1 computed once per phase (the 64-bit modulo is not on the fill path)
+  int prow_c[2] = {(int)(((long long)phase0 * N) % rowsAvail), 0}, prow_p = 0;
+  auto prow = [&](int p) { if (p != prow_p) { prow_p = p; prow_c[p & 1] = (int)(((long long)(phase0 + p) * N) % rowsAvail); } return prow_c[p & 1]; };
+#else
   auto prow = [&](int p) { return (int)(((long long)(phase0 + p) * N) % rowsAvail); };
+#endif
   // fill_a: A boxes of step j (global step number f, slot f % ring) of phase p on full[s] (arrival 1). Independent of the previous phase: may run in the barrier window.
   // CG = 2: both ranks load their 128 rows; only rank 0 expects the bytes of both (all TMAs complete on rank 0's barrier).
   auto fill_a = [&](int p, int j, u32 f) {
     const int t = t0 + j / SPT, kc = (t % KS) * KSL + (j % SPT) * 128, rb = (t / KS) / NTT, s = f % ring;
     const u32 full = fullb + 8 * s;
+    if (orc & 8) { if (CG == 1 || rank == 0) mbar_arrive(full); return; }   // oracle: no A loads
     if (CG == 1 || rank == 0) mbar_expect_tx(full, CG * A_BYTES);
     for (int a = 0; a < 2; ++a) {
       const int row = prow(p) + rb * (128 * CG) + 128 * rank;
@@ -155,6 +171,7 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
   auto fill_b = [&](int j, u32 f) {
     const int t = t0 + j / SPT, kc = (t % KS) * KSL + (j % SPT) * 128, tt = (t / KS) % NTT, s = f % ring;
     const u32 full = fullb + 8 * s;
+    if (orc & 4) { if (CG == 1 || rank == 0) mbar_arrive(full); return; }   // oracle: no B loads
     if (CG == 1 || rank == 0) mbar_expect_tx(full, (u32)TT * 256);
     for (int a = 0; a < 2; ++a) {
       const int row = tt * TT + rank * BR;
@@ -171,6 +188,7 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
       float* yp = Y + (size_t)(tt * TT) * N + rb * (128 * CG) + 128 * rank + 32 * q + lane;
       const u32 ta = tb + ((u32)(q * 32) << 16) + b * TT;
       for (int c = (warp >> 2) - 1; c < NCH; c += 6) {
+        if (orc & 16) break;                                          // oracle: no TMEM reads
         const int cb = tt * TT + c * 16;                              // first token of the chunk
         if (cb >= T) break;                                           // ragged tile: chunk past T (T is a multiple of 16 here: no per-element guard needed)
         const bool two = c + 3 < NCH && cb + 48 < T;
@@ -203,7 +221,8 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
   if (tid == 0) for (int i = 0; i < min(ring, nst); ++i) { fill_a(0, i, i); fill_b(i, i); }
   for (int p = 0; p < nph; ++p) {
     const u32 F0 = (u32)p * nst, G0 = (u32)p * nt;                    // global step / tile counters at the start of this phase
-    if (tid == 0) {                                                   // ---- producer (both ranks for CG = 2, own empty[s])
+    if (orc & 64) {                                                   // oracle: grid barrier only (the window prefetch of phase 0 is never consumed)
+    } else if (tid == 0) {                                            // ---- producer (both ranks for CG = 2, own empty[s])
       if (p > 0) for (int i = 0; i < min(ring, nst); ++i) fill_b(i, F0 + i);   // B of the window-prefetched steps, after the grid barrier
       for (int j = ring; j < nst; ++j) {
         const u32 f = F0 + j, s = f % ring;
@@ -236,6 +255,7 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
             else tc_mma(tb + b * TT, sdesc(sa + a * 16384 + off), sdesc(sb + a * (BR * 128) + off), idesc, acc);
           }
           if (CG == 2) { commit2(emptyb + 8 * s); if (k == SPT - 1) commit2(accf + 8 * b); }
+          else if (orc & 32) { mbar_arrive(emptyb + 8 * s); if (k == SPT - 1) mbar_arrive(accf + 8 * b); }   // oracle: plain arrives (no tcgen05.commit)
           else { tc_commit(emptyb + 8 * s); if (k == SPT - 1) tc_commit(accf + 8 * b); }
         }
       }
