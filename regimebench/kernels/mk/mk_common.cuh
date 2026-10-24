@@ -61,7 +61,7 @@
 #define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
 #endif
 #ifndef MK_WU
-#define MK_WU 0   // P14: 1 = tile-stream producer / MMA issuer as whole warps 0 / 1 (lane 0 works, lanes 1..31 wait at __syncwarp) instead of tid 0 / 32 with the rest of the warp at the join barrier (xover4 job 9802: GU / D / QKV T 256 -0.55 / -0.58 / -0.65 us/phase)
+#define MK_WU -1  // P14 (-1 = per bucket: 1 at NPAD 128 only; job 9803: b128 -10.4, b256 +8.9): 1 = tile-stream producer / MMA issuer as whole warps 0 / 1 (lane 0 works, lanes 1..31 wait at __syncwarp) instead of tid 0 / 32 with the rest of the warp at the join barrier (xover4 job 9802: GU / D / QKV T 256 -0.55 / -0.58 / -0.65 us/phase)
 #endif
 #ifndef MK_L2PF
 #define MK_L2PF 0   // P11: L2 prefetch (cp.async.bulk.prefetch.tensor) of this CTA's GU (bit 0) / D (bit 1) weight boxes before attend (TSB + splitkv)
@@ -139,6 +139,7 @@ constexpr int TS_KS = (NPAD == 256) ? 2 : 4;                // split-K factor of
 constexpr int TS_SLOT = 32768 + TS_TT * 256;                // ring slot bytes: A (128 rows x 128 k bf16) + B (TS_TT x 128 k bf16)
 // P5b phase configs (TT tokens per tile / KS split-K): GU 96 / 1 (NPAD 256, ragged: 96 + 96 + 64), 48 / 1 (NPAD 128, 48 + 48 + 32); D 128 / 8 (256), 128 / 12 (128). QKV = (TS_TT, TS_KS).
 constexpr int FIN = MK_FIN >= 0 ? MK_FIN : (NPAD >= 128 ? 2 : 0);
+constexpr bool WU = MK_WU >= 0 ? MK_WU != 0 : NPAD == 128;   // P14 per bucket
 constexpr int GU_TT = MK_GU_TT ? MK_GU_TT : (NPAD == 256 ? 96 : 48), GU_KS = 1;   // MK_GU_TT: ragged tiles allowed (NTT = ceil(NPAD / TT); B rows past MAXTOK are TMA OOB zero fill)
 constexpr int D_TT = 128, D_KS = NPAD == 256 ? 8 : 12;
 constexpr int TS_EXCH = TSB ? 12288 : 0;                    // GU exchange region: [3 groups][2 quadrant pairs][16 tokens][32 lanes] fp32

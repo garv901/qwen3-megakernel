@@ -423,7 +423,7 @@ __device__ __forceinline__ void ts_phase(GS& g, int l, int ntok, EpiF epi) {
     const TsGeom ge = ts_geom<PH, TT, KS>();
     const int t0 = ge.t0, nt = ge.nt, nst = ge.nst;
     const u32 fullb = g.bars + LMB_FULL, emptyb = g.bars + LMB_EMPTY, accf = g.bars + LMB_ACCF, acce = g.bars + LMB_ACCE;
-    if (MK_WU ? warp == 0 : tid == 0) { if (!MK_WU || lane == 0) {   // ---- producer (MK_WU: lanes 1..31 of the warp wait at __syncwarp, not at the join barrier)
+    if (WU ? warp == 0 : tid == 0) { if (!WU || lane == 0) {   // ---- producer (WU: lanes 1..31 of the warp wait at __syncwarp, not at the join barrier)
         fence_proxy_async_global();   // xb was written with generic stores (D phase / prologue of other CTAs, released by the grid barrier)
         for (int i = 0; i < R && i < nst; ++i) ts_fill_b<PH, TT, KS, BM>(g, t0, i, i);   // B of the window-prefetched steps
         if (NUL) {
@@ -440,7 +440,7 @@ __device__ __forceinline__ void ts_phase(GS& g, int l, int ntok, EpiF epi) {
             }
             for (int j = nst > R ? nst - R : 0; j < nst; ++j) mbar_wait(emptyb + 8 * (j % R), (j / R) & 1);   // drain: last use of every slot is complete
         }
-    } if (MK_WU) __syncwarp(); } else if (!NUL && (MK_WU ? warp == 1 : tid == 32)) { if (!MK_WU || lane == 0) {   // ---- MMA issuer
+    } if (WU) __syncwarp(); } else if (!NUL && (WU ? warp == 1 : tid == 32)) { if (!WU || lane == 0) {   // ---- MMA issuer
         const u32 idesc = tc_idesc(128, TT);
         for (int ti = 0; ti < nt; ++ti) {
             const int b = ti & 1;
@@ -459,7 +459,7 @@ __device__ __forceinline__ void ts_phase(GS& g, int l, int ntok, EpiF epi) {
                 if (k == SPT - 1) mk_commit(accf + 8 * b);
             }
         }
-    } if (MK_WU) __syncwarp(); } else if (!NUL && warp >= 4) {   // ---- epilogue: quadrant q = warp & 3, column chunks (warp >> 2) - 1 + 3 m (disjoint per (quadrant, chunk))
+    } if (WU) __syncwarp(); } else if (!NUL && warp >= 4) {   // ---- epilogue: quadrant q = warp & 3, column chunks (warp >> 2) - 1 + 3 m (disjoint per (quadrant, chunk))
         if constexpr (PAIR) {   // GU: epi(-1, ..) = per-token setup by the 12 epilogue warps while the MMAs run (r2 into smem; ends with a 384-thread named barrier)
             u32 none[16];
             if (nt > 0) epi(-1, lane, 0, 0, 0, none);
