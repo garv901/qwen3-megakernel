@@ -524,8 +524,12 @@ template <bool IS_O, int NTILE, bool SS = IS_O>
 __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw, bf16_t* out, float* ss2, unsigned* tk, int ntok) {
     constexpr int NTT = NPAD / 128, TARGET = IS_O ? PhO::K / KU : D_KS;
     int rank, nidle;
-    idle_rank<NTILE>(rank, nidle);
-    if (rank < 0) return;   // not an idle CTA (block-uniform)
+    if constexpr (FIN == 2) {   // every CTA finalizes (the callers issue their tickets first, so no CTA waits on a CTA that waits)
+        rank = (int)blockIdx.x; nidle = (int)gridDim.x;
+    } else {
+        idle_rank<NTILE>(rank, nidle);
+        if (rank < 0) return;   // not an idle CTA (block-uniform)
+    }
     const int tid = threadIdx.x;
     if constexpr (FIN == 0) {
     for (int job = rank; job < 8 * NTT; job += nidle) {
@@ -560,7 +564,7 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
         }
     }
     } else {
-    // MK_FIN 1: each job is split over nsub = nidle / NJOB idle CTAs by token rows (part p: tokens tt 128 + p pr ..); the last of the nsub CTAs that saw
+    // MK_FIN 1 / 2: each job is split over nsub = nidle / NJOB idle (2: all) CTAs by token rows (part p: tokens tt 128 + p pr ..); the last of the nsub CTAs that saw
     // the target resets the ticket and the seen counter tk[32 + (IS_O ? 0 : 16) + job]. (Issuing all loads before the stores deadlocked at b128, job 9766
     // and srun bisect 2026-10-23; not root-caused, not kept.)
     constexpr int NJOB = 8 * NTT;

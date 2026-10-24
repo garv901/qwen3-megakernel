@@ -61,7 +61,7 @@
 #define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
 #endif
 #ifndef MK_FIN
-#define MK_FIN -1   // P7: idle-CTA finalizers (O -> xb2 / ss2, D -> xb): 0 = one CTA per (rb, tt) job; 1 = each job split by token rows over nidle / njobs idle CTAs (seen counters tk[32, 64));
+#define MK_FIN -1   // P7: idle-CTA finalizers (O -> xb2 / ss2, D -> xb): 0 = one CTA per (rb, tt) job; 1 = each job split by token rows over nidle / njobs idle CTAs (seen counters tk[32, 64)); 2 = 1 over all CTAs after their own tickets;
                      // -1 = per bucket: 1 at NPAD 128 (job 9771: b128 -94.3 alone, -65.6 on h64), else 0 (b256 +49.2 on h64, b64 +5.7)
 #endif
 #ifndef MK_GU_TT
