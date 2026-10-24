@@ -99,8 +99,19 @@ def strip_knobs(src: str) -> str:
     return re.sub(r"mk_null\(\d+\)", "false", src)
 
 
-# splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8), item prefetch (P9), merge chunk (P4), KV evict_first + 1-row tail by LDG (v5)
-SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES")
+# splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8), item prefetch (P9), merge chunk (P4), KV evict_first + 1-row tail by LDG (v5),
+# half-CTA consumers + stage geometry (splitkv-v8 P10)
+SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS")
+
+
+def skv_stage_units(knobs: dict) -> int:
+    """KV ring size of a q_len 1 build in 128-row stage units (skv_off_bars ``skv_stages``): SKV_STAGES x SKV_STAGE_ROWS / 128 (h64: 4 x 64 rows = 2)."""
+    return int(knobs.get("SKV_STAGES", 2)) * int(knobs.get("SKV_STAGE_ROWS", 128)) // 128
+
+
+def skv_knob_defines(knobs: dict) -> list[str]:
+    """The SKV_* knobs of a build as NAME=value defines (skv_geometry / skv_map_specs ``extra``)."""
+    return [f"{n}={int(v)}" for n, v in sorted(knobs.items()) if n.startswith("SKV_")]
 
 
 def knob_defines(knobs: dict | None) -> list[str]:
@@ -186,7 +197,7 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     if stripped:
         src = strip_knobs(src)
     k = {**DEFAULT_KNOBS, **dict(knobs)}
-    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn, skv_stages=k.get("SKV_STAGES", 2), gu_tt=k["MK_GU_TT"]) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
+    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn, skv_stages=skv_stage_units(k), gu_tt=k["MK_GU_TT"]) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
     defs = [f"NPAD={npad}", f"NB={nb}", f"MK_EXPECT_DYN={exp}", *knob_defines(dict(knobs))]
     defs += os.environ.get("MK_EXTRA_DEFINES", "").split()   # debug only (e.g. SKV_DEBUG_WAIT=1); not part of the knob set
     if attn == "splitkv":
@@ -235,11 +246,11 @@ def skv_num_maps(qmax: int = 1) -> int:
     return skv_geometry(skv_defines(qmax))[0].bit_length()
 
 
-def skv_map_specs(rows: int, n_layers: int = NL, qmax: int = 1) -> list[tuple[list[int], list[int], list[int]]]:
+def skv_map_specs(rows: int, n_layers: int = NL, qmax: int = 1, extra=()) -> list[tuple[list[int], list[int], list[int]]]:
     """(dims, strides_bytes, box) of the 2 * kNumMaps A1 maps in kernel order (K: box rows stage_rows .. 1, then V): dims {128, 8, n_layers * rows}, strides {256, 2048} B,
     box {64, 1, r}, CU_TENSOR_MAP_SWIZZLE_128B (SKV_TMA_MMA 1, the header default; a1bench.py tensor_maps with mma = True; the kernel issues each box at dim 0 and 64).
-    ``rows`` = cache rows per layer (mk: the fixture's packed rows; the CTX padding rows lie behind the last layer). ``qmax``: the build (skv_defines)."""
-    stage_rows = skv_geometry(skv_defines(qmax))[0]
+    ``rows`` = cache rows per layer (mk: the fixture's packed rows; the CTX padding rows lie behind the last layer). ``qmax``: the build (skv_defines); ``extra``: its SKV_* knob defines (skv_knob_defines; SKV_STAGE_ROWS)."""
+    stage_rows = skv_geometry([*skv_defines(qmax), *extra])[0]
     out = []
     for _kv in range(2):
         for rs in range(stage_rows.bit_length()):
@@ -247,11 +258,11 @@ def skv_map_specs(rows: int, n_layers: int = NL, qmax: int = 1) -> list[tuple[li
     return out
 
 
-def encode_skv_maps(kc_ptr: int, vc_ptr: int, rows: int, n_layers: int = NL, qmax: int = 1) -> bytes:
+def encode_skv_maps(kc_ptr: int, vc_ptr: int, rows: int, n_layers: int = NL, qmax: int = 1, extra=()) -> bytes:
     """2 * kNumMaps x 128 B tensor maps over the K / V caches (device pointers), SWIZZLE_128B, L2 promotion none, as a1bench.py tensor_maps (mma); needs cuInit (a GPU host)."""
     from cuda.bindings import driver as d
     blob = b""
-    specs = skv_map_specs(rows, n_layers, qmax)
+    specs = skv_map_specs(rows, n_layers, qmax, extra)
     for i, (dims, strides, box) in enumerate(specs):
         res = d.cuTensorMapEncodeTiled(
             d.CUtensorMapDataType.CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, 3, int(kc_ptr if i < len(specs) // 2 else vc_ptr),

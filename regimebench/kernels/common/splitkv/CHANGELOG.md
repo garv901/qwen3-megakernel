@@ -91,3 +91,18 @@
   KV boxes only, 2 = TMA + LDG engine loads (the old 1). In mk the TMA KV stream evicted mk's weights from L2: with EF, b128 QKV / O / GU / D
   5.06 / 5.61 / 9.71 / 4.83 -> 4.26 / 4.81 / 8.64 / 4.10 us/layer; us/step b64 -15, b128 -106, b256 -145, R3-b32-kv1K -18 (TAIL + EF: -62 /
   -216 / -424 / -33). On the LDG-only b1 build EF loses (kv16K +14.7), hence LDG loads stay without the hint by default.
+- 2026-10-23 (tag splitkv-v7, MK-core job 9748): `SKV_KV_EVICT_FIRST` default is 1 only for SKV_QMAX == 1 builds; R6 builds (SKV_QMAX > 1)
+  default to 0 (with it, in mk: R6-b1-kv1024 q4 +10.8, q16 +4.7 us/step). Explicit -D values are unchanged.
+
+- P10 (opt-in, `-DSKV_HALVES=1`, default 0, no change to the default build): half-CTA consumers for the q_len 1 TMA mma path (needs iface 1, SKV_QMAX 1,
+  SKV_FORCE_ENGINE 1, SKV_TMA_RELEASE 1, SKV_TICKET 0, SKV_PROF_NOCOMP 0, SKV_ITEM_PREFETCH 1; `#error` otherwise). Half h = warps 8h..8h+7 runs the CTA's items
+  k = h, h + 2, .. with its own ring slots (h * SKV_STAGES / 2 ..), producer thread (256 h), item prefetch, q scratch, tail park slot, end-of-item merge and named
+  barrier (`bar.sync 1 + h, 256`); one `__syncthreads` ends attend as before. Works with 128 x 2 (one slot per half) and 64 x 4 (two per half); empty mbarriers have count 8
+  in this build. `ring_phase` packs the two halves' stage counters (bits 0..14, 16..30; bit 31 = initialised). Named barriers 1 and 2 are used inside attend only: every
+  `bar.sync 1 + h` a half starts completes before attend returns, and a half without items executes none. Params, records, planner, smem (148,032 B), combine unchanged.
+  Intended for mk's NPAD >= 64 bucket (every CTA has >= 2 items); a CTA with one item leaves half 1 idle (slower). GPU numbers: job `slurm/mk_attn_p10.sbatch`.
+
+## splitkv-v8 (P10 result, job 9770)
+- SKV_HALVES checked at 11 points x 3 builds (33/33). Best variant: `SKV_HALVES=1,SKV_TAIL_LDG=1,SKV_STAGE_ROWS=64,SKV_STAGES=4` (2 x 64-row slots per half):
+  b256kv128 43.12 -> 34.23, b128kv128 22.74 -> 20.00, b64kv128 13.86 -> 11.67, b32kv1024 28.15 -> 26.05 us/layer vs `SKV_TAIL_LDG=1`. Slower for 1-item CTAs
+  (b1kv32768 +6.5). Default unchanged (opt-in); suggested for mk buckets NPAD >= 32 pending the in-mk A/B.
