@@ -60,6 +60,9 @@
 #ifndef MK_TSB
 #define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
 #endif
+#ifndef MK_QR
+#define MK_QR 0   // P10: 1 = QKV -> q/k-norm + RoPE without a grid barrier (ticket-gated rope jobs on every CTA; TSB + splitkv only)
+#endif
 #ifndef MK_PFE
 #define MK_PFE 0   // P9: 1 = issue the next phase's first weight units (ts_first) before the O / D finalizer instead of after the barrier arrive
 #endif

@@ -93,7 +93,7 @@ class MkStep:
         self.tsb = B.tsb_on(self.npad, ld.knobs)
         if self.tsb:   # P5b: bf16(x * ln2) [MAXTOK][HID], sum x^2 per token, act = bf16(silu * up) [MAXTOK][INTER] (rows >= ntok stay zero), wgu (built once per weight set)
             self.xb2 = torch.zeros(M * B.H, dtype=torch.bfloat16, device=dev)
-            self.ss2 = torch.zeros(2 * M, **f32)   # [0, M) = ss2 (sum x^2 per token after O), [M, 2M) = ssf (after the last D, MK_LMTS; SPEC-P3c)
+            self.ss2 = torch.zeros(3 * M, **f32)   # [0, M) = ss2 (sum x^2 per token after O), [M, 2M) = ssf (after the last D, MK_LMTS; SPEC-P3c), [2M, 3M) = ss1 (MK_QR)
             self.act = torch.zeros(M * B.INTER, dtype=torch.bfloat16, device=dev)
             self.wgu = arm._wgu(inputs["wg"], inputs["wu"])
         self.sync = torch.zeros(B.SYNC_INTS, dtype=torch.int32, device=dev)

@@ -71,6 +71,13 @@ static_assert(MK_EXPECT_DYN == DYN_SMEM, "host dyn_smem (build.py) != kernel DYN
 
 // MK_PFE 1 (TSB): the GU / next-QKV first weight units are issued before the O / D finalizer (ts_first fills A only; the finalizer uses no smem)
 constexpr bool PFE_O = MK_PFE && TSB && !mk_null(3), PFE_D = MK_PFE && TSB && TS && !mk_null(5);
+// MK_QR 1 (TSB, splitkv): no grid barrier between QKV and q/k-norm + RoPE: QKV tiles add QKV tickets, every CTA then runs ticket-gated rope jobs; r1 comes from
+// ss1 = ss2 + 2 MAXTOK (sum x^2 per token: prologue for layer 0, the D finalizer for the next layer; zeroed in the O extra)
+#ifdef MK_SKV
+constexpr bool QR = MK_QR && TSB && TS;
+#else
+constexpr bool QR = false;
+#endif
 // next-phase weight prefetch vs grid-barrier arrive: MK_PFA 0 = prefetch, then arrive (v0); 1 = arrive, then prefetch (the TMA issue
 // overlaps the barrier latency and cannot delay the arrive's release fence). The prefetch writes only ring slots whose MMAs completed.
 #if MK_PFA
@@ -508,6 +515,8 @@ __device__ __forceinline__ uint4 pack_xw(const float4 a, const float4 b, const u
 // ---------------------------------------------------------------- P5b: idle-CTA finalizers (SPEC-P5b; NOTES.md "GU and D on the tile stream")
 // Ticket layout in tk[64]: O tickets tk[0 .. 8 NTT) (index rb * NTT + tt, target 16 = the units of a row block), D tickets tk[TK_D ..] (same index, target D_KS).
 constexpr int TK_D = 16;
+// MK_QR: QKV tickets tk[TK_Q + rb * NTT + tt] (rb = 128-row block of the 4096 QKV rows = one head; target TS_KS), seen counters of the rope jobs at tk[TK_QS + job]
+constexpr int TK_Q = 64, TK_QS = 128;
 // CTA b of an NTILE-unit phase owns [lo(b), lo(b + 1)) (the formula of geom / ts_geom); idle = owns none. rank = index of this CTA among the idle CTAs in blockIdx order, nidle = their count.
 template <int NTILE>
 __device__ __forceinline__ void idle_rank(int& rank, int& nidle) {
@@ -710,6 +719,20 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             __stcg(x + i, bf2f(embed[(size_t)token[i / HID] * HID + (i % HID)]));
     }
     zero_f32(qkv, ntok * QKVN);
+    if constexpr (QR) {   // ss1[t] = sum of embed[token[t]]^2 (layer 0's r1; one warp per token)
+        for (int t = gwarp; t < ntok; t += nwarps) {
+            const uint4 e = __ldg(reinterpret_cast<const uint4*>(embed + (size_t)token[t] * HID) + lane);   // 32 lanes x 8 = 256: 4 rounds
+            float sq = 0.f;
+            for (int m = 0; m < HID / 256; ++m) {
+                const uint4 v = m == 0 ? e : __ldg(reinterpret_cast<const uint4*>(embed + (size_t)token[t] * HID) + lane + 32 * m);
+                const u32 w[4] = {v.x, v.y, v.z, v.w};
+#pragma unroll
+                for (int j = 0; j < 4; ++j) { const float a = bf2f(w[j] & 0xffffu), b = bf2f(w[j] >> 16); sq += a * a + b * b; }
+            }
+            sq = warp_sum(sq);
+            if (lane == 0) __stcg(ss2 + 2 * MAXTOK + t, sq);
+        }
+    }
     if constexpr (!TSB) zero_f32(gu, ntok * GUN);   // TSB: no gu buffer (GU accumulates in TMEM, ss2 is zeroed in the QKV extra())
     if (MK_DBG_EXIT == 2) return;
     if constexpr (TS) fence_proxy_async_global();   // xb generic stores -> TMA reads of every CTA after the grid barrier
@@ -735,25 +758,96 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                     if (c0 + i < ntok) red_add(qkv + (size_t)(c0 + i) * QKVN + row, __uint_as_float(v[i]));
             };
             const bool zssf = LMTS && l == NLAY - 1;   // ssf: sums of squares of the last layer's x (MAXTOK-sized, MAXTOK % 4 == 0); constant false (not captured) without LMTS
-            auto extra = [&]() { rr_of_x(x, rr1, ntok); if constexpr (TSB) { zero_f32(ss2, ntok); if (zssf) zero_f32(ss2 + MAXTOK, (ntok + 3) & ~3); } else zero_f32(gu, ntok * GUN); };
+            auto extra = [&]() { if constexpr (!QR) rr_of_x(x, rr1, ntok); if constexpr (TSB) { zero_f32(ss2, ntok); if (zssf) zero_f32(ss2 + MAXTOK, (ntok + 3) & ~3); } else zero_f32(gu, ntok * GUN); };
 #ifndef MK_SKV
             skv_prefetch(l, blockIdx.x, gridDim.x);   // splitkv: A1 has no prefetch (L2 prefetch measured net <= 0)
 #endif
             if constexpr (TS) {
                 ts_phase<PhQkv, TS_TT, TS_KS, 8, mk_null(0)>(g, l, ntok, epi);   // joined by a __syncthreads inside
+                if constexpr (QR && !mk_null(0)) {
+                    if (tid == 0) {
+                        const TsGeom ge = ts_geom<PhQkv, TS_TT, TS_KS>();
+                        if (ge.nt > 0) {
+                            __threadfence();   // release: this CTA's red.adds into qkv (ordered before tid 0 by the join barrier) precede the ticket adds
+                            for (int ti = 0; ti < ge.nt; ++ti) atomicAdd(tk + TK_Q + (ge.t0 + ti) / TS_KS, 1u);
+                        }
+                    }
+                }
                 if constexpr (!mk_null(0)) extra();
             } else {
                 gemm_phase<PhQkv, mk_null(0)>(g, l, ntok, get, epi, extra);
             }
         }
 #ifdef MK_SKV
+        if constexpr (!QR) {
         bar_arrive(bar_cnt);   // splitkv: attention's TMA ring overlays the weight ring: O's first units are prefetched after attend (phase 3 window)
+        bar_wait(bar_cnt, bar_target);
+        }
 #else
         MK_PF_ARRIVE(prefetch_next<PhO>(g, l));   // phases 2 and 3 do not use the ring: O's first units land meanwhile
-#endif
         bar_wait(bar_cnt, bar_target);
+#endif
 
         // ---- Phase 2: q/k-norm + RoPE + KV write; one warp per (token, head); head < 16: q (-> qb), else kv head ----
+        if constexpr (QR) {
+            // MK_QR: jobs (head hh < 24, token tile tt) over all CTAs, each split by token rows over nsub CTAs, once the QKV tickets of the head (q: rb = hh; kv: k rb and
+            // v rb) reach TS_KS; r1 from ss1 (prologue / previous D finalizer). The last of the nsub CTAs that saw the target resets the ticket(s) and the seen counter.
+            if constexpr (!mk_null(1)) {
+                constexpr int NTT = NPAD / 128, NJOB = (NQH + NKVH) * NTT;
+                const int G = (int)gridDim.x, nsub = max(1, G / NJOB), prow = (128 + nsub - 1) / nsub;
+                const float* ss1 = ss2 + 2 * MAXTOK;
+                for (int w = (int)blockIdx.x; w < NJOB * nsub; w += G) {
+                    const int job = w % NJOB, part = w / NJOB, hh = job / NTT, tt = job % NTT;
+                    const int rbk = hh < NQH ? hh : QDIM / HDIM + (hh - NQH), rbv = hh < NQH ? -1 : (QDIM + HID) / HDIM + (hh - NQH);
+                    if (tid == 0) {
+                        unsigned* tq = tk + TK_Q + rbk * NTT + tt;
+                        unsigned* tv = rbv >= 0 ? tk + TK_Q + rbv * NTT + tt : tq;
+                        unsigned v0, v1;
+                        do {
+                            asm volatile("ld.acquire.gpu.global.u32 %0, [%1];" : "=r"(v0) : "l"(tq) : "memory");
+                            asm volatile("ld.acquire.gpu.global.u32 %0, [%1];" : "=r"(v1) : "l"(tv) : "memory");
+                            if (v0 != (unsigned)TS_KS || v1 != (unsigned)TS_KS) __nanosleep(64);
+                        } while (v0 != (unsigned)TS_KS || v1 != (unsigned)TS_KS);
+                        if (nsub == 1) { atomicExch(tq, 0u); if (tv != tq) atomicExch(tv, 0u); }
+                        else {
+                            unsigned* seen = tk + TK_QS + job;
+                            if (atomicAdd(seen, 1u) == (unsigned)nsub - 1) { atomicExch(seen, 0u); atomicExch(tq, 0u); if (tv != tq) atomicExch(tv, 0u); }
+                        }
+                    }
+                    __syncthreads();   // broadcast: tid 0's acquire orders the reads of qkv below
+                    const int ntl = min(ntok - tt * 128, 128), p0 = part * prow, np = max(0, min(ntl - p0, prow));
+                    for (int r = warp; r < np; r += NW) {   // one warp per token of the part
+                        const int t = tt * 128 + p0 + r;
+                        const float r1 = rsqrtf(__ldcg(ss1 + t) * (1.f / HID) + EPS);
+                        const bool isq = hh < NQH;
+                        const int kvh = hh - NQH;
+                        const int pos = __ldg(t_vis + t) - 1;
+                        const float4 a = __ldcg(reinterpret_cast<const float4*>(qkv + (size_t)t * QKVN + (isq ? hh * HDIM : QDIM + kvh * HDIM)) + lane);
+                        const uint2 nw = __ldg(reinterpret_cast<const uint2*>((isq ? qn : kn) + l * HDIM + lane * 4));
+                        float e[4] = {a.x * r1, a.y * r1, a.z * r1, a.w * r1}, o[4];
+                        const float rn = rsqrtf(warp_sum(e[0] * e[0] + e[1] * e[1] + e[2] * e[2] + e[3] * e[3]) / (float)HDIM + EPS);
+#pragma unroll
+                        for (int i = 0; i < 4; ++i) e[i] = e[i] * rn * bf2f((i < 2 ? nw.x : nw.y) >> ((i & 1) * 16) & 0xffffu);
+#pragma unroll
+                        for (int i = 0; i < 4; ++i) {
+                            const float pr = __shfl_xor_sync(0xffffffffu, e[i], 16);
+                            const int j = (lane * 4 + i) & 63;
+                            const float cs = __ldg(rope + (size_t)pos * 128 + j), sn = __ldg(rope + (size_t)pos * 128 + 64 + j);
+                            o[i] = e[i] * cs + (lane < 16 ? -pr : pr) * sn;
+                        }
+                        const uint2 ob = make_uint2(pack_bf16(o[0], o[1]), pack_bf16(o[2], o[3]));
+                        if (isq) {
+                            *reinterpret_cast<uint2*>(qb + ((size_t)t * NQH + hh) * HDIM + lane * 4) = ob;
+                        } else {
+                            const size_t orow = (((size_t)l * cache_rows + __ldg(t_base + t) + pos) * NKVH + kvh) * HDIM + lane * 4;
+                            *reinterpret_cast<uint2*>(kcache + orow) = ob;
+                            const float4 v = __ldcg(reinterpret_cast<const float4*>(qkv + (size_t)t * QKVN + QDIM + HID + kvh * HDIM) + lane);
+                            *reinterpret_cast<uint2*>(vcache + orow) = make_uint2(pack_bf16(v.x * r1, v.y * r1), pack_bf16(v.z * r1, v.w * r1));
+                        }
+                    }
+                }
+            }
+        } else
         if constexpr (!mk_null(1)) {
             for (int it = gwarp; it < ntok * (NQH + NKVH); it += nwarps) {
                 const int t = it / (NQH + NKVH), hh = it - t * (NQH + NKVH);
@@ -826,7 +920,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 for (int i = 0; i < 16; ++i)
                     if (c0 + i < ntok) red_add(x + (size_t)(c0 + i) * HID + row, __uint_as_float(v[i]));
             };
-            auto extra = [&]() { zero_f32(qkv, ntok * QKVN); };
+            auto extra = [&]() { zero_f32(qkv, ntok * QKVN); if constexpr (QR) zero_f32(ss2 + 2 * MAXTOK, ntok); };
             if constexpr (TSB) {
                 // P5b: after a CTA's flush of row block rb its O tickets (one per token tile) get nk units; the idle CTAs (no O unit) convert x -> xb2, ss2 once a ticket reaches 16
                 auto fin = [&](int rb, int nk) {
@@ -942,10 +1036,10 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                         }
                         if constexpr (PFE_D) if (l + 1 < NLAY) ts_first<PhQkv, TS_TT, TS_KS>(g, l + 1);   // MK_PFE: next QKV's first weight units land during the finalizer
                         if constexpr (LMTS) {
-                            if (l + 1 < NLAY) idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE>(x, ln1 + (size_t)(l + 1) * HID, xb, ss2, tk, ntok);
+                            if (l + 1 < NLAY) idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE, QR>(x, ln1 + (size_t)(l + 1) * HID, xb, ss2 + (QR ? 2 * MAXTOK : 0), tk, ntok);
                             else idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE, true>(x, fnorm, xb, ss2 + MAXTOK, tk, ntok);
                         } else {
-                            idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE>(x, ln1 + (size_t)(l + 1) * HID, xb, ss2, tk, ntok);
+                            idle_finalize<false, TsC<PhD, D_TT, D_KS>::NTILE, QR>(x, ln1 + (size_t)(l + 1) * HID, xb, ss2 + (QR ? 2 * MAXTOK : 0), tk, ntok);
                         }
                     }
                 }

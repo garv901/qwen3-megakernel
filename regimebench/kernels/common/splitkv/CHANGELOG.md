@@ -116,3 +116,13 @@
 ## splitkv-v9 (P11 result, job 9774)
 - `SKV_HALVES=1,SKV_GROUPS=4,SKV_TAIL_LDG=1,SKV_STAGE_ROWS=32,SKV_STAGES=8` (g4a): b256kv128 34.05 -> 32.10, b128kv128 19.97 -> 17.75, b64kv128 11.64 -> 10.50 us/layer vs
   the v8 h64 build. Slower with <= 2 items per CTA (b32kv1024 +10.9, b16kv128 +1.6) and at b256kv255 (+2.1). attend smem 148,096 B (8 stages: kBarBytes 128).
+
+- P12 (opt-in, `-DSKV_HALVES=1 -DSKV_GROUPS=8`, needs `SKV_STAGE_ROWS=16`, `SKV_STAGES=16`; static_assert otherwise): 8 merge-free consumer groups of 2 warps. Group q = warps 2q, 2q + 1,
+  items k = q, q + 8, .., ring slots 2q, 2q + 1 (16-row stages, kNumMaps 5: 16 / 8 / 4 / 2 / 1-row boxes, no host change), producer = lane 0 of warp 2q, empty mbarrier count 2. Both warps compute
+  the stage's one tile (full 128-dim QK^T) and the same online-softmax state; each does PV for its 64 dims and normalises / stores them itself, so there is no merge, no named barrier and
+  no group barrier. Per-warp q scratch and tail park (tail row loaded and folded by every warp). `ring_phase` counters are 3-bit fields at bits 0, 3, .., 21 (wrap mod 8, a multiple of 4).
+  Separate code path (`run_items_g8`); default, G = 2 and G = 4 builds are SASS-identical to splitkv-v9. attend smem 148,224 B (16 stages: kBarBytes 256). GPU numbers: job `slurm/mk_attn_p12.sbatch`.
+
+## splitkv-v10 (P12 result, job 9781)
+- `SKV_HALVES=1,SKV_GROUPS=8,SKV_TAIL_LDG=1,SKV_STAGE_ROWS=16,SKV_STAGES=16` (g8): b256kv128 32.06 -> 27.27, b128kv128 17.75 -> 16.16 us/layer vs g4a. Slower at b64kv128 (+0.9),
+  long items (b64kv4096 +48) and <= 2 items per CTA. attend smem 148,224 B (kBarBytes 256).

@@ -309,7 +309,7 @@ def test_tsb_map_specs():
                                                       ([1024, 28 * 6144], [2048], [64, 128]), ([3072, 256], [6144], [64, 128])]
     assert B.workspace_map_specs(128, B.WS_ORDER)[1] == ([1024, 256], [2048], [64, 48])
     assert B.workspace_map_specs() == [([1024, 256], [2048], [64, 128])]
-    assert MkArm(tsb=1).knobs["MK_TSB"] == 1 and MkArm().knobs["MK_TSB"] == 1 and B.DEFAULT_KNOBS["MK_TSB"] == 1 and B.TK_SIZE == 64
+    assert MkArm(tsb=1).knobs["MK_TSB"] == 1 and MkArm().knobs["MK_TSB"] == 1 and B.DEFAULT_KNOBS["MK_TSB"] == 1 and B.TK_SIZE == 192
 
 
 # ---------------------------------------------------------------- attn = splitkv (A1 v1, SPEC-P2)

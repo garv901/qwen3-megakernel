@@ -101,10 +101,10 @@
 #endif
 
 #ifndef SKV_GROUPS
-#define SKV_GROUPS 2        // (P11) number of independent consumer groups of SKV_HALVES mode: 2 (half CTAs, P10) or 4 (quarter CTAs)
+#define SKV_GROUPS 2        // (P11) number of independent consumer groups of SKV_HALVES mode: 2 (half CTAs, P10), 4 (quarter CTAs) or 8 (P12: 2 warps per group, 16-row stages, no merge; needs SKV_STAGE_ROWS 16, SKV_STAGES 16)
 #endif
-#if SKV_GROUPS != 2 && SKV_GROUPS != 4
-#error "SKV_GROUPS must be 2 or 4"
+#if SKV_GROUPS != 2 && SKV_GROUPS != 4 && SKV_GROUPS != 8
+#error "SKV_GROUPS must be 2, 4 or 8"
 #endif
 #if SKV_GROUPS != 2 && !SKV_HALVES
 #error "SKV_GROUPS != 2 needs SKV_HALVES 1"
@@ -118,11 +118,15 @@ constexpr int kKvHeads = 8, kDim = 128, kQHeads = 16;
 constexpr int kBlock = 512;                       // threads per CTA (16 warps)
 constexpr int kPartStride = 132;                  // floats per partial slot: o[128], m, l, pad (528 B)
 constexpr int kStageRows = SKV_STAGE_ROWS, kStages = SKV_STAGES;   // TMA ring: kStages stages, a stage = kStageRows positions of K + V (256 B each)
+#if SKV_HALVES && SKV_GROUPS == 8
+static_assert(kStageRows == 16 && kStages == 16, "SKV_GROUPS 8 needs SKV_STAGE_ROWS 16 and SKV_STAGES 16");   // P12
+#else
 static_assert(kStageRows == 32 || kStageRows == 64 || kStageRows == 128, "SKV_STAGE_ROWS must be 32, 64 or 128");
 static_assert(kStages >= 2 && kStages <= 8, "SKV_STAGES must be 2..8");
-constexpr int kU = kStageRows / 32;               // positions per row slot per stage (one online-softmax rescale per kU positions)
+#endif
+constexpr int kU = (kStageRows < 32 ? 32 : kStageRows) / 32;               // positions per row slot per stage (one online-softmax rescale per kU positions)
 constexpr int kStageBytes = 2 * kStageRows * 256; // K half then V half
-constexpr int kNumMaps = (kStageRows == 32 ? 6 : kStageRows == 64 ? 7 : 8);   // box rows kStageRows, /2, .., 1 per K / V: tmaps[kv * kNumMaps + log2(kStageRows / rows)]
+constexpr int kNumMaps = (kStageRows == 16 ? 5 : kStageRows == 32 ? 6 : kStageRows == 64 ? 7 : 8);   // box rows kStageRows, /2, .., 1 per K / V: tmaps[kv * kNumMaps + log2(kStageRows / rows)]
 constexpr int kMergeChunk = SKV_MERGE_CHUNK;                   // combine: partial float4 loads in flight per lane
 constexpr float kQScale = 0.08838834764831845f * 1.4426950408889634f;   // 1/sqrt(128) * log2(e)
 constexpr int kRingOff = 0, kMrgOff = kStages * kStageBytes, kMrgBytes = 16 * 2 * kPartStride * 4;
@@ -131,12 +135,20 @@ constexpr int kBarOff = kMrgOff + kMrgBytes, kSmemBytes = kBarOff + kBarBytes;
 
 constexpr bool kMmaOn = (SKV_TMA_MMA != 0);
 // mma consumer geometry: warp w takes 16-position tile (w % kMmaT) of the stage and the dim slice dh = w / kMmaT (kMmaDW dims = kMmaMt m-tiles of 16)
-constexpr int kMmaT = kStageRows / 16, kMmaWPT = 16 / kMmaT, kMmaDW = 128 / kMmaWPT, kMmaMt = kMmaDW / 16, kMmaMS = kMmaDW + 4;   // kMmaMS: floats of one (warp, q-head) merge slot: O[kMmaDW], m, l, pad
+constexpr int kGeoRows = (kStageRows < 32 ? 32 : kStageRows);   // P12: the 16-row stages exist only in SKV_GROUPS 8 (own consumer); the other consumers' geometry constants use 32 rows then (never instantiated)
+constexpr int kMmaT = kGeoRows / 16, kMmaWPT = 16 / kMmaT, kMmaDW = 128 / kMmaWPT, kMmaMt = kMmaDW / 16, kMmaMS = kMmaDW + 4;   // kMmaMS: floats of one (warp, q-head) merge slot: O[kMmaDW], m, l, pad
 constexpr int kMmaNew = 32 * kMmaMS, kMmaQs = kMmaNew + 132;   // merge buffer (float offsets): 32 slots | new-row state (v[128], m[2], pad) | per-item q scratch (2 x 128 bf16 = 128 floats)
 constexpr int kMmaG = 1;                        // V m-tiles loaded / multiplied together
 constexpr int kHalfBytes = kStageRows * 128;                   // one 64-dim half of K or V in a stage (SKV_TMA_MMA: [rows][64] bf16, 128 B swizzled rows)
-static_assert(!kMmaOn || (kStageRows >= 32 && kMmaDW % 16 == 0 && (kMmaQs + 128) * 4 <= kMrgBytes), "SKV_TMA_MMA geometry");
-#if SKV_HALVES
+static_assert(!kMmaOn || (kGeoRows >= 32 && kMmaDW % 16 == 0 && (kMmaQs + 128) * 4 <= kMrgBytes), "SKV_TMA_MMA geometry");
+#if SKV_HALVES && SKV_GROUPS == 8
+// P12 geometry (SKV_GROUPS 8): group q = warp >> 1 (2 warps, 64 threads) owns ring slots 2 q, 2 q + 1 (16-row stages); warp lw = warp & 1 = dims half dh (64 dims = kHMt m-tiles), the one tile of
+// the stage is computed by both warps (full 128-dim QK^T), so each warp's online-softmax state is the group's: no merge. Merge buffer (floats): 16 x tail park (64 dims of v) | 16 x q scratch (128 floats).
+constexpr int kG = 8, kHW = 2, kHT = 64, kHS = kStages / kG, kHDW = 64, kHMt = kHDW / 16;
+static_assert(kHS == 2 && kStageRows == 16, "SKV_GROUPS 8 geometry");
+constexpr int kP8Park = 0, kP8Q = 16 * 64, kP8Floats = kP8Q + 16 * 128;
+static_assert(kP8Floats * 4 <= kMrgBytes, "SKV_GROUPS 8 merge buffer budget");
+#elif SKV_HALVES
 // P10 half-CTA geometry: half h = warps 8h .. 8h + 7 owns ring slots h * kHS .. h * kHS + kHS - 1. Warp lw = warp % 8: dim half dh = lw / 4 (kHDW = 64 dims = kHMt m-tiles), tile owner tw = lw % 4 takes
 // the stage's 16-position tiles tw, tw + 4, .. (kHTP of them). Merge slot (warp, hq) = O[64], m, l, pad (kHMS floats), indexed by the global warp; per-half new-row (tail park) state and q scratch.
 // P11: G = SKV_GROUPS groups (G = 2: the halves above; G = 4: quarters of 4 warps / 128 threads, items k = q, q + G, ..): group q = warp / kHW, kHW = 16 / G warps, kHT = 512 / G threads.
@@ -972,7 +984,7 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
   }
 }
 
-#if SKV_HALVES
+#if SKV_HALVES && SKV_GROUPS != 8
 // ------------------------------------------------------------------------------------------------ P10: half-CTA consumers (SKV_HALVES 1)
 // P11: the code is parameterised by G = SKV_GROUPS (2 = halves, as described here with 8 warps / 256 threads / 4 tile owners; 4 = quarters: 4 warps / 128 threads / 2 tile owners, merge in
 // 2 passes, bar.sync 1 + h, 128, ring_phase counters of 7 bits); `h` below is the group index and `half` means group.
@@ -1235,6 +1247,250 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
   __syncthreads();                                              // both halves done (a half without items arrives here directly); attend ends with this barrier
   g = (((g1c + (unsigned)tot1) & kHMask) << kHShift) | ((g0c + (unsigned)tot0) & kHMask);
   if (kG == 4) g |= (((g2c + (unsigned)tot2) & kHMask) << (2 * kHShift)) | (((g3c + (unsigned)tot3) & kHMask) << (3 * kHShift));
+}
+#endif
+
+#if SKV_HALVES && SKV_GROUPS == 8
+// ------------------------------------------------------------------------------------------------ P12: 8 merge-free consumer groups (SKV_HALVES 1, SKV_GROUPS 8)
+// Group q = warp >> 1 (2 warps, threads 64 q ..) runs the CTA's items k = q, q + 8, .. with its own ring slots 2 q, 2 q + 1 (16-row stages: one 16-position tile per stage), its own producer
+// (lane 0 of warp 2 q) and item prefetch. Both warps of a group compute the same scores (full 128-dim QK^T of the stage's tile) and the same online-softmax state (m, l per q-head); warp
+// lw = warp & 1 = dims half dh does the PV product for its 64 dims. So there is no cross-warp merge, no merge slot and no group barrier (no named barrier in this mode): each warp normalises and
+// stores its own 64 dims (S == 1) or its partial (O for its dims; m, l written by the dh == 0 warp). Everything a warp touches in smem is its own: q scratch (128 floats, written by lanes < 16,
+// read after __syncwarp) and the tail park (the 64 dims of the tail V row this warp needs, floats); the park of item k + 1 is written after the __syncwarp that follows the fold of item k.
+// Ring slots: the producer of group q refills a slot after both warps of the group arrived on its empty barrier (count 2); ring_phase: counter of group q = (g >> 3 q) & 7 (wrap mod 8 is a
+// multiple of 2 kHS = 4, so slot and parity stay consistent). The final __syncthreads is kept (a group without items goes straight to it).
+__device__ __forceinline__ void run_items_g8(const Params& p, int layer, unsigned char* smem, unsigned& g, const int4* rec, int ni) {
+  const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, l16 = lane & 15;
+  const int h = tid >> 6, t = tid & 63, dh = warp & 1;          // h = group index
+  const unsigned sbase = smaddr(smem);
+  const unsigned bar0 = sbase + kBarOff;
+  float* mrg = reinterpret_cast<float*>(smem + kMrgOff);
+  const size_t layer_row = (size_t)layer * p.cache_rows;
+  const int4 zero4 = make_int4(0, 0, 0, 0);
+  constexpr bool kTail = (SKV_TAIL_LDG != 0);
+
+  const int nih = (ni - h + 7) >> 3;                            // items of this group: k = h, h + 8, ..
+  const int4* rh = rec + 2 * h;                                 // item kk of the group: records rh[16 kk], rh[16 kk + 1]
+  const int gh0 = (int)((g >> (3 * h)) & 7u);                   // this group's stage counter at entry
+
+  // ---- TMA producer (lane 0 of warp 2 h): the group's stage sequence into its own slots
+  int pk = -1, pp = 0, pend = 0, pkvh = 0;
+  size_t prow = 0;
+  int4 pnxt = zero4;
+  auto produce = [&](int slot) {
+    if (pp >= pend) {
+      if (pk + 1 >= nih) return;
+      ++pk;
+      const int4 it = pnxt;
+      pnxt = (pk + 1 < nih) ? rh[16 * (pk + 1)] : zero4;
+      pp = it.z; pend = it.w; pkvh = it.y & 15; prow = layer_row + (size_t)it.x;
+      if (kTail && it.w - it.z > 1 && (it.w - it.z) % kStageRows == 1) --pend;   // P9d tail rule (as the consumer)
+    }
+    const int n = min(kStageRows, pend - pp);
+    const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
+    mb_expect(bar, (unsigned)n * 512u);
+    int off = 0, rc = (int)(prow + pp);
+#pragma unroll
+    for (int rs = 0; rs < kNumMaps; ++rs) {
+      const int rows = kStageRows >> rs;
+      if (n & rows) {
+        const char* mk = (const char*)p.tmaps + (0 * kNumMaps + rs) * 128;
+        const char* mv = (const char*)p.tmaps + (1 * kNumMaps + rs) * 128;
+        tma3d(dst + off * 128, mk, 0, pkvh, rc, bar);
+        tma3d(dst + kHalfBytes + off * 128, mk, 64, pkvh, rc, bar);
+        tma3d(dst + 2 * kHalfBytes + off * 128, mv, 0, pkvh, rc, bar);
+        tma3d(dst + 3 * kHalfBytes + off * 128, mv, 64, pkvh, rc, bar);
+        off += rows; rc += rows;
+      }
+    }
+    pp += n;
+  };
+  if (t == 0 && nih > 0) {
+    pnxt = rh[0];
+#pragma unroll
+    for (int s = 0; s < kHS; ++s) produce(h * kHS + (gh0 + s) % kHS);
+  }
+
+  auto item_off = [&](const int4& a) { return ((layer_row + (size_t)a.x) * kKvHeads + (a.y & 15)) * 256 + l16 * 16; };
+  auto load_q = [&](const int4& a, int tok, uint4& x, uint4& y) {
+    const bf16* qp = p.q + (size_t)(tok * kQHeads + 2 * (a.y & 15)) * kDim + l16 * 8;
+    x = ldg_cg4(qp); y = ldg_cg4(qp + kDim);
+  };
+  auto load_tail = [&](const int4& a, uint4& tr) {              // every warp: lanes 0..15 = K row, lanes 16..31 = V row of position p1 - 1
+    tr = make_uint4(0, 0, 0, 0);
+    if (a.w - a.z > 1 && (a.w - a.z) % kStageRows == 1)
+      tr = ldg_nc((const char*)(lane < 16 ? p.kc : p.vc) + item_off(a) + (size_t)(a.w - 1) * 2048);
+  };
+  uint4 tra = make_uint4(0, 0, 0, 0), trb = tra;
+  int4 ra = nih > 0 ? rh[0] : zero4;                            // (a group without items must not read past the CTA's records)
+  uint4 qa = make_uint4(0, 0, 0, 0), qb = qa;
+  if (nih > 0) {
+    load_q(ra, rh[1].z, qa, qb);
+    if (kTail) load_tail(ra, tra);
+  }
+  float* nbp = mrg + kP8Park + 64 * warp;                       // this warp's tail park (64 dims of the tail V row)
+  float* qsp = mrg + kP8Q + 128 * warp;                         // this warp's q scratch
+  int gh = gh0;
+
+  for (int k = 0; k < nih; ++k) {
+    const int kvh = ra.y & 15, p0 = ra.z, p1 = ra.w;
+    const bool tail = kTail && p1 - p0 > 1 && (p1 - p0) % kStageRows == 1;   // warp-uniform
+    int4 na = zero4;
+    int ntok = 0;
+    uint4 nqa = make_uint4(0, 0, 0, 0), nqb = nqa;
+    if (k + 1 < nih) { na = rh[16 * (k + 1)]; ntok = rh[16 * (k + 1) + 1].z; }
+    float st0 = 0.f, st1 = 0.f;                                 // tail scores of the two q-heads (log2 units)
+    if (tail) {
+      float qr0[8], qr1[8], kf[8], vf[8];
+      unpack8(qa, qr0); unpack8(qb, qr1);
+      unpack8(tra, kf);
+      float d0 = 0.f, d1 = 0.f;
+#pragma unroll
+      for (int j = 0; j < 8; ++j) { d0 = fmaf(kf[j], qr0[j], d0); d1 = fmaf(kf[j], qr1[j], d1); }
+#pragma unroll
+      for (int o = 1; o <= 8; o <<= 1) { d0 += __shfl_xor_sync(0xffffffffu, d0, o); d1 += __shfl_xor_sync(0xffffffffu, d1, o); }
+      st0 = __shfl_sync(0xffffffffu, d0, 0) * kQScale; st1 = __shfl_sync(0xffffffffu, d1, 0) * kQScale;
+      uint4 vn;
+      vn.x = __shfl_xor_sync(0xffffffffu, tra.x, 16); vn.y = __shfl_xor_sync(0xffffffffu, tra.y, 16);
+      vn.z = __shfl_xor_sync(0xffffffffu, tra.z, 16); vn.w = __shfl_xor_sync(0xffffffffu, tra.w, 16);
+      if (lane < 16 && (l16 >> 3) == dh) {                      // lanes holding dims 64 dh .. 64 dh + 63 of the V row
+        unpack8(vn, vf);
+        *reinterpret_cast<float4*>(nbp + (l16 & 7) * 8) = make_float4(vf[0], vf[1], vf[2], vf[3]);
+        *reinterpret_cast<float4*>(nbp + (l16 & 7) * 8 + 4) = make_float4(vf[4], vf[5], vf[6], vf[7]);
+      }
+    }
+    float mr0 = neg_inf(), mr1 = neg_inf(), lp0 = 0.f, lp1 = 0.f;
+    float oacc[kHMt][4];
+#pragma unroll
+    for (int i = 0; i < kHMt; ++i) oacc[i][0] = oacc[i][1] = oacc[i][2] = oacc[i][3] = 0.f;
+    {
+      unsigned* qw = reinterpret_cast<unsigned*>(qsp);
+      if (lane < 16) {
+        qw[mma_q_word(l16, 0)] = qa.x; qw[mma_q_word(l16, 1)] = qa.y; qw[mma_q_word(l16, 2)] = qa.z; qw[mma_q_word(l16, 3)] = qa.w;
+        qw[64 + mma_q_word(l16, 0)] = qb.x; qw[64 + mma_q_word(l16, 1)] = qb.y; qw[64 + mma_q_word(l16, 2)] = qb.z; qw[64 + mma_q_word(l16, 3)] = qb.w;
+      }
+      __syncwarp();
+    }
+    const int len = p1 - p0 - (tail ? 1 : 0);
+    const int ns = (len + kStageRows - 1) / kStageRows;
+    const unsigned qsa = smaddr(qsp) + mma_q_off(lane, 0);
+    for (int j = 0; j < ns; ++j, ++gh) {
+      const int slot = h * kHS + gh % kHS;
+      const unsigned par = (gh / kHS) & 1;
+      mb_wait(bar0 + 8 * slot, par);
+      const int n = min(kStageRows, len - j * kStageRows);      // valid positions of the stage (>= 1)
+      const unsigned sb = sbase + kRingOff + slot * kStageBytes;
+      const unsigned j32 = mma_j32(lane);
+      unsigned kdep = 0;
+      const unsigned kb = sb + mma_k_base(lane, 0), vb = sb + mma_v_base(lane, 0);
+      const bool partial = n < 16;
+      unsigned pb0, pb1;
+      {
+        float sa[4] = {0.f, 0.f, 0.f, 0.f}, sb2[4] = {0.f, 0.f, 0.f, 0.f};
+#pragma unroll
+        for (int ks = 0; ks < 8; ++ks) {
+          unsigned k0[4];
+          ldsm4(k0, kb + mma_k_term(ks, j32, kHalfBytes));
+          uint2 qb0 = make_uint2(0u, 0u);
+          if ((lane >> 2) < 2) qb0 = lds64(qsa + ks * 32);
+          hmma16816((ks & 1) ? sb2 : sa, k0, qb0.x, qb0.y);
+          kdep ^= k0[0];
+        }
+        float s0 = sa[0] + sb2[0], s1 = sa[1] + sb2[1], s2 = sa[2] + sb2[2], s3 = sa[3] + sb2[3];
+        if (partial) {
+          const int pos = lane >> 2;
+          if (pos >= n) { s0 = neg_inf(); s1 = neg_inf(); }
+          if (pos + 8 >= n) { s2 = neg_inf(); s3 = neg_inf(); }
+        }
+        float c0 = fmaxf(s0, s2), c1 = fmaxf(s1, s3);
+#pragma unroll
+        for (int o = 4; o <= 16; o <<= 1) { c0 = fmaxf(c0, __shfl_xor_sync(0xffffffffu, c0, o)); c1 = fmaxf(c1, __shfl_xor_sync(0xffffffffu, c1, o)); }
+        const float n0 = fmaxf(mr0, c0 * kQScale), n1 = fmaxf(mr1, c1 * kQScale);
+        const float a0 = ex2(mr0 - n0), a1 = ex2(mr1 - n1);
+        mr0 = n0; mr1 = n1;
+        const float p0v = ex2(fmaf(s0, kQScale, -n0)), p1v = ex2(fmaf(s1, kQScale, -n1)), p2v = ex2(fmaf(s2, kQScale, -n0)), p3v = ex2(fmaf(s3, kQScale, -n1));
+        lp0 = fmaf(lp0, a0, p0v + p2v); lp1 = fmaf(lp1, a1, p1v + p3v);
+        if (__any_sync(0xffffffffu, (lane & 3) == 0 && (a0 != 1.f || a1 != 1.f))) {
+#pragma unroll
+          for (int mt = 0; mt < kHMt; ++mt) { oacc[mt][0] *= a0; oacc[mt][1] *= a1; oacc[mt][2] *= a0; oacc[mt][3] *= a1; }
+        }
+        pb0 = movm_t(pack_bf16x2(p0v, p1v)); pb1 = movm_t(pack_bf16x2(p2v, p3v));
+      }
+#pragma unroll
+      for (int g0 = 0; g0 < kHMt; g0 += kMmaG) {
+        unsigned vf[kMmaG][4];
+#pragma unroll
+        for (int gi = 0; gi < kMmaG; ++gi) ldsm4t(vf[gi], vb + mma_v_term(dh * kHMt + g0 + gi, j32, kHalfBytes));
+        if (partial) {
+          const int k0 = 2 * (lane & 3);
+          const unsigned m01 = (k0 < n ? 0xffffu : 0u) | (k0 + 1 < n ? 0xffff0000u : 0u), m23 = (k0 + 8 < n ? 0xffffu : 0u) | (k0 + 9 < n ? 0xffff0000u : 0u);
+#pragma unroll
+          for (int gi = 0; gi < kMmaG; ++gi) { vf[gi][0] &= m01; vf[gi][1] &= m01; vf[gi][2] &= m23; vf[gi][3] &= m23; }
+        }
+        if (g0 + kMmaG >= kHMt) {                               // after this warp's last V ldmatrix of the stage: one arrive on the group's empty barrier
+          __syncwarp();
+          if (lane == 0) mb_arrive_dep(bar0 + 8 * (kStages + slot), kdep ^ vf[0][0]);
+        }
+#pragma unroll
+        for (int gi = 0; gi < kMmaG; ++gi) hmma16816(oacc[g0 + gi], vf[gi], pb0, pb1);
+      }
+      if (t == 0) { mb_wait(bar0 + 8 * (kStages + slot), par); produce(slot); }   // both warps of the group have read the stage
+      __syncwarp();
+    }
+    if (k + 1 < nih) { load_q(na, ntok, nqa, nqb); if (kTail) load_tail(na, trb); }
+    const int4 rb = rh[16 * k + 1];
+    float l0 = lp0, l1 = lp1;
+#pragma unroll
+    for (int o = 4; o <= 16; o <<= 1) { l0 += __shfl_xor_sync(0xffffffffu, l0, o); l1 += __shfl_xor_sync(0xffffffffu, l1, o); }
+    if (tail) {                                                 // fold the tail position (single-position state) into this warp's state
+      const float M0 = fmaxf(mr0, st0), M1 = fmaxf(mr1, st1);
+      const float a0 = ex2(mr0 - M0), a1 = ex2(mr1 - M1), e0 = ex2(st0 - M0), e1 = ex2(st1 - M1);
+      mr0 = M0; mr1 = M1;
+      l0 = fmaf(l0, a0, e0); l1 = fmaf(l1, a1, e1);
+      const int r = lane >> 2;
+#pragma unroll
+      for (int mt = 0; mt < kHMt; ++mt) {
+        const float va = nbp[mt * 16 + r], vb8 = nbp[mt * 16 + r + 8];
+        oacc[mt][0] = fmaf(oacc[mt][0], a0, e0 * va); oacc[mt][1] = fmaf(oacc[mt][1], a1, e1 * va);
+        oacc[mt][2] = fmaf(oacc[mt][2], a0, e0 * vb8); oacc[mt][3] = fmaf(oacc[mt][3], a1, e1 * vb8);
+      }
+      __syncwarp();                                             // park free for this warp's next item
+    }
+    if ((lane & 3) == 0) {
+      const int d0 = dh * kHDW + (lane >> 2);
+      if (rb.y == 1) {
+        bf16* ao0 = p.ao + (size_t)rb.z * (kQHeads * kDim) + (2 * kvh) * kDim;
+#pragma unroll
+        for (int mt = 0; mt < kHMt; ++mt) {
+          ao0[d0 + mt * 16] = f2bf(oacc[mt][0] / l0); ao0[kDim + d0 + mt * 16] = f2bf(oacc[mt][1] / l1);
+          ao0[d0 + mt * 16 + 8] = f2bf(oacc[mt][2] / l0); ao0[kDim + d0 + mt * 16 + 8] = f2bf(oacc[mt][3] / l1);
+        }
+      } else {
+        float* dst0 = p.part + ((size_t)rb.x * 2) * kPartStride;
+        float* dst1 = dst0 + kPartStride;
+#pragma unroll
+        for (int mt = 0; mt < kHMt; ++mt) {
+          __stcg(dst0 + d0 + mt * 16, oacc[mt][0]); __stcg(dst1 + d0 + mt * 16, oacc[mt][1]);
+          __stcg(dst0 + d0 + mt * 16 + 8, oacc[mt][2]); __stcg(dst1 + d0 + mt * 16 + 8, oacc[mt][3]);
+        }
+        if (dh == 0 && lane == 0) { __stcg(dst0 + 128, mr0); __stcg(dst0 + 129, l0); __stcg(dst1 + 128, mr1); __stcg(dst1 + 129, l1); }
+      }
+    }
+    ra = na; qa = nqa; qb = nqb; if (kTail) tra = trb;
+  }
+  __syncthreads();                                              // all groups done (a group without items arrives here directly); attend ends with this barrier
+  unsigned gout = 0;                                            // every thread stores the same packed counters: group q's counter + its stage total of this call
+#pragma unroll
+  for (int q = 0; q < 8; ++q) {
+    int tot = 0;
+    for (int k = q; k < ni; k += 8) {
+      const int4 it = rec[2 * k];
+      const int ln = it.w - it.z;
+      tot += (ln - ((kTail && ln > 1 && ln % kStageRows == 1) ? 1 : 0) + kStageRows - 1) / kStageRows;
+    }
+    gout |= (((g >> (3 * q)) + (unsigned)tot) & 7u) << (3 * q);
+  }
+  g = gout;
 }
 #endif
 
@@ -1554,7 +1810,7 @@ __device__ __forceinline__ void ticket_merge(const Params& p, unsigned char* sme
 
 // All 512 threads. Runs the CTA's items one after another. ring_phase: bit 31 = mbarriers initialised, low bits = TMA stages consumed so far;
 // start every CTA with ring_phase = 0 and pass the same variable to every layer's call.
-// SKV_HALVES: stage counters of the groups (identical in every thread at return): G = 2: bits 0..14 / 16..30; G = 4: 7 bits each at bits 0, 8, 16, 24.
+// SKV_HALVES: stage counters of the groups (identical in every thread at return): G = 2: bits 0..14 / 16..30; G = 4: 7 bits each at bits 0, 8, 16, 24; G = 8: 3 bits each at bits 0, 3, .., 21.
 // smem: attend_smem_bytes() bytes, 128 B aligned, owned by attend during the call. Between calls the caller may use bytes [0, kBarOff)
 // (TMA ring + merge buffer; e.g. GEMM stages or the combine_head xs slot) but must keep the last kBarBytes bytes (the mbarriers) unchanged.
 // Ends with __syncthreads (CTAs with no items return early without it).
@@ -1591,7 +1847,9 @@ __device__ void attend(const Params& p, int layer, unsigned char* smem, unsigned
   const int ni = rec[1].w;                                      // n_items is stored in every record of the CTA
 #endif
   if (ni == 0) return;
-#if SKV_HALVES
+#if SKV_HALVES && SKV_GROUPS == 8
+  run_items_g8(p, layer, smem, g, rec, ni);
+#elif SKV_HALVES
   run_items_halves(p, layer, smem, g, rec, ni);
 #elif SKV_QMAX > 1
   run_items_r6(p, layer, smem, g, rec, ni);
