@@ -560,11 +560,11 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
         }
     }
     } else {
-    // MK_FIN 1: every thread issues all its loads (<= 4 items of 16 B x 2) before its stores (one L2 round trip per job instead of up to 4).
-    // MK_FIN 2: also split each job over nsub = nidle / NJOB idle CTAs by token rows (part p: tokens tt 128 + p pr ..); the last of the nsub CTAs that saw the
-    // target resets the ticket (and the seen counter tk[32 + (IS_O ? 0 : 16) + job]).
-    constexpr int NJOB = 8 * NTT, MI = (128 * 16 + NT - 1) / NT;
-    const int nsub = MK_FIN >= 2 ? max(1, nidle / NJOB) : 1, pr = (128 + nsub - 1) / nsub;
+    // MK_FIN 1: each job is split over nsub = nidle / NJOB idle CTAs by token rows (part p: tokens tt 128 + p pr ..); the last of the nsub CTAs that saw
+    // the target resets the ticket and the seen counter tk[32 + (IS_O ? 0 : 16) + job]. (Issuing all loads before the stores deadlocked at b128, job 9766
+    // and srun bisect 2026-10-23; not root-caused, not kept.)
+    constexpr int NJOB = 8 * NTT;
+    const int nsub = max(1, nidle / NJOB), pr = (128 + nsub - 1) / nsub;
     for (int w = rank; w < NJOB * nsub; w += nidle) {
         const int job = w % NJOB, part = w / NJOB, rb = job / NTT, tt = job % NTT;
         unsigned* tick = tk + (IS_O ? 0 : TK_D) + job;
@@ -583,24 +583,17 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
         __syncthreads();
         const int ntl = min(ntok - tt * 128, 128), p0 = part * pr, np = max(0, min(ntl - p0, pr)), items = np * 16;
         const bf16_t* lw = lnw + rb * 128;
-        float4 a[MI], b[MI];
-#pragma unroll
-        for (int m = 0; m < MI; ++m) {
-            const int i = m * NT + tid, t = tt * 128 + p0 + (i >> 4), cg = i & 15;
-            a[m] = make_float4(0.f, 0.f, 0.f, 0.f); b[m] = a[m];
-            if (i < items) {
-                const float* xp = x + (size_t)t * HID + rb * 128 + cg * 8;
-                a[m] = __ldcg(reinterpret_cast<const float4*>(xp)); b[m] = __ldcg(reinterpret_cast<const float4*>(xp + 4));
-            }
-        }
-#pragma unroll
-        for (int m = 0; m < MI; ++m) {
-            if (m * NT >= items) break;   // block-uniform (the shuffles below need all lanes)
-            const int i = m * NT + tid, t = tt * 128 + p0 + (i >> 4), cg = i & 15;
+        for (int i0 = 0; i0 < items; i0 += NT) {   // block-uniform trip count (the shuffles below need all lanes)
+            const int i = i0 + tid, t = tt * 128 + p0 + (i >> 4), cg = i & 15;
             const bool ok = i < items;
-            if (ok) *reinterpret_cast<uint4*>(out + (size_t)t * HID + rb * 128 + cg * 8) = pack_xw(a[m], b[m], __ldg(reinterpret_cast<const uint4*>(lw + cg * 8)));
+            float4 a = make_float4(0.f, 0.f, 0.f, 0.f), b = a;
+            if (ok) {
+                const float* xp = x + (size_t)t * HID + rb * 128 + cg * 8;
+                a = __ldcg(reinterpret_cast<const float4*>(xp)); b = __ldcg(reinterpret_cast<const float4*>(xp + 4));
+            }
+            if (ok) *reinterpret_cast<uint4*>(out + (size_t)t * HID + rb * 128 + cg * 8) = pack_xw(a, b, __ldg(reinterpret_cast<const uint4*>(lw + cg * 8)));
             if constexpr (SS) {
-                float sq = a[m].x * a[m].x + a[m].y * a[m].y + a[m].z * a[m].z + a[m].w * a[m].w + b[m].x * b[m].x + b[m].y * b[m].y + b[m].z * b[m].z + b[m].w * b[m].w;
+                float sq = a.x * a.x + a.y * a.y + a.z * a.z + a.w * a.w + b.x * b.x + b.y * b.y + b.z * b.z + b.w * b.w;
 #pragma unroll
                 for (int o = 8; o; o >>= 1) sq += __shfl_xor_sync(0xffffffffu, sq, o);
                 if (ok && cg == 0) atomicAdd(ss2 + t, sq);

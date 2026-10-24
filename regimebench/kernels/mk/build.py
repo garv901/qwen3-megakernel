@@ -35,7 +35,7 @@ TSB_MAPS = ("xb2", "wgu", "act")   # kernel maps 9, 10, 11 (MK_TSB): xb2 bf16 [M
 WS_ORDER = WORKSPACE_MAPS + TSB_MAPS
 TS_TT = 128   # TS token tile (mk_common.cuh TS_TT)
 TS_EXCH = 12288   # MK_TSB: GU exchange region after the ring (mk_common.cuh TS_EXCH)
-TK_SIZE = 64      # u32 tickets: O at [0, 16), D at [16, 32) (mk_step.cu TK_D)
+TK_SIZE = 64      # u32 tickets: O at [0, 16), D at [16, 32) (mk_step.cu TK_D); MK_FIN 1 seen counters at [32, 64)
 
 
 def ts_tt(npad: int, gu_tt: int = 0) -> dict:
