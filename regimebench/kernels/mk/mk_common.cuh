@@ -60,6 +60,9 @@
 #ifndef MK_TSB
 #define MK_TSB 1   // (default 1, job 9622) 1: GU and D on the tile stream + idle-CTA finalizers (SPEC-P5b); needs MK_TS on at the bucket (else no effect)
 #endif
+#ifndef MK_DBG_NOATT
+#define MK_DBG_NOATT 0   // debug (MK_SKV builds): 1 = attend is compiled in but skipped at run time (guard ntok < 0): separates its code-gen cost from its run-time cost; output is wrong
+#endif
 #ifndef MK_STG
 #define MK_STG 4   // staging chunks (16 B) in flight per thread
 #endif

@@ -744,7 +744,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
 
         // ---- Phase 3: attention (A1 interface; placeholder: one CTA per (token, q-head) item) -> ao ----
 #ifdef MK_SKV
-        if constexpr (!mk_null(2)) { MK_SKV_PARAMS(SP); skv::attend<NT>(SP, l, mk_opaque(sm + OFF_BARS - skv::kBarOff), ring_phase); }   // CTAs without items return early (no block barrier): bar_arrive below starts with __syncthreads
+        if constexpr (!mk_null(2)) if (!MK_DBG_NOATT || ntok < 0) { MK_SKV_PARAMS(SP); skv::attend<NT>(SP, l, mk_opaque(sm + OFF_BARS - skv::kBarOff), ring_phase); }   // CTAs without items return early (no block barrier): bar_arrive below starts with __syncthreads
         bar_arrive(bar_cnt);   // always arrive first (MK_PFA 0 order would race the TMA writes with other warps' last reads of attend's ring)
         prefetch_next<PhO>(g, l);   // attend is done with the ring bytes (all its reads precede the arrive's __syncthreads): O's first units land during the barrier
 #else
