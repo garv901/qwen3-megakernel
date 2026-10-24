@@ -61,7 +61,8 @@ class MkStep:
         dev = torch.device(device)
         self.attn = arm.resolve_attn(w)   # "placeholder" | "splitkv" (auto resolved per workload)
         self.qmax = B.skv_qmax_of([(s.kv_len, s.q_len) for s in w.seqs]) if self.attn == "splitkv" else 1   # R6 build (-DSKV_QMAX=16) iff some q_len > 1
-        ld = arm._kernel(self.npad, dev, self.attn, self.qmax)
+        tune = B.skv_tune(self.npad, self.qmax, [(s.kv_len, s.q_len) for s in w.seqs]) if self.attn == "splitkv" and arm.skvtune else ()
+        ld = arm._kernel(self.npad, dev, self.attn, self.qmax, tune)
         self.kern = ld
         self.nb = ld.nb
         self.desc = d = B.build_descriptors([(s.kv_len, s.q_len) for s in w.seqs], B.MAXTOK)
@@ -143,7 +144,7 @@ class MkStep:
         self.config: dict[str, Any] = {
             "kernel": B.KERNEL, "npad": self.npad, "graph": not direct, "proxy": False, "launches_per_step": 1,
             "grid": self.nb, "block": 512, "dyn_smem": ld.dyn_smem, "regs": ld.regs, "static_smem": ld.static_smem,
-            "local_bytes": ld.local_bytes, "ptxas": ld.ptxas, "attn": self.attn, "attn_option": arm.attn, "skv_engine": getattr(getattr(self, "plan", None), "engine_name", None), "knobs": {**B.DEFAULT_KNOBS, **arm.knobs},
+            "local_bytes": ld.local_bytes, "ptxas": ld.ptxas, "attn": self.attn, "attn_option": arm.attn, "skv_engine": getattr(getattr(self, "plan", None), "engine_name", None), "knobs": dict(ld.knobs),
             "source_sha256": B.source_sha256(self.attn),
         }
         self._graph = None
@@ -211,10 +212,11 @@ class MkStep:
 class MkArm:
     name = "mk"
 
-    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", **_: Any):
+    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, **_: Any):
         if attn not in ATTN_OPTIONS:
             raise ValueError(f"unknown attn {attn!r} (one of {ATTN_OPTIONS})")
         self.attn = attn
+        self.skvtune = int(skvtune)   # 1: per-bucket splitkv header knobs (B.skv_tune; job 9714)
         self.knobs = {"MK_STAMPS": int(stamps), "MK_NULL": int(null), "MK_KU": int(ku), "MK_RING": int(ring), "MK_TS": int(ts), "MK_TSB": int(tsb), "MK_LMTS": int(lmts)}
         self._loaded: dict[tuple, _Loaded] = {}
         self._wgu_cache: dict[tuple, Any] = {}
@@ -253,11 +255,12 @@ class MkArm:
             return B.auto_attn([(s.kv_len, s.q_len) for s in w.seqs]) if self.knobs["MK_KU"] == 128 else "placeholder"
         return self.attn
 
-    def _kernel(self, npad: int, device, attn: str | None = None, qmax: int = 1) -> _Loaded:
+    def _kernel(self, npad: int, device, attn: str | None = None, qmax: int = 1, tune: tuple = ()) -> _Loaded:
         attn = attn or self.attn
-        key = (npad, str(device), attn, qmax)
+        knobs = tuple(sorted({**dict(tune), **self.knobs}.items()))   # knobs set on the arm win over the per-bucket tune
+        key = (npad, str(device), attn, qmax, knobs)
         if key not in self._loaded:
-            self._loaded[key] = _Loaded(npad, tuple(sorted(self.knobs.items())), attn, device, qmax)
+            self._loaded[key] = _Loaded(npad, knobs, attn, device, qmax)
         return self._loaded[key]
 
     def prepare(self, w: Workload, inputs: dict, variant: str, device: str) -> MkStep:

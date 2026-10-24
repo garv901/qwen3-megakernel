@@ -279,6 +279,23 @@ SKV_AUTO_MIN_KV = 512   # job 9702: kv512 -67 us (b1)
 SKV_AUTO_MIN_SEQ = 16   # job 9702: kv128 b16 -1.3, b8 +81 us
 
 
+def skv_tune(npad: int, qmax: int, seqs) -> tuple:
+    """Per-bucket splitkv header knobs of a workload (MkArm skvtune=1), as sorted (name, value) pairs; knobs set on the arm win.
+    Job 9714 (v4, us/step vs the header default, 1 GPU x 7 rounds): at NPAD <= 32, q_len 1:
+    - one sequence with kv <= SKV_LDG_MAX_KV: LDG-only (SKV_FORCE_ENGINE 0): b1 kv1K -21.8, 2K -30.0, 4K -9.1, 8K -4.5, 16K -16.6 (kv32K +4.5);
+    - else SKV_MERGE_CHUNK 20 (one merge round at S = 19..20; 0 spill at NPAD 16 / 32 TMA-only only): b1 kv32K -1.9, R3-b8-kv4K -15.2, R3-b32-kv1K -6.7.
+    ``seqs``: iterable of (kv_len, q_len)."""
+    seqs = [(int(k), int(q)) for k, q in seqs]
+    if qmax != 1 or npad > 32 or not seqs:
+        return ()
+    if len(seqs) == 1 and seqs[0][0] <= SKV_LDG_MAX_KV:
+        return (("SKV_FORCE_ENGINE", 0),)
+    return (("SKV_MERGE_CHUNK", 20),)
+
+
+SKV_LDG_MAX_KV = 16384   # job 9714: LDG-only wins at b1 kv1K..16K, loses at 32K
+
+
 # ---- tensor maps (host; 2D bf16 SW128, box {64 k, 128 rows}, one per weight tensor, 128 B each in global memory) ----
 def map_specs(weights: dict) -> list[tuple[list[int], list[int], list[int]]]:
     """(dims, strides_bytes, box) per map in WEIGHT_MAPS order; dims = {K, layers * rows}. ``weights``: name -> tensor-like with .shape."""
