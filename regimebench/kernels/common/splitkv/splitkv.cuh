@@ -100,6 +100,16 @@
 #error "SKV_HALVES needs SKV_TMA_MMA 1, SKV_IFACE 1, SKV_QMAX 1, SKV_FORCE_ENGINE 1, SKV_TICKET 0, SKV_TMA_RELEASE 1, SKV_PROF_NOCOMP 0, SKV_ITEM_PREFETCH 1"
 #endif
 
+#ifndef SKV_GROUPS
+#define SKV_GROUPS 2        // (P11) number of independent consumer groups of SKV_HALVES mode: 2 (half CTAs, P10) or 4 (quarter CTAs)
+#endif
+#if SKV_GROUPS != 2 && SKV_GROUPS != 4
+#error "SKV_GROUPS must be 2 or 4"
+#endif
+#if SKV_GROUPS != 2 && !SKV_HALVES
+#error "SKV_GROUPS != 2 needs SKV_HALVES 1"
+#endif
+
 namespace skv {
 
 typedef unsigned short bf16;   // raw bf16 bits (hv2g does the same; no cuda_bf16 dependency)
@@ -129,10 +139,18 @@ static_assert(!kMmaOn || (kStageRows >= 32 && kMmaDW % 16 == 0 && (kMmaQs + 128)
 #if SKV_HALVES
 // P10 half-CTA geometry: half h = warps 8h .. 8h + 7 owns ring slots h * kHS .. h * kHS + kHS - 1. Warp lw = warp % 8: dim half dh = lw / 4 (kHDW = 64 dims = kHMt m-tiles), tile owner tw = lw % 4 takes
 // the stage's 16-position tiles tw, tw + 4, .. (kHTP of them). Merge slot (warp, hq) = O[64], m, l, pad (kHMS floats), indexed by the global warp; per-half new-row (tail park) state and q scratch.
-static_assert(kStages % 2 == 0 && kStageRows >= 64, "SKV_HALVES needs an even SKV_STAGES and SKV_STAGE_ROWS 64 / 128");
-constexpr int kHS = kStages / 2, kHDW = 64, kHMt = kHDW / 16, kHMS = kHDW + 4, kHTP = kMmaT / 4;
-constexpr int kHNew = 32 * kHMS, kHQs = kHNew + 2 * 132;      // float offsets in the merge buffer: 32 slots | 2 x tail park (v[128], m[2], pad) | 2 x q scratch (128 floats each)
-static_assert((kHQs + 2 * 128) * 4 <= kMrgBytes, "SKV_HALVES merge buffer budget");
+// P11: G = SKV_GROUPS groups (G = 2: the halves above; G = 4: quarters of 4 warps / 128 threads, items k = q, q + G, ..): group q = warp / kHW, kHW = 16 / G warps, kHT = 512 / G threads.
+// The warps of a group split into 2 dims halves of kHO = kHW / 2 tile owners each (tile owner tw takes the stage's tiles tw, tw + kHO, ..).
+constexpr int kG = SKV_GROUPS, kHW = 16 / kG, kHT = 512 / kG, kHO = kHW / 2;
+constexpr int kHTs = (kG == 2 ? 8 : 7), kHOs = (kG == 2 ? 2 : 1), kGs = (kG == 2 ? 1 : 2);   // log2(kHT), log2(kHO), log2(kG)
+static_assert(kStages % kG == 0 && kStages / kG >= 1, "SKV_HALVES needs SKV_STAGES % SKV_GROUPS == 0");
+static_assert(kG == 2 ? kStageRows >= 64 : kStageRows >= 32, "SKV_HALVES needs SKV_STAGE_ROWS 64 / 128 (SKV_GROUPS 2) or 32 / 64 / 128 (SKV_GROUPS 4)");
+constexpr int kHS = kStages / kG, kHDW = 64, kHMt = kHDW / 16, kHMS = kHDW + 4, kHTP = kMmaT / kHO;
+static_assert(kMmaT % kHO == 0 && kHTP >= 1, "SKV_HALVES tile owners must divide the stage's tiles");
+constexpr int kHNew = 32 * kHMS, kHQs = kHNew + kG * 132;     // float offsets in the merge buffer: 32 slots | G x tail park (v[128], m[2], pad) | G x q scratch (128 floats each)
+constexpr int kHFloats = kHQs + kG * 128;                      // merge buffer floats used (of kMrgBytes / 4 = 4224)
+static_assert(kHFloats * 4 <= kMrgBytes, "SKV_HALVES merge buffer budget");
+constexpr int kHShift = (kG == 2 ? 16 : 8), kHMask = (kG == 2 ? 0x7fff : 0x7f);   // ring_phase: counter of group q = (g >> (q * kHShift)) & kHMask
 #endif
 
 struct Params {                    // filled by the host planner (plan.py) + caller pointers; plain device pointers
@@ -956,6 +974,8 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
 
 #if SKV_HALVES
 // ------------------------------------------------------------------------------------------------ P10: half-CTA consumers (SKV_HALVES 1)
+// P11: the code is parameterised by G = SKV_GROUPS (2 = halves, as described here with 8 warps / 256 threads / 4 tile owners; 4 = quarters: 4 warps / 128 threads / 2 tile owners, merge in
+// 2 passes, bar.sync 1 + h, 128, ring_phase counters of 7 bits); `h` below is the group index and `half` means group.
 // Half h (threads 256 h .. 256 h + 255) runs the CTA's items k = h, h + 2, .. as an independent q_len 1 mma consumer: its own ring slots (h * kHS ..), producer thread (256 h), item prefetch,
 // q scratch, tail park slot, merge slots (indexed by the global warp) and named barrier (bar.sync 1 + h, 256). While one half runs its serial chain (merge, store, q staging) the other
 // half computes or waits for its loads. Stage counters: gh0 / gh1 in g bits 0..14 / 16..30; the stage of counter c of half h uses slot h * kHS + c % kHS, parity (c / kHS) & 1.
@@ -968,11 +988,11 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
 //     follows every warp's last read of it (stage loop of item k) in program order, so no read of item k sees item k + 1's bytes.
 //   merge slots (warp, hq): written by their warp before the first bar.sync, read by the half's merge threads between the two barriers, rewritten only after the second one.
 //   The two halves touch disjoint ring slots, park slots, q scratch and merge slots; the ring-slot empty barriers (count 8) are arrived on by the 8 warps of the owning half only.
-__device__ __forceinline__ void bar_sync256(int id) { asm volatile("bar.sync %0, 256;" ::"r"(id) : "memory"); }
+__device__ __forceinline__ void bar_sync_grp(int id) { asm volatile("bar.sync %0, %1;" ::"r"(id), "n"(kHT) : "memory"); }
 
 __device__ __forceinline__ void run_items_halves(const Params& p, int layer, unsigned char* smem, unsigned& g, const int4* rec, int ni) {
   const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, l16 = lane & 15;
-  const int h = tid >> 8, t = tid & 255, lw = warp & 7, dh = lw >> 2, tw = lw & 3;
+  const int h = tid >> kHTs, t = tid & (kHT - 1), lw = warp & (kHW - 1), dh = lw >> kHOs, tw = lw & (kHO - 1);   // h = group index
   const unsigned sbase = smaddr(smem);
   const unsigned bar0 = sbase + kBarOff;
   float* mrg = reinterpret_cast<float*>(smem + kMrgOff);
@@ -981,17 +1001,20 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
   constexpr bool kTail = (SKV_TAIL_LDG != 0);
 
   // ---- both halves' stage totals of this call (a pure function of the records; every thread computes them, so every thread stores the same packed counters at the end)
-  int tot0 = 0, tot1 = 0;
+  int tot0 = 0, tot1 = 0, tot2 = 0, tot3 = 0;                  // stage totals of groups 0..G-1 (tot2 / tot3 only for G = 4; dead code for G = 2)
   for (int k = 0; k < ni; ++k) {
     const int4 it = rec[2 * k];
     const int ln = it.w - it.z;
     const int ns = (ln - ((kTail && ln > 1 && ln % kStageRows == 1) ? 1 : 0) + kStageRows - 1) / kStageRows;
-    if (k & 1) tot1 += ns; else tot0 += ns;
+    if (kG == 2) { if (k & 1) tot1 += ns; else tot0 += ns; }
+    else { const int kq = k & 3; if (kq == 0) tot0 += ns; else if (kq == 1) tot1 += ns; else if (kq == 2) tot2 += ns; else tot3 += ns; }
   }
-  const unsigned g0c = g & 0x7fffu, g1c = (g >> 16) & 0x7fffu;
-  const int nih = (ni - h + 1) >> 1;                           // items of this half: k = h, h + 2, ..
-  const int4* rh = rec + 2 * h;                                // item kk of the half: records rh[4 kk], rh[4 kk + 1]
-  const int gh0 = (int)(h ? g1c : g0c);                        // this half's stage counter at entry
+
+  const int nih = (ni - h + kG - 1) >> kGs;                     // items of this group: k = h, h + G, ..
+  const int4* rh = rec + 2 * h;                                // item kk of the group: records rh[2 G kk], rh[2 G kk + 1]
+  const unsigned g0c = g & kHMask, g1c = (g >> kHShift) & kHMask;
+  const unsigned g2c = (g >> (2 * kHShift)) & kHMask, g3c = (g >> (3 * kHShift)) & kHMask;   // (g2c / g3c only for G = 4)
+  const int gh0 = (int)(kG == 2 ? (h ? g1c : g0c) : (h == 0 ? g0c : h == 1 ? g1c : h == 2 ? g2c : g3c));   // this group's stage counter at entry
 
   // ---- TMA producer (thread 256 h): the half's stage sequence into its own slots
   int pk = -1, pp = 0, pend = 0, pkvh = 0;
@@ -1002,7 +1025,7 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
       if (pk + 1 >= nih) return;
       ++pk;
       const int4 it = pnxt;
-      pnxt = (pk + 1 < nih) ? rh[4 * (pk + 1)] : zero4;
+      pnxt = (pk + 1 < nih) ? rh[2 * kG * (pk + 1)] : zero4;
       pp = it.z; pend = it.w; pkvh = it.y & 15; prow = layer_row + (size_t)it.x;
       if (kTail && it.w - it.z > 1 && (it.w - it.z) % kStageRows == 1) --pend;   // P9d tail rule (as the consumer)
     }
@@ -1058,7 +1081,7 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
     int4 na = zero4;
     int ntok = 0;
     uint4 nqa = make_uint4(0, 0, 0, 0), nqb = nqa;
-    if (k + 1 < nih) { na = rh[4 * (k + 1)]; ntok = rh[4 * (k + 1) + 1].z; }
+    if (k + 1 < nih) { na = rh[2 * kG * (k + 1)]; ntok = rh[2 * kG * (k + 1) + 1].z; }
     if (tail && lw == 0) {
       float qr0[8], qr1[8], kf[8], vf[8];
       unpack8(qa, qr0); unpack8(qb, qr1);
@@ -1102,8 +1125,8 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
       const unsigned j32 = mma_j32(lane);
       unsigned kdep = 0;
 #pragma unroll 1
-      for (int ti = 0; ti < kHTP; ++ti) {                      // tiles tw, tw + 4, ..: the per-stage code of run_items, one tile after another
-        const int tb = (tw + 4 * ti) * 16;
+      for (int ti = 0; ti < kHTP; ++ti) {                      // tiles tw, tw + kHO, ..: the per-stage code of run_items, one tile after another
+        const int tb = (tw + kHO * ti) * 16;
         const unsigned kb = sb + mma_k_base(lane, tb), vb = sb + mma_v_base(lane, tb);
         const bool live = tb < n, partial = tb + 16 > n;
         unsigned pb0 = 0, pb1 = 0;
@@ -1165,7 +1188,7 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
       __syncwarp();
     }
     if (k + 1 < nih) { load_q(na, ntok, nqa, nqb); if (kTail) load_tail(na, trb); }
-    const int4 rb = rh[4 * k + 1];
+    const int4 rb = rh[2 * kG * k + 1];
     {
       float l0 = lp0, l1 = lp1;
 #pragma unroll
@@ -1180,18 +1203,19 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
       }
       if (lane == 0) { ws[kHDW] = mr0; ws[kHDW + 1] = l0; ws[kHMS + kHDW] = mr1; ws[kHMS + kHDW + 1] = l1; }
     }
-    bar_sync256(1 + h);
-    {
-      const int hq = t >> 7, d = t & 127, dd = d >> 6;       // dims d are owned by the 4 warps 8 h + 4 dd + t' (disjoint position tiles)
-      const float* b = mrg + ((8 * h + 4 * dd) * 2 + hq) * kHMS;
+    bar_sync_grp(1 + h);
+#pragma unroll
+    for (int ps = 0; ps < 256 / kHT; ++ps) {                    // 256 / kHT passes of (hq, d) = (idx >> 7, idx & 127), idx = t + ps kHT
+      const int idx = t + ps * kHT, hq = idx >> 7, d = idx & 127, dd = d >> 6;   // dims d are owned by the kHO warps kHW h + kHO dd + t' (disjoint position tiles)
+      const float* b = mrg + ((kHW * h + kHO * dd) * 2 + hq) * kHMS;
       float M = neg_inf();
       if (tail) M = nbp[128 + hq];
 #pragma unroll
-      for (int tt = 0; tt < 4; ++tt) M = fmaxf(M, b[tt * 2 * kHMS + kHDW]);
+      for (int tt = 0; tt < kHO; ++tt) M = fmaxf(M, b[tt * 2 * kHMS + kHDW]);
       const float Mc = M == neg_inf() ? 0.f : M;
       float L = 0.f, O = 0.f;
 #pragma unroll
-      for (int tt = 0; tt < 4; ++tt) {
+      for (int tt = 0; tt < kHO; ++tt) {
         const float a = ex2(b[tt * 2 * kHMS + kHDW] - Mc);
         L = fmaf(a, b[tt * 2 * kHMS + kHDW + 1], L);
         O = fmaf(a, b[tt * 2 * kHMS + (d - dd * kHDW)], O);
@@ -1205,11 +1229,12 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
         if (d == 0) { __stcg(dst + 128, M); __stcg(dst + 129, L); }
       }
     }
-    bar_sync256(1 + h);                                         // merge slots / park slot free for the half's next item
+    bar_sync_grp(1 + h);                                        // merge slots / park slot free for the group's next item
     ra = na; qa = nqa; qb = nqb; if (kTail) tra = trb;
   }
   __syncthreads();                                              // both halves done (a half without items arrives here directly); attend ends with this barrier
-  g = (((g1c + (unsigned)tot1) & 0x7fffu) << 16) | ((g0c + (unsigned)tot0) & 0x7fffu);
+  g = (((g1c + (unsigned)tot1) & kHMask) << kHShift) | ((g0c + (unsigned)tot0) & kHMask);
+  if (kG == 4) g |= (((g2c + (unsigned)tot2) & kHMask) << (2 * kHShift)) | (((g3c + (unsigned)tot3) & kHMask) << (3 * kHShift));
 }
 #endif
 
@@ -1529,7 +1554,7 @@ __device__ __forceinline__ void ticket_merge(const Params& p, unsigned char* sme
 
 // All 512 threads. Runs the CTA's items one after another. ring_phase: bit 31 = mbarriers initialised, low bits = TMA stages consumed so far;
 // start every CTA with ring_phase = 0 and pass the same variable to every layer's call.
-// SKV_HALVES: bits 0..14 = stage counter of half 0, bits 16..30 = of half 1 (identical in every thread at return).
+// SKV_HALVES: stage counters of the groups (identical in every thread at return): G = 2: bits 0..14 / 16..30; G = 4: 7 bits each at bits 0, 8, 16, 24.
 // smem: attend_smem_bytes() bytes, 128 B aligned, owned by attend during the call. Between calls the caller may use bytes [0, kBarOff)
 // (TMA ring + merge buffer; e.g. GEMM stages or the combine_head xs slot) but must keep the last kBarBytes bytes (the mbarriers) unchanged.
 // Ends with __syncthreads (CTAs with no items return early without it).
@@ -1549,7 +1574,7 @@ __device__ void attend(const Params& p, int layer, unsigned char* smem, unsigned
   if (tma && !(ring_phase >> 31)) {
     if (tid == 0) {
 #if SKV_HALVES
-      for (int s = 0; s < kStages; ++s) { mb_init(bar0 + 8 * s, 1); mb_init(bar0 + 8 * (kStages + s), 8); }   // P10: one arrive per warp of the owning half
+      for (int s = 0; s < kStages; ++s) { mb_init(bar0 + 8 * s, 1); mb_init(bar0 + 8 * (kStages + s), kHW); }   // P10: one arrive per warp of the owning group (kHW = 16 / SKV_GROUPS)
 #else
       for (int s = 0; s < kStages; ++s) { mb_init(bar0 + 8 * s, 1); mb_init(bar0 + 8 * (kStages + s), 16); }
 #endif

@@ -37,3 +37,4 @@ Budget: 20 GPU-h for the whole effort. Tags: [M] measured, [H] hypothesis.
   `CUDA_CACHE_DISABLE=1`.
 | P10 | SKV_HALVES (2 independent half-CTA consumers), 64x4 | b256kv128 43.12 -> 34.23 (h128 33.86), b128 22.74 -> 20.00, b64 13.86 -> 11.67, b32kv1024 28.15 -> 26.05, b64kv4096 177.3 -> 169.8; b1kv32768 +6.5 (1-item CTAs); check 33/33 [M] | 9770 | keep opt-in; mk A/B NPAD >= 32 |
 | P10a | attention vs active SMs | b128-b256 time ~ 1/SMs even without arithmetic (per-SM item rate bound); nano-batch split parked (MK-core 9765 GEMM data) [M] | 9764 | analysis |
+| P11 | SKV_GROUPS=4, 32x8 (g4a) vs G 2 64x4 | b256kv128 34.05 -> 32.10, b128 19.97 -> 17.75, b64 11.64 -> 10.50, b64kv4096 -3.3; b32kv1024 +10.9, b256kv255 +2.1, b16 +1.6; check 33/33 [M] | 9774 | keep opt-in; mk A/B NPAD >= 64 |

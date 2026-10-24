@@ -48,8 +48,8 @@ static_assert(VOCAB % 128 == 0, "LM row blocks");
 static_assert(NW == skv::kBlock / 32, "attention header assumes 16 warps");
 static_assert(!TS || TSB, "MK_ATTN=splitkv with MK_TS on needs MK_TSB 1: the P5a-only layout (TS, TSB 0) hangs at NPAD 256 in mk barriers (job 9662, A1 debug waits silent; open, see LEDGER)");
 static_assert(MK_KU == 128, "MK_ATTN=splitkv: the O phase stages one head per 128-k unit (combine_head); MK_KU 64 stays on the placeholder");
-static_assert(SKV_TAIL == 64 && (OFF_BARS % 1024) == 512 && (OFF_BARS - (int)skv::kBarOff) >= 0 && ((OFF_BARS - (int)skv::kBarOff) % 1024) == 0,
-              "splitkv scratch: mbarrier tail at [OFF_BARS, OFF_BARS + 64), scratch base 1024 B aligned");
+static_assert(SKV_TAIL % 64 == 0 && (OFF_BARS % 1024) == 512 && (OFF_BARS - (int)skv::kBarOff) >= 0 && ((OFF_BARS - (int)skv::kBarOff) % 1024) == 0,
+              "splitkv scratch: mbarrier tail at [OFF_BARS, OFF_BARS + kBarBytes) (64 B, 128 B at 8 stages), scratch base 1024 B aligned");
 static_assert(OFF_X + XREG <= OFF_BARS && LM_BYTES <= OFF_BARS && TS_BYTES <= OFF_BARS, "all overlays (GEMM ring, B tiles, LM ring, TS ring + exchange) stay below OFF_BARS");
 static_assert(OFF_BARS - (int)skv::kBarOff + ATTN_BYTES == OFF_MB, "scratch end == start of mk's barrier block");
 static_assert(QDIM / KU == NQH && PhO::NRB * (PhO::K / KU) == 128, "O units: u = rb * 16 + kc, kc = q-head");

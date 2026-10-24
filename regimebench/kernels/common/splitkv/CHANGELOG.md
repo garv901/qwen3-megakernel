@@ -106,3 +106,13 @@
 - SKV_HALVES checked at 11 points x 3 builds (33/33). Best variant: `SKV_HALVES=1,SKV_TAIL_LDG=1,SKV_STAGE_ROWS=64,SKV_STAGES=4` (2 x 64-row slots per half):
   b256kv128 43.12 -> 34.23, b128kv128 22.74 -> 20.00, b64kv128 13.86 -> 11.67, b32kv1024 28.15 -> 26.05 us/layer vs `SKV_TAIL_LDG=1`. Slower for 1-item CTAs
   (b1kv32768 +6.5). Default unchanged (opt-in); suggested for mk buckets NPAD >= 32 pending the in-mk A/B.
+
+- P11 (opt-in, `-DSKV_GROUPS=4` with `-DSKV_HALVES=1`; `SKV_GROUPS` default 2 = the P10 halves, same code): G independent consumer groups. Group q = warps 16/G*q .., 512/G
+  threads, items k = q, q + G, .., ring slots q * SKV_STAGES / G .., own producer thread, q scratch, tail park slot, merge (G = 4: 2 passes of 128 threads) and named barrier
+  (`bar.sync 1 + q, 512 / G`); empty mbarriers count 16 / G; `ring_phase` counters 15 bits at 0 / 16 (G = 2) or 7 bits at 0 / 8 / 16 / 24 (G = 4). G = 4 accepts 32-row stages
+  (32 x 8 or 64 x 4). `#error` for SKV_GROUPS not 2 / 4 or != 2 without SKV_HALVES; static_assert SKV_STAGES % G == 0. Default build and G = 2 unchanged (same ptxas regs / SASS structure).
+  GPU numbers: job `slurm/mk_attn_p11.sbatch`.
+
+## splitkv-v9 (P11 result, job 9774)
+- `SKV_HALVES=1,SKV_GROUPS=4,SKV_TAIL_LDG=1,SKV_STAGE_ROWS=32,SKV_STAGES=8` (g4a): b256kv128 34.05 -> 32.10, b128kv128 19.97 -> 17.75, b64kv128 11.64 -> 10.50 us/layer vs
+  the v8 h64 build. Slower with <= 2 items per CTA (b32kv1024 +10.9, b16kv128 +1.6) and at b256kv255 (+2.1). attend smem 148,096 B (8 stages: kBarBytes 128).

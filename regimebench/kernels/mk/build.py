@@ -101,12 +101,17 @@ def strip_knobs(src: str) -> str:
 
 # splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8), item prefetch (P9), merge chunk (P4), KV evict_first + 1-row tail by LDG (v5),
 # half-CTA consumers + stage geometry (splitkv-v8 P10)
-SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS")
+SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS", "SKV_GROUPS")
 
 
 def skv_stage_units(knobs: dict) -> int:
     """KV ring size of a q_len 1 build in 128-row stage units (skv_off_bars ``skv_stages``): SKV_STAGES x SKV_STAGE_ROWS / 128 (h64: 4 x 64 rows = 2)."""
     return int(knobs.get("SKV_STAGES", 2)) * int(knobs.get("SKV_STAGE_ROWS", 128)) // 128
+
+
+def skv_bar_bytes(knobs: dict) -> int:
+    """skv::kBarBytes of a build: max(64, 16 x SKV_STAGES) (splitkv-v9: 128 at the g4a 8-stage ring); the header defaults (2 / 4 stages) give 64."""
+    return max(SKV_BAR_BYTES, 16 * int(knobs.get("SKV_STAGES", 2)))
 
 
 def skv_knob_defines(knobs: dict) -> list[str]:
@@ -164,7 +169,7 @@ def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placehold
     return lay
 
 
-def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, attn: str = "placeholder", skv_stages: int = 2, gu_tt: int = 0) -> int:
+def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, attn: str = "placeholder", skv_stages: int = 2, gu_tt: int = 0, skv_bar: int = SKV_BAR_BYTES) -> int:
     """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM; the kernel traps if the launch gives less).
     lmp: MK_LMP (the pipelined LM head only applies at npad <= 64: smem = [8 X chunks][lmr x 32 KB ring], 384 B of barriers).
     attn = "splitkv" (SPEC-P2): OFF_BARS = skv_off_bars(..) (>= skv::kBarOff, = 512 mod 1024), A1's 64 B mbarrier tail at [OFF_BARS, +64), mk's barrier block (384 / 256 B) behind it."""
@@ -172,7 +177,7 @@ def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SME
         if ku != 128:
             raise ValueError("MK_ATTN=splitkv needs MK_KU 128")
         tail = 384 if ((lmp and npad <= 64) or (ts and npad >= ts_min(ts))) else 256
-        return 1024 + skv_off_bars(npad, ku, ring, attn, lmp, lmr, ts, tsb, skv_stages, gu_tt) + SKV_BAR_BYTES + tail
+        return 1024 + skv_off_bars(npad, ku, ring, attn, lmp, lmr, ts, tsb, skv_stages, gu_tt) + skv_bar + tail
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     off_bars = ring * ub + max(2 * xs, attn_bytes)
@@ -197,7 +202,7 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     if stripped:
         src = strip_knobs(src)
     k = {**DEFAULT_KNOBS, **dict(knobs)}
-    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn, skv_stages=skv_stage_units(k), gu_tt=k["MK_GU_TT"]) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
+    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn, skv_stages=skv_stage_units(k), gu_tt=k["MK_GU_TT"], skv_bar=skv_bar_bytes(k)) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
     defs = [f"NPAD={npad}", f"NB={nb}", f"MK_EXPECT_DYN={exp}", *knob_defines(dict(knobs))]
     defs += os.environ.get("MK_EXTRA_DEFINES", "").split()   # debug only (e.g. SKV_DEBUG_WAIT=1); not part of the knob set
     if attn == "splitkv":
