@@ -376,6 +376,20 @@ __device__ __forceinline__ void ts_fill_a(const GS& g, int l, int t0, int j, int
     mbar_expect_tx(bar, UB);
     mk_tma_unit(g.base + s * C::SLOT, g.maps + m * 128, kc, row, bar);
 }
+// tid 0 (MK_L2PF): L2 prefetch of the A boxes of every step of this CTA's tiles of the phase (the boxes ts_fill_a will load), no smem / mbarrier
+template <class PH, int TT, int KS>
+__device__ __forceinline__ void ts_l2pf_a(const GS& g, int l) {
+    using C = TsC<PH, TT, KS>;
+    const TsGeom ge = ts_geom<PH, TT, KS>();
+    for (int j = 0; j < ge.nst; ++j) {
+        const int t = ge.t0 + j / C::SPT, kc = (t % KS) * C::KSL + (j % C::SPT) * 128, rb = (t / KS) / C::NTT;
+        int m, row;
+        PH::src(l, rb, m, row);
+#pragma unroll
+        for (int a = 0; a < NBOX; ++a)
+            asm volatile("cp.async.bulk.prefetch.tensor.2d.L2.global.tile [%0, {%1, %2}];" :: "l"(g.maps + m * 128), "r"(kc + a * 64), "r"(row) : "memory");
+    }
+}
 // tid 0: B boxes of step j (map BM = 8 xb | 9 xb2 | 11 act, k kc.., tokens TT tt..) into ring slot s (full[s] arrival 2); only after the grid barrier + fence.proxy.async.global
 template <class PH, int TT, int KS, int BM>
 __device__ __forceinline__ void ts_fill_b(const GS& g, int t0, int j, int s) {
@@ -887,6 +901,8 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
 
         // ---- Phase 3: attention (A1 interface; placeholder: one CTA per (token, q-head) item) -> ao ----
 #ifdef MK_SKV
+        if constexpr (TSB && (MK_L2PF & 1)) if (tid == 0) ts_l2pf_a<PhGu, GU_TT, GU_KS>(g, l);   // MK_L2PF: GU / D weights into L2 while attend streams the KV
+        if constexpr (TSB && (MK_L2PF & 2)) if (tid == 0) ts_l2pf_a<PhD, D_TT, D_KS>(g, l);
         if constexpr (!mk_null(2)) if (!MK_DBG_NOATT || ntok < 0) { MK_SKV_PARAMS(SP); skv::attend<NT>(SP, l, mk_opaque(sm + OFF_BARS - skv::kBarOff), ring_phase); }   // CTAs without items return early (no block barrier): bar_arrive below starts with __syncthreads
         bar_arrive(bar_cnt);   // always arrive first (MK_PFA 0 order would race the TMA writes with other warps' last reads of attend's ring)
         prefetch_next<PhO>(g, l);   // attend is done with the ring bytes (all its reads precede the arrive's __syncthreads): O's first units land during the barrier
