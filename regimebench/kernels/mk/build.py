@@ -287,17 +287,26 @@ def skv_tune(npad: int, qmax: int, seqs) -> tuple:
     Job 9725 (v5, vs the above): TMA builds add SKV_TAIL_LDG 1 (1-row item tail by LDG) + SKV_KV_EVICT_FIRST 1 (KV loads L2 evict_first: the GEMM
     phases after attend recover most of their run-time loss): b64 -61.7, b128 -216.3, b256 -424.0, R3-b32-kv1K -32.7 (on chunk 20); EF on the
     LDG-only b1 build: kv1K +1.7, kv16K +14.7 (not used there).
+    Job 9748 (vs chunk 20 + TAIL + EF at NPAD 16): TAIL never helps at NPAD 16 (b16-kv128 +10.5, R3-b8-kv1K +20.9, b1 kv32K +11.2, R3-b8-kv4K +17.4);
+    EF helps at long kv (b1 kv32K -51, R3-b8-kv4K -35) and hurts at short kv (b16-kv128 +4.2, R3-b8-kv1K +7.6); NPAD 32 keeps both (b32-kv128 +31.8 / +42.1
+    without); R6 build: EF q4 +10.8, q16 +4.7 -> EF 0 (splitkv-v6: SKV_KV_EVICT_FIRST default 1 = TMA KV loads, so the off buckets set 0 explicitly).
     ``seqs``: iterable of (kv_len, q_len)."""
     seqs = [(int(k), int(q)) for k, q in seqs]
-    if qmax != 1 or not seqs:
+    if not seqs:
         return ()
+    if qmax != 1:
+        return (("SKV_KV_EVICT_FIRST", 0),)
     if npad > 32:
         return (("SKV_KV_EVICT_FIRST", 1), ("SKV_TAIL_LDG", 1))
-    if len(seqs) == 1 and seqs[0][0] <= SKV_LDG_MAX_KV:
+    if npad > 16:
+        return (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1))
+    kv = max(k for k, _ in seqs)
+    if len(seqs) == 1 and kv <= SKV_LDG_MAX_KV:
         return (("SKV_FORCE_ENGINE", 0),)
-    return (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1))
+    return (("SKV_KV_EVICT_FIRST", int(kv >= SKV_EF_MIN_KV)), ("SKV_MERGE_CHUNK", 20))
 
 
+SKV_EF_MIN_KV = 4096   # job 9748, NPAD 16 TMA builds: EF wins at kv 4K / 32K, loses at kv128 / 1K
 SKV_LDG_MAX_KV = 16384   # job 9714: LDG-only wins at b1 kv1K..16K, loses at 32K
 
 

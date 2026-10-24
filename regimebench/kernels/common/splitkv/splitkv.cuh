@@ -80,8 +80,9 @@
 #endif
 
 #ifndef SKV_KV_EVICT_FIRST
-#define SKV_KV_EVICT_FIRST 0 // (default 0, opt-in for MK-core's A/B) 1 = every KV load (TMA boxes of both consumers, LDG engine) carries an L2 evict_first cache policy:
-#endif                       // KV is read once per step, so it should not displace the caller's weights / activations in L2
+#define SKV_KV_EVICT_FIRST 1 // (default 1 since MK-core job 9725: in mk b128 -106, b256 -145 us/step, the GEMM phases recover; standalone neutral, job 9720)
+#endif                       // L2 evict_first cache policy on KV loads: KV is read once per step, so it should not displace the caller's weights / activations
+                             // in L2. 0 = none, 1 = TMA boxes only (both consumers), 2 = TMA + LDG engine (LDG-only b1 builds lose in mk: kv16K +14.7)
 #ifndef SKV_TAIL_LDG
 #define SKV_TAIL_LDG 0      // (default 0, opt-in; P9d) 1 = q_len 1 TMA mma path: an item whose length is == 1 (mod kStageRows) (and > 1) streams only its first len - 1 positions by TMA
 #endif                      // (whole stages); the last position is read by LDG (warp 0) and merged as a parked single-position state, as the iface 2 new row
@@ -157,7 +158,7 @@ __device__ __forceinline__ unsigned long long kv_policy() {   // SKV_KV_EVICT_FI
 }
 __device__ __forceinline__ uint4 ldg_nc(const void* p) {   // KV stream load; SKV_KV_NC 1: non-coherent (LDG...CONSTANT), 0: coherent weak load
   uint4 v;
-#if SKV_KV_EVICT_FIRST
+#if SKV_KV_EVICT_FIRST >= 2
   const unsigned long long pol = kv_policy();
 #if SKV_KV_NC
   asm volatile("ld.global.nc.L1::no_allocate.L2::cache_hint.v4.u32 {%0,%1,%2,%3}, [%4], %5;" : "=r"(v.x), "=r"(v.y), "=r"(v.z), "=r"(v.w) : "l"(p), "l"(pol));

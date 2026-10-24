@@ -87,3 +87,7 @@
 - `SKV_KV_EVICT_FIRST` (opt-in, default 0): every KV load (TMA `cp.async.bulk.tensor` and LDG `ld.global`) carries an L2 evict_first
   cache hint (`createpolicy.fractional.L2::evict_first`, fraction 1.0). Purpose: KV bytes do not push mk's weights out of L2. Standalone
   (job 9720) neutral within +-0.4 us/layer; the test that matters is in mk (MK-core).
+- 2026-10-23 (tag splitkv-v6, MK-core job 9725): `SKV_KV_EVICT_FIRST` default 0 -> 1, and its values change: 1 = evict_first on the TMA
+  KV boxes only, 2 = TMA + LDG engine loads (the old 1). In mk the TMA KV stream evicted mk's weights from L2: with EF, b128 QKV / O / GU / D
+  5.06 / 5.61 / 9.71 / 4.83 -> 4.26 / 4.81 / 8.64 / 4.10 us/layer; us/step b64 -15, b128 -106, b256 -145, R3-b32-kv1K -18 (TAIL + EF: -62 /
+  -216 / -424 / -33). On the LDG-only b1 build EF loses (kv16K +14.7), hence LDG loads stay without the hint by default.
