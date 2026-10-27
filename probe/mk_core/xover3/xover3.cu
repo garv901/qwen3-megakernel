@@ -292,7 +292,7 @@ int main(int argc, char** argv) {
   const int regs = fa.numRegs, spill = (int)fa.localSizeBytes;
   CK(cudaFuncSetAttribute(k_ts, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM_MAX));
   struct Sh { const char* name; int N, K; } shapes[4] = {{"QKV", 4096, 1024}, {"O", 1024, 2048}, {"GU", 6144, 1024}, {"D", 1024, 3072}};
-  const int Ts[4] = {32, 64, 128, 256}, TTs[4] = {32, 64, 128, 256}, KSs[9] = {1, 2, 3, 4, 6, 8, 12, 16, 24};
+  const int Ts[5] = {16, 32, 64, 128, 256}, TTs[5] = {16, 32, 64, 128, 256}, KSs[9] = {1, 2, 3, 4, 6, 8, 12, 16, 24};
   for (auto& sh : shapes) {
     if (strcmp(shsel, "all") && strcmp(shsel, sh.name)) continue;
     const int N = sh.N, K = sh.K, NRB = N / 128;
@@ -336,7 +336,7 @@ int main(int argc, char** argv) {
             CK(cudaLaunchKernelEx(&lc, k_ts, mW, mX, Y, N, K, T, TT, KS, np, p0, rowsAvail, ring, cnt, tm, Xf, rs, SB));
           };
           int pass = -1;
-          if (T == 64 || T == 256) {
+          if (T == 16 || T == 64 || T == 256) {
             CK(cudaMemset(Y, KS == 1 ? 0xFF : 0, (size_t)T * N * 4)); CK(cudaMemset(ver, 0, 64));   // KS == 1 writes every element: NaN fill catches misses
             launch(1, 0); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
             k_ref<<<((size_t)T * N + 255) / 256, 256>>>(pool, SB ? Xs : X, Y, N, K, T, 0, ver, ver + 1); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());

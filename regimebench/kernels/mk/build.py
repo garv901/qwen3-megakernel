@@ -33,14 +33,15 @@ WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map
 WORKSPACE_MAPS = ("xb",)   # kernel map 8 (MK_TS): bf16 [MAXTOK_MK][H] workspace of the tile-stream QKV (B tiles by TMA)
 TSB_MAPS = ("xb2", "wgu", "act")   # kernel maps 9, 10, 11 (MK_TSB): xb2 bf16 [MAXTOK][H] (B of GU), wgu bf16 [NL * 6144][H] (A of GU), act bf16 [MAXTOK][INTER] (B of D)
 WS_ORDER = WORKSPACE_MAPS + TSB_MAPS
-TS_TT = 128   # TS token tile (mk_common.cuh TS_TT)
+TS_TT = 128   # TS token tile at NPAD >= 128 (mk_common.cuh TS_TT = min(NPAD, 128))
 TS_EXCH = 12288   # MK_TSB: GU exchange region after the ring (mk_common.cuh TS_EXCH)
 TK_SIZE = 192     # u32 tickets: O at [0, 16), D at [16, 32) (mk_step.cu TK_D); MK_FIN seen counters at [32, 64); MK_QR QKV tickets [64, 128), rope seen [128, 192)
 
 
 def ts_tt(npad: int, gu_tt: int = 0) -> dict:
     """Token tile TT per tile-stream phase (mk_common.cuh TS_TT, GU_TT, D_TT): the box rows of the B maps xb, xb2, act. gu_tt: MK_GU_TT (0 = per-bucket default)."""
-    return {"qkv": TS_TT, "gu": gu_tt or (96 if npad == 256 else 48), "d": 128}
+    tt = min(npad, TS_TT)
+    return {"qkv": tt, "gu": gu_tt or {256: 96, 128: 48}.get(npad, npad), "d": tt}
 
 
 def ts_ks(npad: int) -> dict:
@@ -136,32 +137,40 @@ def lm_ring(npad: int, lmr: int) -> int:
     return lmr if lmr else {16: 4, 32: 3}.get(npad, 2)
 
 
+STAMP_SMEM = 8 * (2 * (1 + 6 * 28) + 8)   # MK_STAMPS: static smem of mk_sk_s (MK_NSTAMP u64)
+
+
 def ts_min(ts: int) -> int:
     """Smallest NPAD on the tile stream for MK_TS (mk_common.cuh TS_MIN): 0 = off, 1 = 128, else the value."""
     return 128 if ts == 1 else ts
 
 
-def ts_ring(ts: int = 1, tt: int = TS_TT, tsb: int = 0) -> int:
+def ts_ring(ts: int = 1, tt: int = TS_TT, tsb: int = 0, stamps: int = 0) -> int:
     """Tile-stream ring depth (mk_common.cuh ts_ringn; TS_R for the QKV phase): slots of 32 KB A + tt x 256 B B that fit the 227 KB budget
-    (static 11280, align 1024, barriers 384, + the GU exchange region with tsb)."""
+    (static 11280 + STAMP_SMEM with MK_STAMPS, align 1024, barriers 384, + the GU exchange region with tsb)."""
     if not ts:
         return 1
-    return min(8, (227 * 1024 - 11280 - 1024 - 384 - (TS_EXCH if tsb else 0)) // (32768 + tt * 256))
+    return min(8, (227 * 1024 - 11280 - (STAMP_SMEM if stamps else 0) - 1024 - 384 - (TS_EXCH if tsb else 0)) // (32768 + tt * 256))
 
 
-def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placeholder", lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, skv_stages: int = 2, gu_tt: int = 0) -> int:
+def _ts_lay(npad: int, ku: int, ts: int, tsb: int, gu_tt: int, stamps: int = 0) -> int:
+    """Bytes of the tile-stream layout (mk_common.cuh TS_BYTES: largest phase ring, + the GU exchange region with tsb); 0 where TS is off."""
+    if not (ts and npad >= ts_min(ts) and ku == 128):
+        return 0
+    tt = ts_tt(npad, gu_tt)
+    if tsb:
+        return max(ts_ring(1, tt[p], 1, stamps) * (32768 + tt[p] * 256) for p in ("qkv", "gu", "d")) + TS_EXCH
+    return ts_ring(1, tt["qkv"], 0, stamps) * (32768 + tt["qkv"] * 256)
+
+
+def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placeholder", lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, skv_stages: int = 2, gu_tt: int = 0, stamps: int = 0) -> int:
     """OFF_BARS of the kernel layout (mk_common.cuh): end of the overlay regions; under attn = splitkv at least kBarOff and = 512 (mod 1024).
     ``skv_stages``: SKV_STAGES of a q_len 1 build (128-row stages, 64 KB each: kBarOff = SKV_BAR_OFF + (stages - 2) * 64 KB)."""
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     lay = ring * ub + 2 * xs
-    if ts and npad >= ts_min(ts) and ku == 128:
-        tt = ts_tt(npad, gu_tt)
-        if tsb:
-            lay = max(lay, max(ts_ring(1, tt[p], 1) * (32768 + tt[p] * 256) for p in ("qkv", "gu", "d")) + TS_EXCH)
-        else:
-            lay = max(lay, ts_ring(1) * (32768 + TS_TT * 256))
-    elif lmp and npad <= 64 and ku == 128:
+    lay = max(lay, _ts_lay(npad, ku, ts, tsb, gu_tt, stamps))
+    if lmp and npad <= 64 and ku == 128:   # the LMP layout and the TS ring overlay each other (kernel OFF_BARS = max of the layouts)
         lay = max(lay, 8 * xs + lm_ring(npad, lmr) * ub)
     if attn == "splitkv":
         lay = max(lay, SKV_BAR_OFF + (skv_stages - 2) * SKV_STAGE_BYTES)
@@ -169,7 +178,7 @@ def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placehold
     return lay
 
 
-def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, attn: str = "placeholder", skv_stages: int = 2, gu_tt: int = 0, skv_bar: int = SKV_BAR_BYTES) -> int:
+def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, attn: str = "placeholder", skv_stages: int = 2, gu_tt: int = 0, skv_bar: int = SKV_BAR_BYTES, stamps: int = 0) -> int:
     """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM; the kernel traps if the launch gives less).
     lmp: MK_LMP (the pipelined LM head only applies at npad <= 64: smem = [8 X chunks][lmr x 32 KB ring], 384 B of barriers).
     attn = "splitkv" (SPEC-P2): OFF_BARS = skv_off_bars(..) (>= skv::kBarOff, = 512 mod 1024), A1's 64 B mbarrier tail at [OFF_BARS, +64), mk's barrier block (384 / 256 B) behind it."""
@@ -177,19 +186,13 @@ def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SME
         if ku != 128:
             raise ValueError("MK_ATTN=splitkv needs MK_KU 128")
         tail = 384 if ((lmp and npad <= 64) or (ts and npad >= ts_min(ts))) else 256
-        return 1024 + skv_off_bars(npad, ku, ring, attn, lmp, lmr, ts, tsb, skv_stages, gu_tt) + skv_bar + tail
+        return 1024 + skv_off_bars(npad, ku, ring, attn, lmp, lmr, ts, tsb, skv_stages, gu_tt, stamps) + skv_bar + tail
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     off_bars = ring * ub + max(2 * xs, attn_bytes)
-    if ts and npad >= ts_min(ts) and ku == 128:   # MK_TS: tile-stream ring overlays the other regions; 384 B of barriers
-        tt = ts_tt(npad, gu_tt)
-        if tsb:   # MK_TSB: ring bytes = the largest over the phases (QKV / D at TT 128, GU at TT 128 or 64), then the GU exchange region
-            ring_b = max(ts_ring(1, tt[p], 1) * (32768 + tt[p] * 256) for p in ("qkv", "gu", "d"))
-            return 1024 + max(off_bars, ring_b + TS_EXCH) + 384
-        return 1024 + max(off_bars, ts_ring(1) * (32768 + TS_TT * 256)) + 384
-    if lmp and npad <= 64 and ku == 128:
-        return 1024 + max(off_bars, 8 * xs + lm_ring(npad, lmr) * ub) + 384
-    return 1024 + off_bars + 256
+    ts_b = _ts_lay(npad, ku, ts, tsb, gu_tt, stamps)   # MK_TS: tile-stream ring (+ GU exchange with MK_TSB) overlays the other regions; 384 B of barriers
+    lm_b = 8 * xs + lm_ring(npad, lmr) * ub if lmp and npad <= 64 and ku == 128 else 0   # MK_LMP layout (may coexist with TS at NPAD <= 64)
+    return 1024 + max(off_bars, ts_b, lm_b) + (384 if ts_b or lm_b else 256)
 
 
 @lru_cache(maxsize=None)
@@ -202,7 +205,7 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     if stripped:
         src = strip_knobs(src)
     k = {**DEFAULT_KNOBS, **dict(knobs)}
-    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn, skv_stages=skv_stage_units(k), gu_tt=k["MK_GU_TT"], skv_bar=skv_bar_bytes(k)) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
+    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn, skv_stages=skv_stage_units(k), gu_tt=k["MK_GU_TT"], skv_bar=skv_bar_bytes(k), stamps=k["MK_STAMPS"]) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
     defs = [f"NPAD={npad}", f"NB={nb}", f"MK_EXPECT_DYN={exp}", *knob_defines(dict(knobs))]
     defs += os.environ.get("MK_EXTRA_DEFINES", "").split()   # debug only (e.g. SKV_DEBUG_WAIT=1); not part of the knob set
     if attn == "splitkv":

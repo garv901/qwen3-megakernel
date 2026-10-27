@@ -1,0 +1,46 @@
+== ts1 (-DCG=1)
+xover4.cu(87): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z5k_refPK13__nv_bfloat16S1_PKfiiiiPjS4_' for 'sm_100a'
+ptxas info    : Function properties for _Z5k_refPK13__nv_bfloat16S1_PKfiiiiPjS4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers
+ptxas info    : Compile time = 11.592 ms
+ptxas info    : Compiling entry function '_Z6k_initP13__nv_bfloat16mj' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_initP13__nv_bfloat16mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.908 ms
+ptxas info    : Compiling entry function '_Z4k_ts14CUtensorMap_stS_PfiiiiiiixiPjPy' for 'sm_100a'
+ptxas info    : Function properties for _Z4k_ts14CUtensorMap_stS_PfiiiiiiixiPjPy
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 108 registers, used 1 barriers
+ptxas info    : Compile time = 92.055 ms
+== ts2 (-DCG=2)
+xover4.cu(87): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z5k_refPK13__nv_bfloat16S1_PKfiiiiPjS4_' for 'sm_100a'
+ptxas info    : Function properties for _Z5k_refPK13__nv_bfloat16S1_PKfiiiiPjS4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers
+ptxas info    : Compile time = 10.936 ms
+ptxas info    : Compiling entry function '_Z6k_initP13__nv_bfloat16mj' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_initP13__nv_bfloat16mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.917 ms
+ptxas info    : Compiling entry function '_Z4k_ts14CUtensorMap_stS_PfiiiiiiixiPjPy' for 'sm_100a'
+ptxas info    : Function properties for _Z4k_ts14CUtensorMap_stS_PfiiiiiiixiPjPy
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 92 registers, used 1 barriers
+ptxas info    : Compile time = 105.777 ms

@@ -9,7 +9,7 @@
 //   MK_XTMA   0 only (reserved: O-phase B tile by TMA from ao; not implemented in v0).
 //   MK_STAMPS 1: thread 0 stores %globaltimer at every bar_arrive and bar_wait exit into smem, one dump to mk_stamps at the end.
 //   MK_LMP    1: pipelined LM head (NPAD <= 64; NOTES.md "LM head, pipelined"); MK_LMR LM ring slots.
-//   MK_TS     N: tile-stream engine at NPAD >= N (0 off, 1 = 128, default 256) (SPEC-P5a; NOTES.md "Tile-stream QKV"): QKV phase with B = bf16 xb by TMA (NPAD >= 128, MK_KU 128 only; else no effect).
+//   MK_TS     N: tile-stream engine at NPAD >= N (0 off, 1 = 128, default 32) (SPEC-P5a; NOTES.md "Tile-stream QKV"): QKV phase with B = bf16 xb by TMA (MK_KU 128 only; else no effect).
 //   MK_TSB    1: P5b (SPEC-P5b) on top of MK_TS: GU and D on the tile stream (B = bf16 xb2 / act by TMA, A = interleaved wg|wu), act written by the GU epilogue,
 //             bf16 conversions (xb2 + ss2 after O, xb after D) done by idle CTAs on tickets. Default 0 = the P5a build (SASS identical).
 //   MK_SKV    (defined by build.py for attn = splitkv, SPEC-P2): attention = skv::attend + skv::combine_head (O-phase B tile); needs MK_KU 128.
@@ -52,7 +52,7 @@
 #define MK_LMR 0   // LM ring slots (32 KB each) of the MK_LMP path; 0 = per bucket: 4 at NPAD 16, 3 at NPAD 32 (job 9586), 2 at NPAD 64 (smem limit)
 #endif
 #ifndef MK_TS
-#define MK_TS 128   // 0 off; N (128 / 256): tile-stream engine (ts_phase) at NPAD >= N (1 = 128; default 128 with MK_TSB 1: job 9622 b128 -167, b256 -957 us; P5a alone was b128 +54, job 9602); the D phase writes xb = bf16(x * ln1[l+1]) (see NOTES.md)
+#define MK_TS 128  // 0 off; N (16 / 32 / 64 / 128 / 256): tile-stream engine (ts_phase) at NPAD >= N (1 = 128; with MK_TSB 1: job 9622 b128 -167, b256 -957 us; P5a alone was b128 +54, job 9602; NPAD 16 / 32 / 64 opt-in only: e2e b1 +90, b32 +104, b64 +57 us, jobs 10294 / 10308 / 10309); the D phase writes xb = bf16(x * ln1[l+1]) (see NOTES.md)
 #endif
 #ifndef MK_LMTS
 #define MK_LMTS 1   // (default 1, job 9701: b128 -96, b256 -216 us) 1: SPEC-P3c, the LM head on the tile stream (ts_phase<PhLm, 128, 1>, A = embed, B = bf16(x * fnorm) from the last D finalize) when TSB and every lm slot s holds token s; else the v0 LM path
@@ -88,7 +88,7 @@
 static_assert(NPAD == 16 || NPAD == 32 || NPAD == 64 || NPAD == 128 || NPAD == 256, "NPAD bucket");
 static_assert(MK_KU == 128 || MK_KU == 64, "MK_KU");
 static_assert(MK_RING >= 2 && MK_RING <= 4, "MK_RING");
-static_assert(MK_TS == 0 || MK_TS == 1 || MK_TS == 128 || MK_TS == 256, "MK_TS");
+static_assert(MK_TS == 0 || MK_TS == 1 || MK_TS == 16 || MK_TS == 32 || MK_TS == 64 || MK_TS == 128 || MK_TS == 256, "MK_TS");
 static_assert(MK_TSB == 0 || MK_TSB == 1, "MK_TSB");
 static_assert(MK_LMTS == 0 || MK_LMTS == 1, "MK_LMTS");
 static_assert(MK_LMP == 0 || MK_LMP == 1, "MK_LMP");
@@ -132,18 +132,21 @@ constexpr int LM_RING_OFF = 8 * XS;
 constexpr int LM_BYTES = LMP ? 8 * XS + LMR * UB : 0;
 // LM mbarriers (LMP only): full[LMR] at +LMB_FULL, empty[LMR] at +LMB_EMPTY, accfull[2] at +LMB_ACCF, accempty[2] at +LMB_ACCE
 constexpr int LMB_FULL = 192, LMB_EMPTY = 256, LMB_ACCF = 320, LMB_ACCE = 336;
-// Tile-stream QKV (TS, NPAD >= 128): ring of TS_R slots [A 32 KB | B TT x 256 B] from the base, overlaying every other region; its mbarriers reuse the LM block:
-// full[TS_R] at +LMB_FULL, empty[TS_R] at +LMB_EMPTY, accfull[2] at +LMB_ACCF, accempty[2] at +LMB_ACCE (LM and TS never coexist: LMP is NPAD <= 64).
-constexpr int TS_TT = 128;                                  // tokens per tile (B box rows); NPAD 256: 2 token tiles, NPAD 128: 1
+// Tile-stream QKV (TS): ring of TS_R slots [A 32 KB | B TT x 256 B] from the base, overlaying every other region; its mbarriers reuse the LM block:
+// full[TS_R] at +LMB_FULL, empty[TS_R] at +LMB_EMPTY, accfull[2] at +LMB_ACCF, accempty[2] at +LMB_ACCE. With LMP and TS (NPAD <= 64) every ts_first re-initialises the block
+// for its phase and lm_first re-initialises it for the LM head (LMP path).
+constexpr int TS_TT = NPAD < 128 ? NPAD : 128;              // tokens per tile (B box rows); NPAD 256: 2 token tiles, NPAD <= 128: 1
 constexpr int TS_KS = (NPAD == 256) ? 2 : 4;                // split-K factor of the tile stream (job 9592 best per bucket)
 constexpr int TS_SLOT = 32768 + TS_TT * 256;                // ring slot bytes: A (128 rows x 128 k bf16) + B (TS_TT x 128 k bf16)
-// P5b phase configs (TT tokens per tile / KS split-K): GU 96 / 1 (NPAD 256, ragged: 96 + 96 + 64), 48 / 1 (NPAD 128, 48 + 48 + 32); D 128 / 8 (256), 128 / 12 (128). QKV = (TS_TT, TS_KS).
+// P5b phase configs (TT tokens per tile / KS split-K): GU 96 / 1 (NPAD 256, ragged: 96 + 96 + 64), 48 / 1 (NPAD 128, 48 + 48 + 32), NPAD / 1 (NPAD <= 64); D TS_TT / 8 (256), TS_TT / 12 (<= 128)
+// (xover4 job 10214 at T 32 / 64: QKV TT T KS 4, GU TT T KS 1, D TT T KS 12). QKV = (TS_TT, TS_KS).
 constexpr int FIN = MK_FIN >= 0 ? MK_FIN : (NPAD >= 128 ? 2 : 0);
 constexpr bool WU = MK_WU >= 0 ? MK_WU != 0 : NPAD == 128;   // P14 per bucket
-constexpr int GU_TT = MK_GU_TT ? MK_GU_TT : (NPAD == 256 ? 96 : 48), GU_KS = 1;   // MK_GU_TT: ragged tiles allowed (NTT = ceil(NPAD / TT); B rows past MAXTOK are TMA OOB zero fill)
-constexpr int D_TT = 128, D_KS = NPAD == 256 ? 8 : 12;
+constexpr int GU_TT = MK_GU_TT ? MK_GU_TT : (NPAD == 256 ? 96 : NPAD == 128 ? 48 : NPAD), GU_KS = 1;   // MK_GU_TT: ragged tiles allowed (NTT = ceil(NPAD / TT); B rows past MAXTOK are TMA OOB zero fill)
+constexpr int D_TT = TS_TT, D_KS = NPAD == 256 ? 8 : 12;
+constexpr int TK_NTT = (NPAD + 127) / 128;                  // 128-token tiles of the O / D tickets and the idle-CTA finalizer jobs (job = rb * TK_NTT + tt)
 constexpr int TS_EXCH = TSB ? 12288 : 0;                    // GU exchange region: [3 groups][2 quadrant pairs][16 tokens][32 lanes] fp32
-constexpr int TS_SMEM_AVAIL = 227 * 1024 - 11280 - 1024 - 384 - TS_EXCH;   // dyn smem budget after static smem, alignment slack, barriers and the exchange region
+constexpr int TS_SMEM_AVAIL = 227 * 1024 - 11280 - (MK_STAMPS ? 8 * (2 * (1 + 6 * NLAY) + 8) : 0) - 1024 - 384 - TS_EXCH;   // dyn smem budget after static smem (+ mk_sk_s with MK_STAMPS), alignment slack, barriers and the exchange region
 constexpr int ts_slot(int tt) { return 32768 + tt * 256; }
 constexpr int ts_ringn(int tt) { return TS_SMEM_AVAIL / ts_slot(tt) < 8 ? TS_SMEM_AVAIL / ts_slot(tt) : 8; }   // ring depth of a phase with TT = tt: as many slots as fit
 constexpr int TS_R = TS ? ts_ringn(TS_TT) : 1;              // QKV ring depth

@@ -1,0 +1,59 @@
+xover4 orc4 4684ed7 (+ TW / PROWH)
+GPU 0: NVIDIA B200 (UUID: GPU-17dce9e8-fd5a-2fcc-3847-dc31ae451efc)
+== ts1
+PASS ts cg=1 GU T=256 TT=96 KS=1 max|d|=9.918e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":8.912,"us_reps":[8.919,8.919,8.912,8.879,8.873,8.911,8.913],"mhz":1822,"pass":true,"regs":96,"spill":0,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+{"bin":"ts","orc":7,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":7.169,"us_reps":[7.151,7.199,7.152,7.169,7.162,7.170,7.170],"mhz":1962,"pass":null,"regs":96,"spill":0,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+{"bin":"ts","orc":63,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":3.574,"us_reps":[3.568,3.562,3.582,3.584,3.574,3.568,3.588],"mhz":1963,"pass":null,"regs":96,"spill":0,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+PASS ts cg=1 GU T=256 TT=48 KS=1 max|d|=9.918e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"GU","T":256,"TT":48,"KS":1,"us_phase":13.845,"us_reps":[13.817,13.880,13.853,13.844,13.844,13.846,13.845],"mhz":1835,"pass":true,"regs":96,"spill":0,"ring":5,"nt":288,"ntile":288,"tiles_max":2,"tiles_mean":1.946,"steps_per_tile":8,"smem":228352}
+PASS ts cg=1 D T=256 TT=128 KS=8 max|d|=1.144e-04 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"D","T":256,"TT":128,"KS":8,"us_phase":6.528,"us_reps":[6.498,6.545,6.548,6.513,6.528,6.536,6.525],"mhz":1828,"pass":true,"regs":96,"spill":0,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":3,"smem":199680}
+PASS ts cg=1 QKV T=256 TT=128 KS=2 max|d|=5.722e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"QKV","T":256,"TT":128,"KS":2,"us_phase":7.202,"us_reps":[7.195,7.202,7.210,7.211,7.204,7.193,7.189],"mhz":1822,"pass":true,"regs":96,"spill":0,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":4,"smem":199680}
+{"bin":"ts","orc":63,"cg":1,"shape":"GU","T":256,"TT":48,"KS":1,"us_phase":5.406,"us_reps":[5.420,5.402,5.406,5.401,5.407,5.409,5.392],"mhz":1963,"pass":null,"regs":96,"spill":0,"ring":5,"nt":288,"ntile":288,"tiles_max":2,"tiles_mean":1.946,"steps_per_tile":8,"smem":228352}
+{"bin":"ts","orc":63,"cg":1,"shape":"D","T":256,"TT":128,"KS":8,"us_phase":2.360,"us_reps":[2.361,2.356,2.357,2.361,2.365,2.360,2.359],"mhz":1965,"pass":null,"regs":96,"spill":0,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":3,"smem":199680}
+{"bin":"ts","orc":63,"cg":1,"shape":"QKV","T":256,"TT":128,"KS":2,"us_phase":2.636,"us_reps":[2.633,2.642,2.633,2.634,2.641,2.636,2.637],"mhz":1965,"pass":null,"regs":96,"spill":0,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":4,"smem":199680}
+== ts1p
+PASS ts cg=1 GU T=256 TT=96 KS=1 max|d|=9.918e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":9.091,"us_reps":[9.091,9.083,9.059,9.054,9.107,9.091,9.113],"mhz":1822,"pass":true,"regs":110,"spill":8,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+{"bin":"ts","orc":7,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":7.076,"us_reps":[7.068,7.076,7.080,7.073,7.075,7.101,7.078],"mhz":1962,"pass":null,"regs":110,"spill":8,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+{"bin":"ts","orc":63,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":3.696,"us_reps":[3.685,3.704,3.696,3.697,3.693,3.696,3.693],"mhz":1963,"pass":null,"regs":110,"spill":8,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+PASS ts cg=1 GU T=256 TT=48 KS=1 max|d|=9.918e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"GU","T":256,"TT":48,"KS":1,"us_phase":13.755,"us_reps":[13.760,13.785,13.753,13.723,13.755,13.808,13.725],"mhz":1835,"pass":true,"regs":110,"spill":8,"ring":5,"nt":288,"ntile":288,"tiles_max":2,"tiles_mean":1.946,"steps_per_tile":8,"smem":228352}
+PASS ts cg=1 D T=256 TT=128 KS=8 max|d|=1.144e-04 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"D","T":256,"TT":128,"KS":8,"us_phase":6.639,"us_reps":[6.643,6.649,6.643,6.639,6.620,6.620,6.627],"mhz":1829,"pass":true,"regs":110,"spill":8,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":3,"smem":199680}
+PASS ts cg=1 QKV T=256 TT=128 KS=2 max|d|=5.722e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"QKV","T":256,"TT":128,"KS":2,"us_phase":7.297,"us_reps":[7.285,7.306,7.321,7.276,7.283,7.297,7.299],"mhz":1827,"pass":true,"regs":110,"spill":8,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":4,"smem":199680}
+{"bin":"ts","orc":63,"cg":1,"shape":"GU","T":256,"TT":48,"KS":1,"us_phase":5.574,"us_reps":[5.561,5.573,5.574,5.575,5.575,5.581,5.571],"mhz":1963,"pass":null,"regs":110,"spill":8,"ring":5,"nt":288,"ntile":288,"tiles_max":2,"tiles_mean":1.946,"steps_per_tile":8,"smem":228352}
+{"bin":"ts","orc":63,"cg":1,"shape":"D","T":256,"TT":128,"KS":8,"us_phase":2.471,"us_reps":[2.447,2.479,2.473,2.471,2.488,2.447,2.469],"mhz":1965,"pass":null,"regs":110,"spill":8,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":3,"smem":199680}
+{"bin":"ts","orc":63,"cg":1,"shape":"QKV","T":256,"TT":128,"KS":2,"us_phase":2.725,"us_reps":[2.724,2.723,2.727,2.715,2.740,2.725,2.725],"mhz":1965,"pass":null,"regs":110,"spill":8,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":4,"smem":199680}
+== ts1t
+PASS ts cg=1 GU T=256 TT=96 KS=1 max|d|=9.918e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":9.517,"us_reps":[9.558,9.595,9.553,9.517,9.515,9.512,9.515],"mhz":1820,"pass":true,"regs":96,"spill":0,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+{"bin":"ts","orc":7,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":7.756,"us_reps":[7.733,7.735,7.740,7.779,7.761,7.759,7.756],"mhz":1962,"pass":null,"regs":96,"spill":0,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+{"bin":"ts","orc":63,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":4.082,"us_reps":[4.078,4.073,4.097,4.082,4.099,4.076,4.095],"mhz":1965,"pass":null,"regs":96,"spill":0,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+PASS ts cg=1 GU T=256 TT=48 KS=1 max|d|=9.918e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"GU","T":256,"TT":48,"KS":1,"us_phase":15.641,"us_reps":[15.611,15.665,15.655,15.641,15.696,15.639,15.637],"mhz":1837,"pass":true,"regs":96,"spill":0,"ring":5,"nt":288,"ntile":288,"tiles_max":2,"tiles_mean":1.946,"steps_per_tile":8,"smem":228352}
+PASS ts cg=1 D T=256 TT=128 KS=8 max|d|=1.144e-04 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"D","T":256,"TT":128,"KS":8,"us_phase":6.621,"us_reps":[6.621,6.635,6.621,6.609,6.628,6.643,6.601],"mhz":1826,"pass":true,"regs":96,"spill":0,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":3,"smem":199680}
+PASS ts cg=1 QKV T=256 TT=128 KS=2 max|d|=5.722e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"QKV","T":256,"TT":128,"KS":2,"us_phase":7.400,"us_reps":[7.400,7.402,7.408,7.405,7.393,7.392,7.387],"mhz":1825,"pass":true,"regs":96,"spill":0,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":4,"smem":199680}
+{"bin":"ts","orc":63,"cg":1,"shape":"GU","T":256,"TT":48,"KS":1,"us_phase":6.727,"us_reps":[6.726,6.722,6.725,6.727,6.729,6.731,6.732],"mhz":1963,"pass":null,"regs":96,"spill":0,"ring":5,"nt":288,"ntile":288,"tiles_max":2,"tiles_mean":1.946,"steps_per_tile":8,"smem":228352}
+{"bin":"ts","orc":63,"cg":1,"shape":"D","T":256,"TT":128,"KS":8,"us_phase":2.417,"us_reps":[2.411,2.424,2.417,2.417,2.407,2.417,2.411],"mhz":1965,"pass":null,"regs":96,"spill":0,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":3,"smem":199680}
+{"bin":"ts","orc":63,"cg":1,"shape":"QKV","T":256,"TT":128,"KS":2,"us_phase":2.801,"us_reps":[2.795,2.813,2.818,2.798,2.815,2.801,2.801],"mhz":1965,"pass":null,"regs":96,"spill":0,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":4,"smem":199680}
+== ts1pt
+PASS ts cg=1 GU T=256 TT=96 KS=1 max|d|=9.918e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":9.824,"us_reps":[9.825,9.802,9.826,9.789,9.827,9.824,9.805],"mhz":1816,"pass":true,"regs":110,"spill":8,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+{"bin":"ts","orc":7,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":7.553,"us_reps":[7.567,7.551,7.545,7.541,7.583,7.553,7.556],"mhz":1962,"pass":null,"regs":110,"spill":8,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+{"bin":"ts","orc":63,"cg":1,"shape":"GU","T":256,"TT":96,"KS":1,"us_phase":4.163,"us_reps":[4.163,4.164,4.158,4.162,4.167,4.175,4.149],"mhz":1965,"pass":null,"regs":110,"spill":8,"ring":4,"nt":144,"ntile":144,"tiles_max":1,"tiles_mean":0.973,"steps_per_tile":8,"smem":232448}
+PASS ts cg=1 GU T=256 TT=48 KS=1 max|d|=9.918e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"GU","T":256,"TT":48,"KS":1,"us_phase":15.313,"us_reps":[15.303,15.345,15.325,15.313,15.348,15.306,15.309],"mhz":1839,"pass":true,"regs":110,"spill":8,"ring":5,"nt":288,"ntile":288,"tiles_max":2,"tiles_mean":1.946,"steps_per_tile":8,"smem":228352}
+PASS ts cg=1 D T=256 TT=128 KS=8 max|d|=1.144e-04 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"D","T":256,"TT":128,"KS":8,"us_phase":6.749,"us_reps":[6.718,6.749,6.753,6.735,6.753,6.729,6.750],"mhz":1830,"pass":true,"regs":110,"spill":8,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":3,"smem":199680}
+PASS ts cg=1 QKV T=256 TT=128 KS=2 max|d|=5.722e-05 bad=0
+{"bin":"ts","orc":0,"cg":1,"shape":"QKV","T":256,"TT":128,"KS":2,"us_phase":7.463,"us_reps":[7.451,7.472,7.481,7.460,7.463,7.442,7.465],"mhz":1827,"pass":true,"regs":110,"spill":8,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":4,"smem":199680}
+{"bin":"ts","orc":63,"cg":1,"shape":"GU","T":256,"TT":48,"KS":1,"us_phase":6.786,"us_reps":[6.776,6.783,6.788,6.786,6.792,6.787,6.785],"mhz":1964,"pass":null,"regs":110,"spill":8,"ring":5,"nt":288,"ntile":288,"tiles_max":2,"tiles_mean":1.946,"steps_per_tile":8,"smem":228352}
+{"bin":"ts","orc":63,"cg":1,"shape":"D","T":256,"TT":128,"KS":8,"us_phase":2.515,"us_reps":[2.519,2.513,2.507,2.528,2.515,2.501,2.521],"mhz":1965,"pass":null,"regs":110,"spill":8,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":3,"smem":199680}
+{"bin":"ts","orc":63,"cg":1,"shape":"QKV","T":256,"TT":128,"KS":2,"us_phase":2.854,"us_reps":[2.859,2.846,2.854,2.844,2.881,2.855,2.851],"mhz":1965,"pass":null,"regs":110,"spill":8,"ring":3,"nt":128,"ntile":128,"tiles_max":1,"tiles_mean":0.865,"steps_per_tile":4,"smem":199680}
+done

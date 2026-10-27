@@ -46,6 +46,7 @@ struct PhLm {
 static_assert(VOCAB % 128 == 0, "LM row blocks");
 #ifdef MK_SKV
 static_assert(NW == skv::kBlock / 32, "attention header assumes 16 warps");
+static_assert(!TS || NPAD >= 64, "MK_ATTN=splitkv with MK_TS on at NPAD 16 / 32 hangs (job 10307 / 10311: R1-b32 and b8 hang, the same builds pass with attn placeholder; only MK_NULL 4 = attend skipped avoids it; open, see LEDGER)");
 static_assert(!TS || TSB, "MK_ATTN=splitkv with MK_TS on needs MK_TSB 1: the P5a-only layout (TS, TSB 0) hangs at NPAD 256 in mk barriers (job 9662, A1 debug waits silent; open, see LEDGER)");
 static_assert(MK_KU == 128, "MK_ATTN=splitkv: the O phase stages one head per 128-k unit (combine_head); MK_KU 64 stays on the placeholder");
 static_assert(SKV_TAIL % 64 == 0 && (OFF_BARS % 1024) == 512 && (OFF_BARS - (int)skv::kBarOff) >= 0 && ((OFF_BARS - (int)skv::kBarOff) % 1024) == 0,
@@ -63,6 +64,7 @@ static_assert(!TS || (PhQkv::K % (TS_KS * 128) == 0), "TS: split-K factor");
 static_assert(!TSB || (2 * GU_TT <= 256 && 2 * D_TT <= 256 && GU_TT % 16 == 0 && NPAD % D_TT == 0 && ts_ringn(GU_TT) >= 2 && ts_ringn(D_TT) >= 2), "TSB: TMEM columns / ring depth per phase");
 static_assert(!TSB || (PhGu::K % (GU_KS * 128) == 0 && PhD::K % (D_KS * 128) == 0 && PhGu::NRB == 48 && PhD::NRB == 8), "TSB: split-K factors");
 static_assert(!TSB || ts_ringn(D_TT) == ts_ringn(TS_TT), "TSB: D shares the QKV ring depth (TS_RING_A)");
+static_assert(!TSB || D_TT * TK_NTT >= NPAD && (D_TT == 128 || TK_NTT == 1), "TSB: a D ticket (tile / D_KS = rb * NTT + tt) is a finalizer job (rb * TK_NTT + tt)");
 static_assert(!TSB || NB > PhO::NRB * (PhO::K / KU), "TSB: the idle-CTA finalizers need CTAs without an O unit (grid > 128); no last-arriver fallback is built");
 static_assert(!TS || DYN_SMEM + 11280 <= 227 * 1024, "TS: dynamic + static smem exceed 227 KB");
 #if defined(MK_EXPECT_DYN) && MK_EXPECT_DYN
@@ -266,6 +268,11 @@ __device__ __forceinline__ void lm_fill(const GS& g, int r0, int j) {   // one t
 __device__ __forceinline__ void lm_first(const GS& g) {
     if constexpr (LMP) {
         if (threadIdx.x == 0) {
+            if constexpr (TS) {   // the TS phases re-initialised the LM barrier block (ts_first): back to the LM counts and phase 0 (the last ts_phase drained and joined)
+                for (int i = 0; i < LMR; ++i) { mbar_init(g.bars + LMB_FULL + 8 * i, 1); mbar_init(g.bars + LMB_EMPTY + 8 * i, 1); }
+                for (int b = 0; b < 2; ++b) { mbar_init(g.bars + LMB_ACCF + 8 * b, 1); mbar_init(g.bars + LMB_ACCE + 8 * b, LM_EPI_WARPS); }
+                mbar_fence_init();
+            }
             const Geom<PhLm> ge = geom<PhLm>();
             for (int i = 0; i < LMR && i < ge.n; ++i) lm_fill(g, ge.u0 / (HID / KU), i);
         }
@@ -542,12 +549,12 @@ __device__ __forceinline__ void idle_rank(int& rank, int& nidle) {
     nidle = G - NTILE;
     rank = hi == lo ? b - lo : -1;
 }
-// All threads of an idle CTA (block-uniform; other CTAs return at once). Jobs = (rb, tt) with TT = 128 tokens: job j = rb * NTT + tt, idle CTA r takes j = r, r + nidle, ...
+// All threads of an idle CTA (block-uniform; other CTAs return at once). Jobs = (rb, tt) with TT = 128 tokens: job j = rb * TK_NTT + tt, idle CTA r takes j = r, r + nidle, ...
 // IS_O: wait tk[j] == 16, xb2[t][rb 128 ..] = bf16(x * ln2[l]) and ss2[t] += sum of x^2 over the 128 columns; else: wait tk[TK_D + j] == D_KS, xb = bf16(x * ln1[l + 1]).
 // Ends with fence.proxy.async.global in every writing thread (the caller then arrives at the grid barrier).
 template <bool IS_O, int NTILE, bool SS = IS_O>
 __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw, bf16_t* out, float* ss2, unsigned* tk, int ntok) {
-    constexpr int NTT = NPAD / 128, TARGET = IS_O ? PhO::K / KU : D_KS;
+    constexpr int NTT = TK_NTT, TARGET = IS_O ? PhO::K / KU : D_KS;
     int rank, nidle;
     if constexpr (FIN == 2) {   // every CTA finalizes (the callers issue their tickets first, so no CTA waits on a CTA that waits)
         rank = (int)blockIdx.x; nidle = (int)gridDim.x;
@@ -807,7 +814,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             // MK_QR: jobs (head hh < 24, token tile tt) over all CTAs, each split by token rows over nsub CTAs, once the QKV tickets of the head (q: rb = hh; kv: k rb and
             // v rb) reach TS_KS; r1 from ss1 (prologue / previous D finalizer). The last of the nsub CTAs that saw the target resets the ticket(s) and the seen counter.
             if constexpr (!mk_null(1)) {
-                constexpr int NTT = NPAD / 128, NJOB = (NQH + NKVH) * NTT;
+                constexpr int NTT = TK_NTT, NJOB = (NQH + NKVH) * NTT;
                 const int G = (int)gridDim.x, nsub = max(1, G / NJOB), prow = (128 + nsub - 1) / nsub;
                 const float* ss1 = ss2 + 2 * MAXTOK;
                 for (int w = (int)blockIdx.x; w < NJOB * nsub; w += G) {
@@ -943,7 +950,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                     __syncthreads();   // every thread's red.adds of this row block are issued
                     if (tid == 0) {
                         __threadfence();   // release: the CTA's red.adds (ordered before this by the barrier) precede the ticket adds
-                        for (int tt = 0; tt < NPAD / 128; ++tt) atomicAdd(tk + rb * (NPAD / 128) + tt, (unsigned)nk);
+                        for (int tt = 0; tt < TK_NTT; ++tt) atomicAdd(tk + rb * TK_NTT + tt, (unsigned)nk);
                     }
                 };
                 gemm_phase<PhO, mk_null(3)>(g, l, ntok, get, epi, extra, fin);
@@ -1093,7 +1100,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 gemm_phase<PhD, mk_null(5)>(g, l, ntok, get, epi, extra);
             }
         }
-        MK_PF_ARRIVE(if (l + 1 < NLAY) { if constexpr (TS) { if constexpr (!PFE_D) ts_first<PhQkv, TS_TT, TS_KS>(g, l + 1); } else prefetch_next<PhQkv>(g, l + 1); } else { if constexpr (LMTS) { if (lm_ident) ts_first<PhLm, 128, 1>(g, 0); else lm_first(g); } else lm_first(g); });
+        MK_PF_ARRIVE(if (l + 1 < NLAY) { if constexpr (TS) { if constexpr (!PFE_D) ts_first<PhQkv, TS_TT, TS_KS>(g, l + 1); } else prefetch_next<PhQkv>(g, l + 1); } else { if constexpr (LMTS) { if (lm_ident) ts_first<PhLm, TS_TT, 1>(g, 0); else lm_first(g); } else lm_first(g); });
         bar_wait(bar_cnt, bar_target);
     }
 
@@ -1143,7 +1150,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             if (lm_ident) {   // SPEC-P3c: B = xb (fnorm rows, written by the last D finalize), ssf = raw sums of squares; epi as above (it applies rsqrt(s_ss / HID + EPS))
                 for (int t = tid; t < n_lm; t += NT) s_ss[t] = __ldcg(ss2 + MAXTOK + t);   // s_ss is zero for t >= n_lm (prologue, GU re-zero)
                 __syncthreads();
-                ts_phase<PhLm, 128, 1, 8, mk_null(6)>(g, 0, n_lm, epi);
+                ts_phase<PhLm, TS_TT, 1, 8, mk_null(6)>(g, 0, n_lm, epi);
             } else {
                 if constexpr (LMP) lm_phase<mk_null(6)>(g, get, epi);
                 else gemm_phase<PhLm, mk_null(6)>(g, 0, n_lm, get, epi, extra);

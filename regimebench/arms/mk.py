@@ -3,7 +3,7 @@ attention as a placeholder behind the A1 interface.
 
 Variants: ``auto`` (smallest token bucket NPAD in {16, 32, 64, 128, 256} >= total_q, CUDA graph) and ``auto-direct`` (same, no graph).
 One cooperative launch per step (total_q <= 256). Options (``load_arm("mk", **opts)``): ``stamps`` (MK_STAMPS), ``null`` (MK_NULL bitmask),
-``ku``, ``ring``, ``ts`` (MK_TS: tile-stream QKV with B = bf16 ``xb`` by TMA at NPAD >= ts (1 = 128); default 256, 0 = off), ``tsb`` (MK_TSB, default 0: P5b, GU and D on
+``ku``, ``ring``, ``ts`` (MK_TS: tile-stream QKV with B = bf16 ``xb`` by TMA at NPAD >= ts (1 = 128); default 128, 0 = off), ``tsb`` (MK_TSB, default 0: P5b, GU and D on
 the tile stream with act / xb2 buffers, the interleaved wg|wu weights and the idle-CTA finalizers; needs MK_TS on at the bucket), ``lmts`` (MK_LMTS, default 1: SPEC-P3c, the LM head on the tile stream
 at TSB buckets when n_lm == ntok and lm_tok[s] == s; else the v0 LM path), ``attn`` ("placeholder" | "splitkv" | "auto"; default "placeholder"; SPEC-P2: splitkv = A1 split-KV attention v2 (splitkv-v2)
 + combine_head in the O phase when plan.s_max > 1 (else ao is staged, no combine); q_len > 1 (<= 16) builds with -DSKV_QMAX=16; auto = splitkv when every seq has q_len == 1 and max kv >= 512, else the placeholder, chosen per workload at prepare()). The step clones the fixture KV into a packed cache with CTX zero padding rows
@@ -42,7 +42,7 @@ class _Loaded:
         cubin, info, _ = B.compile_build(npad, self.nb, knobs, attn=attn, skv_qmax=qmax)
         self.ptxas = info
         self.knobs = d
-        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"], tsb=d["MK_TSB"], attn=attn, skv_stages=B.skv_stage_units(d), gu_tt=d["MK_GU_TT"], skv_bar=B.skv_bar_bytes(d))
+        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"], tsb=d["MK_TSB"], attn=attn, skv_stages=B.skv_stage_units(d), gu_tt=d["MK_GU_TT"], skv_bar=B.skv_bar_bytes(d), stamps=d["MK_STAMPS"])
         self.kernel = CoopKernel(cubin, B.KERNEL, self.dyn)
         self.regs, self.static_smem = self.kernel.regs, self.kernel.static_smem
         self.local_bytes, self.dyn_smem = self.kernel.local_bytes, self.kernel.dyn_smem

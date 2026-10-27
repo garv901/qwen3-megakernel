@@ -204,8 +204,9 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
       for (int c = (warp >> 2) - 1; c < NCH; c += 6) {
         if (orc & 16) break;                                          // oracle: no TMEM reads
         const int cb = tt * TT + c * 16;                              // first token of the chunk
-        if (cb >= T) break;                                           // ragged tile: chunk past T (T is a multiple of 16 here: no per-element guard needed)
+        if (cb >= T) break;                                           // ragged tile: chunk past T
         const bool two = c + 3 < NCH && cb + 48 < T;
+        const int nv0 = min(16, T - cb), nv1 = min(16, T - cb - 48);  // valid tokens of the two chunks (T < 16 or T % 16 != 0)
         u32 v0[16], v1[16];
         tmem_ld16(v0, ta + c * 16);
         if (two) tmem_ld16(v1, ta + (c + 3) * 16);
@@ -214,17 +215,17 @@ __global__ void __launch_bounds__(NT, 1) k_ts(const __grid_constant__ CUtensorMa
         if (orc & 2) { if (__uint_as_float(v0[0]) == 1234.5f) y0[0] = 0.f; continue; }   // oracle: no stores (one never-taken store keeps the TMEM reads live)
         if (KS == 1) {
 #pragma unroll
-          for (int i = 0; i < 16; ++i) y0[(size_t)i * N] = __uint_as_float(v0[i]);
+          for (int i = 0; i < 16; ++i) if (i < nv0) y0[(size_t)i * N] = __uint_as_float(v0[i]);
           if (two) {
 #pragma unroll
-            for (int i = 0; i < 16; ++i) y0[(size_t)(48 + i) * N] = __uint_as_float(v1[i]);
+            for (int i = 0; i < 16; ++i) if (i < nv1) y0[(size_t)(48 + i) * N] = __uint_as_float(v1[i]);
           }
         } else {
 #pragma unroll
-          for (int i = 0; i < 16; ++i) red_add(y0 + (size_t)i * N, __uint_as_float(v0[i]));
+          for (int i = 0; i < 16; ++i) if (i < nv0) red_add(y0 + (size_t)i * N, __uint_as_float(v0[i]));
           if (two) {
 #pragma unroll
-            for (int i = 0; i < 16; ++i) red_add(y0 + (size_t)(48 + i) * N, __uint_as_float(v1[i]));
+            for (int i = 0; i < 16; ++i) if (i < nv1) red_add(y0 + (size_t)(48 + i) * N, __uint_as_float(v1[i]));
           }
         }
       }
@@ -330,8 +331,8 @@ int main(int argc, char** argv) {
   const int regs = fa.numRegs, spill = (int)fa.localSizeBytes;
   CK(cudaFuncSetAttribute(k_ts, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM_MAX));
   struct Sh { const char* name; int N, K; } shapes[4] = {{"QKV", 4096, 1024}, {"O", 1024, 2048}, {"GU", 6144, 1024}, {"D", 1024, 3072}};
-  const int Ts[4] = {32, 64, 128, 256}, KSs[9] = {1, 2, 3, 4, 6, 8, 12, 16, 24};
-  const std::vector<int> TTbase = CG == 1 ? std::vector<int>{48, 64, 96, 128, 256} : std::vector<int>{48, 64, 96, 128, 192, 256};
+  const int Ts[8] = {1, 4, 8, 16, 32, 64, 128, 256}, KSs[9] = {1, 2, 3, 4, 6, 8, 12, 16, 24};
+  const std::vector<int> TTbase = CG == 1 ? std::vector<int>{16, 32, 48, 64, 96, 128, 256} : std::vector<int>{48, 64, 96, 128, 192, 256};
   for (auto& sh : shapes) {
     if (strcmp(shsel, "all") && strcmp(shsel, sh.name)) continue;
     const int N = sh.N, K = sh.K, NRB = N / (128 * CG);
@@ -348,11 +349,11 @@ int main(int argc, char** argv) {
       if (Tsel && T != Tsel) continue;
       std::vector<int> tts = TTbase; if (std::find(tts.begin(), tts.end(), T) == tts.end()) tts.push_back(T);   // TT = T is always valid
       for (int TT : tts) {
-        if (TT > T || (TTsel && TT != TTsel)) continue;
+        if (TT > (T < 16 ? 16 : T) || (TTsel && TT != TTsel)) continue;   // T < 16: TT 16 (the smallest MMA N), tokens >= T not stored
         if (TT % 16 || TT < 16 || TT > 256 || (CG == 2 && (TT / 2) % 8)) continue;
         // B map: X [T][K] bf16, box 64 k x TT/CG tokens, SW128; T % TT != 0: the last tile's rows >= T are TMA OOB (zero fill)
         CUtensorMap mX;
-        { cuuint64_t dims[2] = {(cuuint64_t)K, (cuuint64_t)T}, strides[1] = {(cuuint64_t)K * 2};
+        { cuuint64_t dims[2] = {(cuuint64_t)K, (cuuint64_t)(T < 16 ? 16 : T)}, strides[1] = {(cuuint64_t)K * 2};   // T < 16: rows T..15 are real X (their outputs are not stored)
           cuuint32_t box[2] = {64, (cuuint32_t)(TT / CG)}, es[2] = {1, 1};
           CUresult r = enc(&mX, CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, 2, X, dims, strides, box, es, CU_TENSOR_MAP_INTERLEAVE_NONE,
                            CU_TENSOR_MAP_SWIZZLE_128B, CU_TENSOR_MAP_L2_PROMOTION_L2_128B, CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
@@ -380,7 +381,7 @@ int main(int argc, char** argv) {
             CK(cudaLaunchKernelEx(&lc, k_ts, mW, mX, Y, N, K, T, TT, KS, np, p0, rowsAvail, ring, cnt, tm, orc));
           };
           int pass = -1;
-          if (!orc && (T == 64 || T == 256)) {
+          if (!orc && (T <= 64 || T == 256)) {
             CK(cudaMemset(Y, KS == 1 ? 0xFF : 0, (size_t)T * N * 4)); CK(cudaMemset(ver, 0, 64));   // KS == 1 writes every element: NaN fill catches misses
             launch(1, 0); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
             k_ref<<<((size_t)T * N + 255) / 256, 256>>>(pool, X, Y, N, K, T, 0, ver, ver + 1); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());

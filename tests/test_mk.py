@@ -210,7 +210,7 @@ def test_ts_workspace_map_specs():
 def test_ts_knob_default_and_arm():
     assert B.DEFAULT_KNOBS["MK_TS"] == 128 and B.ts_min(1) == 128 and B.ts_min(256) == 256
     assert dict(B.knob_defines({"MK_TS": 1}) and [d.split("=") for d in B.knob_defines({"MK_TS": 1})])["MK_TS"] == "1"
-    assert MkArm(ts=1).knobs["MK_TS"] == 1 and MkArm().knobs["MK_TS"] == 128
+    assert MkArm(ts=1).knobs["MK_TS"] == 1 and MkArm().knobs["MK_TS"] == 128   # MK_TS 32 / 64 lose e2e (jobs 10304, 10308, 10309)
 
 
 # ---------------------------------------------------------------- MK_TSB: GU and D on the tile stream, idle-CTA finalizers (SPEC-P5b)
@@ -239,17 +239,17 @@ def test_tsb_dyn_smem_and_rings():
         assert B.dyn_smem(npad, ts=1, tsb=1) == B.dyn_smem(npad)
     assert B.dyn_smem(128, ts=256, tsb=1) == B.dyn_smem(128)   # MK_TS = 256: NPAD 128 is below TS_MIN
     assert B.tsb_on(256, {"MK_TSB": 1, "MK_TS": 256}) and not B.tsb_on(128, {"MK_TSB": 1, "MK_TS": 256}) and B.tsb_on(128, {"MK_TSB": 1, "MK_TS": 128})
-    assert not B.tsb_on(256, {"MK_TSB": 1, "MK_TS": 0}) and not B.tsb_on(256, {"MK_TSB": 0}) and B.tsb_on(128, {}) and not B.tsb_on(64, {})
+    assert not B.tsb_on(256, {"MK_TSB": 1, "MK_TS": 0}) and not B.tsb_on(256, {"MK_TSB": 0}) and B.tsb_on(128, {}) and not B.tsb_on(64, {}) and B.tsb_on(32, {"MK_TS": 32})
 
 
 def test_tsb_off_sass_identical():
-    """MK_TSB=1 where TS is off (NPAD <= 64, NPAD 128 with MK_TS = 256) is MK_TSB=0; the default build is MK_TS 128 + MK_TSB 1 (job 9622)."""
+    """MK_TSB=1 where TS is off (NPAD below MK_TS, NPAD 128 with MK_TS = 256) is MK_TSB=0; the default build at NPAD 256 is MK_TS 128 + MK_TSB 1 (job 9622)."""
     pytest.importorskip("cuda.bindings.nvrtc")
     if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
         pytest.skip("no cuobjdump")
     assert _sass(_cb(256, MK_TS=128, MK_TSB=1)) == _sass(B.compile_build(256)[0])
     for npad in (32, 128):
-        assert _sass(_cb(npad, MK_TSB=1)) == _sass(_cb(npad))
+        assert _sass(_cb(npad, MK_TS=256, MK_TSB=1)) == _sass(_cb(npad, MK_TS=256))
     assert _sass(_cb(128, MK_TS=128, MK_TSB=1)) != _sass(_cb(128, MK_TS=128))
     assert _sass(_cb(256, MK_TSB=1)) != _sass(_cb(256))
 
@@ -545,7 +545,7 @@ def test_lmts_off_sass_identical_to_head(tmp_path):
     if arc.returncode != 0:
         pytest.skip(f"commit {HEAD_P3C} not available")
     subprocess.run(["tar", "-x", "-C", str(tmp_path)], input=arc.stdout, check=True)
-    cfgs = tuple((n, ()) for n in B.BUCKETS) + ((256, (("MK_TS", 256), ("MK_TSB", 0))),)
+    cfgs = tuple((n, (("MK_TS", 128),) if n <= 64 else ()) for n in B.BUCKETS) + ((256, (("MK_TS", 256), ("MK_TSB", 0))),)   # MK_TS 128: NPAD <= 64 off the tile stream as at HEAD_P3C
     code = ("import sys,re,subprocess,tempfile,pathlib;from regimebench.kernels.mk import build as B\n"
             "for npad,kn in %r:\n"
             " c=B.compile_build(npad,knobs=kn)[0];p=pathlib.Path(tempfile.mkdtemp())/'k.cubin';p.write_bytes(c)\n"
@@ -569,11 +569,11 @@ def test_lmts_builds_compile(npad):
 
 @pytest.mark.parametrize("npad", (16, 32, 64))
 def test_lmts_off_below_tsb_buckets_sass_identical(npad):
-    """LMTS = TSB && MK_LMTS: at NPAD <= 64 (TS off) MK_LMTS 1 is the MK_LMTS 0 build."""
+    """LMTS = TSB && MK_LMTS: at NPAD <= 64 with TS off (MK_TS 128) MK_LMTS 1 is the MK_LMTS 0 build."""
     pytest.importorskip("cuda.bindings.nvrtc")
     if not (shutil.which("cuobjdump") or Path("/usr/local/cuda/bin/cuobjdump").exists()):
         pytest.skip("no cuobjdump")
-    assert _sass(B.compile_build(npad, knobs=(("MK_LMTS", 1),))[0]) == _sass(B.compile_build(npad)[0])
+    assert _sass(B.compile_build(npad, knobs=(("MK_TS", 128), ("MK_LMTS", 1)))[0]) == _sass(B.compile_build(npad, knobs=(("MK_TS", 128), ("MK_LMTS", 0)))[0])
 
 
 def test_lmts_knob_default_and_arm():
