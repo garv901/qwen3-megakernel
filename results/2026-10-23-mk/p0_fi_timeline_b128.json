@@ -1,0 +1,52 @@
+[
+ {
+  "workload": "R1-b128-kv128",
+  "variant": "graph-pdl-best",
+  "verdict": "PASS",
+  "accuracy": "ratio 0.78 (<=2) repeat-launch max_abs 0.0e+00",
+  "tok_match": "0.95",
+  "steady_us": "1690.4",
+  "attn": "decode/trtllm-direct",
+  "gemm/pdl": "gemm={'qkv': 'cublas', 'o': 'cublas', 'gu': 'cute-dsl', 'down': 'cudnn', 'lm_head': 'cudnn'} pdl=141/312"
+ },
+ {
+  "workload": "R1-b128-kv128",
+  "variant": "graph-pdl-cublas",
+  "verdict": "PASS",
+  "accuracy": "ratio 0.78 (<=2) repeat-launch max_abs 0.0e+00",
+  "tok_match": "0.95",
+  "steady_us": "1707.8",
+  "attn": "decode/trtllm-direct",
+  "gemm/pdl": "gemm={'qkv': 'cublas', 'o': 'cublas', 'gu': 'cublas', 'down': 'cublas', 'lm_head': 'cublas'} pdl=141/312"
+ },
+ {
+  "workload": "R1-b128-kv128",
+  "variant": "graph-nopdl-best",
+  "verdict": "PASS",
+  "accuracy": "ratio 0.78 (<=2) repeat-launch max_abs 0.0e+00",
+  "tok_match": "0.95",
+  "steady_us": "1846.0",
+  "attn": "decode/trtllm-direct",
+  "gemm/pdl": "gemm={'qkv': 'cublas', 'o': 'cublas', 'gu': 'cute-dsl', 'down': 'cudnn', 'lm_head': 'cudnn'} pdl=0/312"
+ },
+ {
+  "workload": "R1-b128-kv128",
+  "variant": "graph-nopdl-cublas",
+  "verdict": "PASS",
+  "accuracy": "ratio 0.78 (<=2) repeat-launch max_abs 0.0e+00",
+  "tok_match": "0.95",
+  "steady_us": "1848.8",
+  "attn": "decode/trtllm-direct",
+  "gemm/pdl": "gemm={'qkv': 'cublas', 'o': 'cublas', 'gu': 'cublas', 'down': 'cublas', 'lm_head': 'cublas'} pdl=0/312"
+ },
+ {
+  "workload": "R1-b128-kv128",
+  "variant": "eager-pdl-best",
+  "verdict": "SKIP",
+  "accuracy": "eager variant is only measured at R0",
+  "tok_match": "",
+  "steady_us": "",
+  "attn": "",
+  "gemm/pdl": ""
+ }
+]
