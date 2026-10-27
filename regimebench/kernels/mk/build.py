@@ -305,7 +305,8 @@ SKV_AUTO_MIN_SEQ = 16   # job 9702: kv128 b16 -1.3, b8 +81 us
 
 
 # splitkv-v8 half-CTA consumers with 64-row stages (MK-attn P10). Job 9771 (vs the tune without it, 1 GPU x 7 rounds): b256 -417.6, b128 -179.8, b64 -75.6,
-# R3-b32-kv1K -84.0, b16-kv128 -38.7. Not at 1-item-per-CTA plans (MK-attn job 9770: b1 kv32K +6.5 us/layer) -> NPAD 16 only with >= 16 sequences.
+# R3-b32-kv1K -84.0, b16-kv128 -38.7. Not at 1-item-per-CTA plans (MK-attn job 9770: b1 kv32K +6.5 us/layer) -> NPAD 16 only with >= 16 sequences
+# and kv < SKV_H64_MAX_KV_16 (loses from kv 1K at b16; NPAD 32 keeps it: b32 kv1K / 4K / 7K -107 / -254 / -395 us vs none).
 SKV_H64 = (("SKV_HALVES", 1), ("SKV_STAGES", 4), ("SKV_STAGE_ROWS", 64))
 # splitkv-v9 quarter-CTA consumers, 32-row stages x 8 (MK-attn P11). Job 9775 (vs h64): b256 -49.0, b128 -91.4, b64 -34.7. It loses at <= 2 items per CTA
 # (MK-attn job 9774: R3-b32-kv1K +10.9, b16-kv128 +1.6 us/layer) -> NPAD >= 64 only.
@@ -342,11 +343,13 @@ def skv_tune(npad: int, qmax: int, seqs) -> tuple:
     kv = max(k for k, _ in seqs)
     if len(seqs) == 1 and kv <= SKV_LDG_MAX_KV:
         return (("SKV_FORCE_ENGINE", 0),)
-    return tuple(sorted((("SKV_KV_EVICT_FIRST", int(kv >= SKV_EF_MIN_KV)), ("SKV_MERGE_CHUNK", 20), *(SKV_H64 if len(seqs) >= 16 else ()))))
+    h64 = SKV_H64 if len(seqs) >= 16 and kv < SKV_H64_MAX_KV_16 else ()
+    return tuple(sorted((("SKV_KV_EVICT_FIRST", int(kv >= SKV_EF_MIN_KV)), ("SKV_MERGE_CHUNK", 20), *h64)))
 
 
 SKV_EF_MIN_KV = 4096   # job 9748, NPAD 16 TMA builds: EF wins at kv 4K / 32K, loses at kv128 / 1K
 SKV_LDG_MAX_KV = 16384   # job 9714: LDG-only wins at b1 kv1K..16K, loses at 32K
+SKV_H64_MAX_KV_16 = 1024   # NPAD 16, 16 seqs, h64 vs none (direct run 2026-10-27, 7 rounds): kv128 -34.2, 512 -12.4, 1K +76.1, 2K +195, 4K +487, 8K +993, 15K +2008 us
 
 
 # ---- tensor maps (host; 2D bf16 SW128, box {64 k, 128 rows}, one per weight tensor, 128 B each in global memory) ----
