@@ -102,16 +102,20 @@ def strip_knobs(src: str) -> str:
 
 # splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8), item prefetch (P9), merge chunk (P4), KV evict_first + 1-row tail by LDG (v5),
 # half-CTA consumers + stage geometry (splitkv-v8 P10)
-SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS", "SKV_GROUPS", "SKV_TMA_FUSE")
+SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS", "SKV_GROUPS", "SKV_TMA_FUSE", "SKV_TC", "SKV_TC_KST", "SKV_TC_VST")
 
 
 def skv_stage_units(knobs: dict) -> int:
     """KV ring size of a q_len 1 build in 128-row stage units (skv_off_bars ``skv_stages``): SKV_STAGES x SKV_STAGE_ROWS / 128 (h64: 4 x 64 rows = 2)."""
+    if knobs.get("SKV_TC"):   # SKV_TC: K ring KST + V ring VST stages of 32 KB (kBarOff = (KST + VST) x 32 KB + 16,896 = SKV_BAR_OFF at 2 / 2)
+        return -(-(int(knobs.get("SKV_TC_KST", 2)) + int(knobs.get("SKV_TC_VST", 2))) // 2)
     return int(knobs.get("SKV_STAGES", 2)) * int(knobs.get("SKV_STAGE_ROWS", 128)) // 128
 
 
 def skv_bar_bytes(knobs: dict) -> int:
     """skv::kBarBytes of a build: max(64, 16 x SKV_STAGES) (splitkv-v9: 128 at the g4a 8-stage ring); the header defaults (2 / 4 stages) give 64."""
+    if knobs.get("SKV_TC"):
+        return 256   # SKV_TC: 22..26 mbarriers in a 256 B tail
     return max(SKV_BAR_BYTES, 16 * int(knobs.get("SKV_STAGES", 2)))
 
 
@@ -318,7 +322,7 @@ SKV_G8 = (("SKV_GROUPS", 8), ("SKV_HALVES", 1), ("SKV_STAGES", 16), ("SKV_STAGE_
 SKV_FUSE_MIN_KV_32 = 1024
 
 
-def skv_tune(npad: int, qmax: int, seqs) -> tuple:
+def skv_tune(npad: int, qmax: int, seqs, tc: int = 0) -> tuple:
     """Per-bucket splitkv header knobs of a workload (MkArm skvtune=1), as sorted (name, value) pairs; knobs set on the arm win.
     Job 9714 (v4, us/step vs the header default, 1 GPU x 7 rounds): at NPAD <= 32, q_len 1:
     - one sequence with kv <= SKV_LDG_MAX_KV: LDG-only (SKV_FORCE_ENGINE 0): b1 kv1K -21.8, 2K -30.0, 4K -9.1, 8K -4.5, 16K -16.6 (kv32K +4.5);
@@ -329,12 +333,17 @@ def skv_tune(npad: int, qmax: int, seqs) -> tuple:
     Job 9748 (vs chunk 20 + TAIL + EF at NPAD 16): TAIL never helps at NPAD 16 (b16-kv128 +10.5, R3-b8-kv1K +20.9, b1 kv32K +11.2, R3-b8-kv4K +17.4);
     EF helps at long kv (b1 kv32K -51, R3-b8-kv4K -35) and hurts at short kv (b16-kv128 +4.2, R3-b8-kv1K +7.6); NPAD 32 keeps both (b32-kv128 +31.8 / +42.1
     without); R6 build: EF q4 +10.8, q16 +4.7 -> EF 0 (splitkv-v6: SKV_KV_EVICT_FIRST default 1 = TMA KV loads, so the off buckets set 0 explicitly).
-    ``seqs``: iterable of (kv_len, q_len)."""
+    ``seqs``: iterable of (kv_len, q_len). ``tc`` (MkArm skvtc): 1 = the tcgen05 consumer (SKV_TC, MK-core A2) at NPAD 16, q_len 1, kv >= SKV_TC_MIN_KV
+    (the b1 LDG-only rule stays). Job 11562 (vs tc 0, 7 rounds): b8 kv2K -9, 4K -43, 8K -79, 16K -156, 32K -255, b16 kv4K -51, 8K -107, iso-240K b1..b16 -224..-254;
+    NPAD 32 loses (b32 kv4K +20 / +35, 7K -5 +-38): it keeps h64 / TAIL / FUSE."""
     seqs = [(int(k), int(q)) for k, q in seqs]
     if not seqs:
         return ()
     if qmax != 1:
         return (("SKV_KV_EVICT_FIRST", 0),)
+    kv = max(k for k, _ in seqs)
+    if tc and npad <= 16 and kv >= SKV_TC_MIN_KV and not (len(seqs) == 1 and kv <= SKV_LDG_MAX_KV):
+        return (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), ("SKV_TC", 1))
     if npad > 32:
         return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *(SKV_G8 if npad == 256 else SKV_G4A), ("SKV_TAIL_LDG", 1), ("SKV_TMA_FUSE", 1))))
     if npad > 16:
@@ -347,6 +356,7 @@ def skv_tune(npad: int, qmax: int, seqs) -> tuple:
     return tuple(sorted((("SKV_KV_EVICT_FIRST", int(kv >= SKV_EF_MIN_KV)), ("SKV_MERGE_CHUNK", 20), *h64)))
 
 
+SKV_TC_MIN_KV = 4096   # SKV_TC at NPAD 16 (job 11562): b8 kv2K -9 (not used: below the floor of untested kv 1K..2K), kv1K row is noise level (+5.7 with identical builds)
 SKV_EF_MIN_KV = 4096   # job 9748, NPAD 16 TMA builds: EF wins at kv 4K / 32K, loses at kv128 / 1K
 SKV_LDG_MAX_KV = 16384   # job 9714: LDG-only wins at b1 kv1K..16K, loses at 32K
 SKV_H64_MAX_KV_16 = 1024   # NPAD 16, 16 seqs, h64 vs none (direct run 2026-10-27, 7 rounds): kv128 -34.2, 512 -12.4, 1K +76.1, 2K +195, 4K +487, 8K +993, 15K +2008 us

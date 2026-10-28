@@ -136,6 +136,13 @@ def regime_grid() -> list[Workload]:
     rng = random.Random(20261022)
     seqs = tuple(Seq(rng.randint(128, 8 * K), 1) for _ in range(32))
     w.append(Workload("R8-b32-ragged", "R8", seqs, {"B": 32, "kv": "U[128,8K]"}, check=True))
+    for kv in (2 * K, 8 * K, 12 * K, 15 * K, 17 * K, 24 * K, 31 * K, 32 * K, 33 * K):
+        w.append(_uniform("R9", f"R9-b8-kv{kv}", 8, kv, 1, {"B": 8, "kv": kv}))
+    for b, kv in ((16, 512), (16, 1 * K), (16, 2 * K), (16, 4 * K), (16, 8 * K), (32, 4 * K), (32, 7 * K)):   # h64 threshold sweep
+        w.append(_uniform("R9", f"R9-b{b}-kv{kv}", b, kv, 1, {"B": b, "kv": kv}))
+    for b in (1, 2, 4, 8, 16):   # iso total KV: 240K cache tokens split over b sequences
+        kv = 240 * K // b
+        w.append(_uniform("R9", f"R9-b{b}-kv{kv}", b, kv, 1, {"B": b, "kv": kv}))
     return [x for x in w if x.kv_cache_bytes <= KV_BYTES_CAP]
 
 
@@ -158,6 +165,11 @@ _MK_POINTS = ("R0-b1-kv128", *(f"R1-b{b}-kv128" for b in (1, 2, 4, 8, 16, 32, 64
 OWNER_POINTS: dict[str, tuple[str, ...]] = {
     "mk": _MK_POINTS,
     "mk_kv": tuple(p for p in _MK_POINTS if int(p.split("-kv")[1].split("-")[0]) >= 1 * K),
+    # Stage 1 KV sweep at fixed batch 8 (one mk build: NPAD 16, splitkv at every point)
+    "mk_b8kv": ("R3-b8-kv1024", "R3-b8-kv4096", "R3-b8-kv16384", *(f"R9-b8-kv{kv}" for kv in (2 * K, 8 * K, 12 * K, 24 * K, 32 * K))),
+    # power-of-two KV check: +-1K around 16K and 32K
+    "mk_iso240": tuple(f"R9-b{b}-kv{240 * K // b}" for b in (1, 2, 4, 8, 16)),
+    "mk_b8kv_p2": ("R3-b8-kv16384", *(f"R9-b8-kv{kv}" for kv in (15 * K, 17 * K, 24 * K, 31 * K, 32 * K, 33 * K))),
 }
 
 

@@ -647,7 +647,12 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
     skv::Params SP; \
     SP.q = qb; SP.kc = kcache; SP.vc = vcache; SP.cache_rows = cache_rows; SP.n_layers = NLAY; \
     SP.items = skv_items; SP.items_stride = skv_items_stride; SP.item_off = nullptr; SP.pair_info = skv_pair_info; SP.part = skv_part; \
-    SP.ao = ao; SP.tmaps = skv_maps; SP.engine = skv_engine; SP.total_q = ntok
+    SP.ao = ao; SP.tmaps = skv_maps; SP.engine = skv_engine; SP.total_q = ntok MK_SKV_TMEM(SP)
+#if SKV_TC
+#define MK_SKV_TMEM(SP) ; SP.tmem = g.tb   // SKV_TC: attend borrows TMEM columns 0..63 of mk's allocation (no accumulator is live across phase 3)
+#else
+#define MK_SKV_TMEM(SP)
+#endif
 #endif
 extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     const long long* __restrict__ token,

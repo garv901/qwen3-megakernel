@@ -116,6 +116,22 @@
 #error "SKV_GROUPS != 2 needs SKV_HALVES 1"
 #endif
 
+#ifndef SKV_TC
+#define SKV_TC 0            // (default 0, opt-in; MK-core tcgen05 pass) 1 = q_len 1 tcgen05 consumer: S^T = K Q^T and O_t^T = V^T P^T on the tensor core (M = 128 positions / dims, N = 16 = 2 real q heads),
+#endif                      // separate K / V TMA rings, softmax warpgroup (warps 4-7) in registers + TMEM, O accumulated in registers. Needs Params::tmem (64 TMEM columns); TMA engine only
+#ifndef SKV_TC_KST
+#define SKV_TC_KST 2        // SKV_TC: K ring stages (128 rows x 256 B = 32 KB each)
+#endif
+#ifndef SKV_TC_VST
+#define SKV_TC_VST 2        // SKV_TC: V ring stages
+#endif
+#if SKV_TC && !(SKV_TMA_MMA && SKV_IFACE == 1 && SKV_QMAX == 1 && SKV_FORCE_ENGINE == 1 && SKV_TICKET == 0 && SKV_PROF_NOCOMP == 0 && SKV_HALVES == 0 && SKV_TAIL_LDG == 0 && SKV_STAGE_ROWS == 128 && SKV_TMA_FUSE == 0)
+#error "SKV_TC needs SKV_TMA_MMA 1, SKV_IFACE 1, SKV_QMAX 1, SKV_FORCE_ENGINE 1, SKV_TICKET 0, SKV_PROF_NOCOMP 0, SKV_HALVES 0, SKV_TAIL_LDG 0, SKV_STAGE_ROWS 128, SKV_TMA_FUSE 0"
+#endif
+#if SKV_TC && (SKV_TC_KST < 2 || SKV_TC_KST > 3 || SKV_TC_VST < 2 || SKV_TC_VST > 3)
+#error "SKV_TC_KST / SKV_TC_VST must be 2 or 3"
+#endif
+
 namespace skv {
 
 typedef unsigned short bf16;   // raw bf16 bits (hv2g does the same; no cuda_bf16 dependency)
@@ -139,8 +155,18 @@ constexpr int kNumTmaps = 2 * kNumMaps + (SKV_TMA_FUSE ? 2 : 0);
 constexpr int kMergeChunk = SKV_MERGE_CHUNK;                   // combine: partial float4 loads in flight per lane
 constexpr float kQScale = 0.08838834764831845f * 1.4426950408889634f;   // 1/sqrt(128) * log2(e)
 constexpr int kRingOff = 0, kMrgOff = kStages * kStageBytes, kMrgBytes = 16 * 2 * kPartStride * 4;
+#if SKV_TC
+// SKV_TC smem map (bytes from the 1024 B aligned scratch base): K ring kTcK x 32 KB | V ring kTcV x 32 KB | Q 2 x 4 KB | P^T 2 x 4 KB | exchange 512 B | mbarriers (256 B).
+// A K / V stage = two 64-dim halves of [128 rows][128 B] (SWIZZLE_128B TMA boxes, 16 KB each). Q / P^T buffer = two halves of [16 rows][128 B] (2 KB each).
+constexpr int kTcK = SKV_TC_KST, kTcV = SKV_TC_VST;
+constexpr int kTcKOff = 0, kTcVOff = kTcK * 32768, kTcQOff = (kTcK + kTcV) * 32768, kTcPOff = kTcQOff + 8192, kTcXOff = kTcPOff + 8192;
+constexpr int kBarBytes = 256;
+constexpr int kBarOff = kTcXOff + 512, kSmemBytes = kBarOff + kBarBytes;   // kBarOff % 1024 == 512 (mk_step.cu static_assert)
+static_assert(kBarOff % 1024 == 512, "SKV_TC kBarOff");
+#else
 constexpr int kBarBytes = (16 * kStages > 64 ? 16 * kStages : 64);   // mbarriers: full[s] at +8 s, empty[s] at +8 (kStages + s)
 constexpr int kBarOff = kMrgOff + kMrgBytes, kSmemBytes = kBarOff + kBarBytes;
+#endif
 
 constexpr bool kMmaOn = (SKV_TMA_MMA != 0);
 // mma consumer geometry: warp w takes 16-position tile (w % kMmaT) of the stage and the dim slice dh = w / kMmaT (kMmaDW dims = kMmaMt m-tiles of 16)
@@ -186,6 +212,9 @@ struct Params {                    // filled by the host planner (plan.py) + cal
   const void* tmaps;               // 2 * kNumMaps CUtensorMap (128 B each, 64 B aligned): [K|V][box rows kStageRows..1]; null if engine LDG
   int engine;                      // 0 LDG, 1 TMA (planner decides per launch)
   int total_q;
+#if SKV_TC
+  unsigned tmem;                   // SKV_TC: TMEM base address (column 0 of >= 64 allocated columns, warp-aligned lane 0) owned by the caller; attend uses columns 0..63 only during the call
+#endif
 #if SKV_TICKET
   unsigned* tickets;               // [n_pairs = 8 * n_seq] u32, zeroed once per plan, never reset: tickets[seq * 8 + kvh] gains S per layer (SKV_TICKET)
 #endif
@@ -1841,6 +1870,302 @@ __device__ __forceinline__ void ticket_merge(const Params& p, unsigned char* sme
 }
 #endif
 
+#if SKV_TC
+// ------------------------------------------------------------------------------------------------ SKV_TC: tcgen05 consumer (q_len 1, TMA engine)
+// SwapAB: per 128-position tile  S^T[pos][n] = K[pos][:] . Q[n][:]   (A = K tile, K-major SW128, B = Q [16 rows][128 dims] K-major SW128, D = TMEM 128 lanes x 16 columns fp32; rows n >= 2 of Q are zero)
+//         O_t^T[dim][n] = sum_pos V[pos][dim] P^T[n][pos]  (A = V tile, MN-major SW128 (idesc bit 15; LBO = 16 KB dim-half stride, SBO = 1 KB), B = P^T [16 rows][128 positions] K-major SW128)
+// Roles (512 threads): warp 0 lane 0 = TMA producer, warp 1 lane 0 = MMA issuer, warps 4-7 = softmax / correction / epilogue (TMEM quadrant = warp % 4: lane = position resp. dim),
+// the other warps idle until the final __syncthreads. Every role walks the same flat tile sequence (counter g, persisted in ring_phase bits 0..23; the item counter in bits 24..30).
+// mbarriers (8 B each from bar0): kfull[KST] kempty[KST] vfull[VST] vempty[VST] qfull[2] sfull[2] sfree[2] pfull[2] ofull[2] ofree[2]. "empty" style waits use parity ((n / depth) & 1) ^ 1 (a fresh barrier passes).
+// TMEM columns (from Params::tmem): S buffer b at 16 b, O_t buffer b at 32 + 16 b (b = tile counter & 1).
+typedef unsigned long long ull;
+constexpr int kTcBarK = 0, kTcBarKE = kTcK, kTcBarV = 2 * kTcK, kTcBarVE = 2 * kTcK + kTcV, kTcBarQ = 2 * (kTcK + kTcV), kTcBarS = kTcBarQ + 2, kTcBarSF = kTcBarS + 2,
+              kTcBarP = kTcBarSF + 2, kTcBarO = kTcBarP + 2, kTcBarOF = kTcBarO + 2, kTcNBar = kTcBarOF + 2;
+static_assert(kTcNBar * 8 <= kBarBytes, "SKV_TC mbarriers");
+constexpr int kTcNamedBar = 8;                                   // named barrier of the softmax warpgroup (mk: ids 1..7 are the GU exchange pairs)
+constexpr unsigned kTcTileMask = 0xffffffu;                      // ring_phase bits of the tile counter
+
+// Q (B operand of S): row n (0..15) = one q head, chunk c = 16 B = dims 8 c .. 8 c + 7. Half c >> 3 at +2048, row n at 128 n, 16 B chunk (c & 7) ^ (n & 7).
+__host__ __device__ constexpr unsigned tc_q_off(unsigned n, unsigned c) { return (c >> 3) * 2048u + n * 128u + (((c & 7u) ^ (n & 7u)) << 4); }
+// P^T (B operand of PV): row n, K index = position pos (0..127): half pos >> 6, 16 B chunk ((pos & 63) >> 3) ^ (n & 7), 2 B element pos & 7.
+__host__ __device__ constexpr unsigned tc_p_off(unsigned n, unsigned pos) { return (pos >> 6) * 2048u + n * 128u + (((((pos & 63u) >> 3)) ^ (n & 7u)) << 4) + (pos & 7u) * 2u; }
+
+// instruction descriptor, kind::f16: D f32, A / B bf16, M x N, bit 15 = A is MN-major (bit 16 = B MN-major: unused)
+__host__ __device__ constexpr unsigned tc_idesc_(int M, int N, bool a_mn) { return (1u << 4) | (1u << 7) | (1u << 10) | (a_mn ? (1u << 15) : 0u) | ((unsigned)(N >> 3) << 17) | ((unsigned)(M >> 4) << 24); }
+// smem descriptor, SWIZZLE_128B, sm100 version bit. K-major: LBO unused (1), SBO = 1024 B (8 rows x 128 B). MN-major (V as A): LBO = byte stride of the 64-element MN atoms (dim halves, 16 KB), SBO = stride of the 8-row K groups (1 KB)
+__device__ __forceinline__ ull tc_desc_(unsigned addr, unsigned lbo, unsigned sbo) { return (ull)((addr >> 4) & 0x3fff) | ((ull)((lbo >> 4) & 0x3fff) << 16) | ((ull)((sbo >> 4) & 0x3fff) << 32) | (1ull << 46) | (2ull << 61); }
+__device__ __forceinline__ ull tc_kdesc(unsigned addr) { return tc_desc_(addr, 16u, 1024u); }
+__device__ __forceinline__ ull tc_vdesc(unsigned addr) { return tc_desc_(addr, 16384u, 1024u); }
+__device__ __forceinline__ void tc_mma_(unsigned d, ull a, ull b, unsigned idesc, unsigned acc) {
+  asm volatile("{\n\t.reg .pred p;\n\tsetp.ne.b32 p, %4, 0;\n\ttcgen05.mma.cta_group::1.kind::f16 [%0], %1, %2, %3, p;\n\t}" ::"r"(d), "l"(a), "l"(b), "r"(idesc), "r"(acc) : "memory");
+}
+__device__ __forceinline__ void tc_commit_(unsigned mbar) { asm volatile("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64 [%0];" ::"r"(mbar) : "memory"); }
+__device__ __forceinline__ void tc_fence_before_() { asm volatile("tcgen05.fence::before_thread_sync;" ::: "memory"); }
+__device__ __forceinline__ void tc_fence_after_() { asm volatile("tcgen05.fence::after_thread_sync;" ::: "memory"); }
+__device__ __forceinline__ void tc_wait_ld_() { asm volatile("tcgen05.wait::ld.sync.aligned;" ::: "memory"); }
+__device__ __forceinline__ void tc_ld2(unsigned& a, unsigned& b, unsigned ta) { asm volatile("tcgen05.ld.sync.aligned.32x32b.x2.b32 {%0,%1}, [%2];" : "=r"(a), "=r"(b) : "r"(ta)); }
+__device__ __forceinline__ void tc_ld16(unsigned (&v)[16], unsigned ta) {   // unit test: 16 columns
+  asm volatile("tcgen05.ld.sync.aligned.32x32b.x16.b32 {%0,%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14,%15}, [%16];"
+               : "=r"(v[0]), "=r"(v[1]), "=r"(v[2]), "=r"(v[3]), "=r"(v[4]), "=r"(v[5]), "=r"(v[6]), "=r"(v[7]), "=r"(v[8]), "=r"(v[9]), "=r"(v[10]), "=r"(v[11]), "=r"(v[12]), "=r"(v[13]), "=r"(v[14]), "=r"(v[15])
+               : "r"(ta));
+}
+__device__ __forceinline__ void tc_alloc(unsigned smem_slot, unsigned ncols) {   // whole warp (unit test / standalone benches; mk allocates its own 256 columns)
+  asm volatile("tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32 [%0], %1;" ::"r"(smem_slot), "r"(ncols) : "memory");
+  asm volatile("tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned;" ::: "memory");
+}
+__device__ __forceinline__ void tc_dealloc(unsigned taddr, unsigned ncols) { asm volatile("tcgen05.dealloc.cta_group::1.sync.aligned.b32 %0, %1;" ::"r"(taddr), "r"(ncols) : "memory"); }
+__device__ __forceinline__ void mb_arrive1(unsigned b) { asm volatile("mbarrier.arrive.shared::cta.b64 _, [%0];" ::"r"(b) : "memory"); }
+__device__ __forceinline__ void sts16(unsigned a, unsigned short v) { asm volatile("st.shared.b16 [%0], %1;" ::"r"(a), "h"(v) : "memory"); }
+__device__ __forceinline__ void sts128(unsigned a, const uint4& v) { asm volatile("st.shared.v4.u32 [%0], {%1,%2,%3,%4};" ::"r"(a), "r"(v.x), "r"(v.y), "r"(v.z), "r"(v.w) : "memory"); }
+__device__ __forceinline__ void sts64f(unsigned a, float x, float y) { asm volatile("st.shared.v2.f32 [%0], {%1,%2};" ::"r"(a), "f"(x), "f"(y) : "memory"); }
+__device__ __forceinline__ float2 lds64f(unsigned a) {
+  float2 v;
+  asm volatile("ld.shared.v2.f32 {%0,%1}, [%2];" : "=f"(v.x), "=f"(v.y) : "r"(a) : "memory");
+  return v;
+}
+
+// number of 128-position tiles of item record a (positions p0 .. p1 - 1)
+__device__ __forceinline__ int tc_tiles(const int4& a) { return (a.w - a.z + 127) >> 7; }
+
+// ---- TMA producers: warp 0 lane 0 = K (kV false), warp 2 lane 0 = V. K(g) into K slot g % kTcK, V(g) into V slot g % kTcV; always full 128-row boxes (rows past the item / the map are other data /
+// TMA zero fill: masked by the softmax). Separate threads so that K (slot freed right after the S MMAs) never waits for a V slot (freed after the PV MMAs).
+template <bool kV>
+__device__ __forceinline__ void tc_producer(const Params& p, int layer, unsigned sbase, unsigned bar0, unsigned g, const int4* rec, int ni) {
+  const size_t layer_row = (size_t)layer * p.cache_rows;
+  const char* mp = (const char*)p.tmaps + (kV ? kNumMaps * 128 : 0);   // map [0] = K box (64 dims, 1, 128 rows), [kNumMaps] = V
+  constexpr unsigned D = kV ? kTcV : kTcK;
+  constexpr unsigned bf = kV ? kTcBarV : kTcBarK, be = kV ? kTcBarVE : kTcBarKE, off = kV ? kTcVOff : kTcKOff;
+  for (int k = 0; k < ni; ++k) {
+    const int4 a = rec[2 * k];
+    const int nt = tc_tiles(a), kvh = a.y & 15;
+    int rc = (int)(layer_row + (size_t)a.x) + a.z;
+    for (int j = 0; j < nt; ++j, ++g, rc += 128) {
+      const unsigned s = g % D, bar = bar0 + 8 * (bf + s);
+      mb_wait(bar0 + 8 * (be + s), ((g / D) & 1) ^ 1);
+      mb_expect(bar, 32768u);
+      const unsigned dst = sbase + off + s * 32768;
+      tma3d(dst, mp, 0, kvh, rc, bar);
+      tma3d(dst + 16384, mp, 64, kvh, rc, bar);
+    }
+  }
+}
+
+__device__ __forceinline__ bool tc_try(unsigned b, unsigned parity) {
+  unsigned ok;
+  asm volatile("{\n .reg .pred p;\n mbarrier.try_wait.parity.shared::cta.b64 p, [%1], %2;\n selp.u32 %0, 1, 0, p;\n}\n" : "=r"(ok) : "r"(b), "r"(parity) : "memory");
+  return ok != 0;
+}
+
+// ---- warp 1 lane 0: MMA issuer. Whichever of "S(gs): K(gs), Q, S buffer ready" and "PV(gp), gp < gs: P(gp), V(gp), O buffer ready" is ready first is issued (PV first when both are).
+__device__ __forceinline__ void tc_mma_issuer(const Params& p, unsigned sbase, unsigned bar0, unsigned g, unsigned ic, const int4* rec, int ni) {
+  constexpr unsigned idS = tc_idesc_(128, 16, false), idV = tc_idesc_(128, 16, true);
+  unsigned tot = 0;
+  for (int k = 0; k < ni; ++k) tot += (unsigned)tc_tiles(rec[2 * k]);
+  const unsigned end = g + tot;
+  unsigned gs = g, gp = g;
+  int k = 0, j = 0, nt = tc_tiles(rec[0]);
+  while (gp < end) {
+    if (gp < gs) {
+      const unsigned b = gp & 1, vs = gp % kTcV;
+      if (tc_try(bar0 + 8 * (kTcBarP + b), (gp >> 1) & 1) && tc_try(bar0 + 8 * (kTcBarV + vs), (gp / kTcV) & 1) && tc_try(bar0 + 8 * (kTcBarOF + b), ((gp >> 1) & 1) ^ 1)) {
+        tc_fence_after_();
+        const unsigned va = sbase + kTcVOff + vs * 32768, pa = sbase + kTcPOff + b * 4096, d = p.tmem + 32 + 16 * b;
+#pragma unroll
+        for (int kk = 0; kk < 8; ++kk) tc_mma_(d, tc_vdesc(va + kk * 2048), tc_kdesc(pa + (kk >> 2) * 2048 + (kk & 3) * 32), idV, kk > 0);
+        tc_commit_(bar0 + 8 * (kTcBarO + b));
+        tc_commit_(bar0 + 8 * (kTcBarVE + vs));
+        ++gp;
+        continue;
+      }
+    }
+    if (gs < end) {
+      const unsigned b = gs & 1, ks = gs % kTcK;
+      const unsigned iq = ic + (unsigned)k;
+      if ((j > 0 || tc_try(bar0 + 8 * (kTcBarQ + (iq & 1)), (iq >> 1) & 1)) && tc_try(bar0 + 8 * (kTcBarK + ks), (gs / kTcK) & 1) && tc_try(bar0 + 8 * (kTcBarSF + b), ((gs >> 1) & 1) ^ 1)) {
+        tc_fence_after_();
+        const unsigned qb = sbase + kTcQOff + (iq & 1) * 4096, ka = sbase + kTcKOff + ks * 32768, d = p.tmem + 16 * b;
+#pragma unroll
+        for (int kk = 0; kk < 8; ++kk) tc_mma_(d, tc_kdesc(ka + (kk >> 2) * 16384 + (kk & 3) * 32), tc_kdesc(qb + (kk >> 2) * 2048 + (kk & 3) * 32), idS, kk > 0);
+        tc_commit_(bar0 + 8 * (kTcBarS + b));
+        tc_commit_(bar0 + 8 * (kTcBarKE + ks));
+        ++gs;
+        if (++j == nt) { j = 0; ++k; if (k < ni) nt = tc_tiles(rec[2 * k]); }
+      }
+    }
+  }
+}
+
+// ---- warps 4-7: softmax, O correction, epilogue. Thread (wq, lane): S^T position / O^T dim = 32 wq + lane (the TMEM lane); two q heads in two columns.
+__device__ __forceinline__ void tc_softmax(const Params& p, int layer, unsigned sbase, unsigned bar0, unsigned g, unsigned ic, const int4* rec, int ni) {
+  (void)layer;
+  const int wt = threadIdx.x - 128, lane = wt & 31, wq = wt >> 5;
+  const unsigned tq = (unsigned)(wq * 32) << 16;
+  const unsigned xm = sbase + kTcXOff, xl = xm + 64;            // max exchange [2 buffers][4 warps][2 heads], l exchange [4 warps][2]
+  {                                                               // rows 2..15 of the Q / P^T buffers (8 half blocks of 2 KB at kTcQOff, kTcPOff = kTcQOff + 8 KB): zero once per call
+    const uint4 z = make_uint4(0, 0, 0, 0);
+    for (int i = wt; i < 8 * 112; i += 128) sts128(sbase + kTcQOff + (i / 112) * 2048 + 256 + (i % 112) * 16, z);
+  }
+  auto ldq = [&](int k) {                                         // warp 4 only: lane = (head hq = lane >> 4, 16 B chunk lane & 15) of item k's q
+    const int4 a = rec[2 * k], b = rec[2 * k + 1];
+    return ldg_cg4(p.q + (size_t)(b.z * kQHeads + 2 * (a.y & 15) + (lane >> 4)) * kDim + (lane & 15) * 8);
+  };
+  auto stq = [&](unsigned ib, const uint4& x) { sts128(sbase + kTcQOff + ib * 4096 + tc_q_off(lane >> 4, lane & 15), x); };
+  uint4 qn = make_uint4(0, 0, 0, 0);
+  if (wq == 0) { qn = ldq(0); stq(ic & 1, qn); }
+  asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
+  asm volatile("bar.sync %0, %1;" ::"r"(kTcNamedBar), "r"(128) : "memory");
+  if (wt == 0) mb_arrive1(bar0 + 8 * (kTcBarQ + (ic & 1)));
+
+#ifdef SKV_TC_PROF
+  long long pw_s = 0, pw_o = 0, pt0 = clock64(), pfirst = 0, plast = 0;
+  int ptiles = 0;
+#define PROF_BEGIN long long pq_ = clock64();
+#define PROF_END(v) v += clock64() - pq_;
+#else
+#define PROF_BEGIN
+#define PROF_END(v)
+#endif
+  for (int k = 0; k < ni; ++k, ++ic) {
+    const int4 ra = rec[2 * k], rb = rec[2 * k + 1];
+    const int len = ra.w - ra.z, nt = tc_tiles(ra), kvh = ra.y & 15;
+    if (wq == 0 && k + 1 < ni) qn = ldq(k + 1);
+    float m0 = neg_inf(), m1 = neg_inf(), l0 = 0.f, l1 = 0.f, o0 = 0.f, o1 = 0.f, ap0 = 0.f, ap1 = 0.f;
+    for (int j = 0; j < nt; ++j, ++g) {
+      const unsigned b = g & 1;
+      { PROF_BEGIN mb_wait(bar0 + 8 * (kTcBarS + b), (g >> 1) & 1); PROF_END(pw_s) }
+#ifdef SKV_TC_PROF
+      if (ptiles == 0) pfirst = clock64() - pt0;
+      ++ptiles; plast = clock64();
+#endif
+      tc_fence_after_();
+      unsigned u0, u1;
+      tc_ld2(u0, u1, p.tmem + tq + 16 * b);
+      if (j == 0 && wq == 0 && k + 1 < ni) {                       // S MMAs of this item's first tile are done => the other Q buffer (item k - 1) is free: stage item k + 1's q
+        stq((ic + 1) & 1, qn);
+        asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
+        __syncwarp();
+        if (lane == 0) mb_arrive1(bar0 + 8 * (kTcBarQ + ((ic + 1) & 1)));
+      }
+      tc_wait_ld_();
+      tc_fence_before_();
+      __syncwarp();
+      if (lane == 0) mb_arrive1(bar0 + 8 * (kTcBarSF + b));
+      float s0 = __uint_as_float(u0), s1 = __uint_as_float(u1);
+      if (j == nt - 1 && wq * 32 + lane >= len - j * 128) { s0 = neg_inf(); s1 = neg_inf(); }   // positions >= n (only the last tile can be partial)
+      float c0, c1;
+      asm volatile("redux.sync.max.f32 %0, %1, 0xffffffff;" : "=f"(c0) : "f"(s0));
+      asm volatile("redux.sync.max.f32 %0, %1, 0xffffffff;" : "=f"(c1) : "f"(s1));
+      const unsigned xa = xm + (b * 8 + wq * 2) * 4;
+      if (lane == 0) sts64f(xa, c0, c1);
+      asm volatile("bar.sync %0, %1;" ::"r"(kTcNamedBar), "r"(128) : "memory");
+      {
+        const unsigned xb = xm + b * 32;
+        const float2 e0 = lds64f(xb), e1 = lds64f(xb + 8), e2 = lds64f(xb + 16), e3 = lds64f(xb + 24);
+        c0 = fmaxf(fmaxf(e0.x, e1.x), fmaxf(e2.x, e3.x)); c1 = fmaxf(fmaxf(e0.y, e1.y), fmaxf(e2.y, e3.y));
+      }
+      const float n0 = fmaxf(m0, c0 * kQScale), n1 = fmaxf(m1, c1 * kQScale);      // finite: every tile has a valid position
+      const float a0 = ex2(m0 - n0), a1 = ex2(m1 - n1);
+      m0 = n0; m1 = n1;
+      const float pp0 = ex2(fmaf(s0, kQScale, -n0)), pp1 = ex2(fmaf(s1, kQScale, -n1));
+      l0 = fmaf(l0, a0, pp0); l1 = fmaf(l1, a1, pp1);
+      {
+        const unsigned pa = sbase + kTcPOff + b * 4096, pos = wq * 32 + lane;
+        sts16(pa + tc_p_off(0, pos), f2bf(pp0));
+        sts16(pa + tc_p_off(1, pos), f2bf(pp1));
+      }
+      asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
+      __syncwarp();
+      if (lane == 0) mb_arrive1(bar0 + 8 * (kTcBarP + b));
+      if (j > 0) {                                                  // O_t of the previous tile: O = O * alpha(g - 1) + O_t(g - 1)  (O is relative to m of tile g - 2 before)
+        const unsigned gg = g - 1, bb = gg & 1;
+        { PROF_BEGIN mb_wait(bar0 + 8 * (kTcBarO + bb), (gg >> 1) & 1); PROF_END(pw_o) }
+        tc_fence_after_();
+        unsigned v0, v1;
+        tc_ld2(v0, v1, p.tmem + tq + 32 + 16 * bb);
+        tc_wait_ld_();
+        tc_fence_before_();
+        __syncwarp();
+        if (lane == 0) mb_arrive1(bar0 + 8 * (kTcBarOF + bb));
+        o0 = fmaf(o0, ap0, __uint_as_float(v0)); o1 = fmaf(o1, ap1, __uint_as_float(v1));
+      }
+      ap0 = a0; ap1 = a1;
+    }
+    // l: per-position partial sums -> warp -> 4 warps
+#pragma unroll
+    for (int o = 16; o; o >>= 1) { l0 += __shfl_xor_sync(0xffffffffu, l0, o); l1 += __shfl_xor_sync(0xffffffffu, l1, o); }
+    if (lane == 0) sts64f(xl + wq * 8, l0, l1);
+    asm volatile("bar.sync %0, %1;" ::"r"(kTcNamedBar), "r"(128) : "memory");
+    float L0, L1;
+    {
+      const float2 e0 = lds64f(xl), e1 = lds64f(xl + 8), e2 = lds64f(xl + 16), e3 = lds64f(xl + 24);
+      L0 = (e0.x + e1.x) + (e2.x + e3.x); L1 = (e0.y + e1.y) + (e2.y + e3.y);
+    }
+    {                                                               // drain: the last tile's O_t
+      const unsigned gg = g - 1, bb = gg & 1;
+      mb_wait(bar0 + 8 * (kTcBarO + bb), (gg >> 1) & 1);
+      tc_fence_after_();
+      unsigned v0, v1;
+      tc_ld2(v0, v1, p.tmem + tq + 32 + 16 * bb);
+      tc_wait_ld_();
+      tc_fence_before_();
+      __syncwarp();
+      if (lane == 0) mb_arrive1(bar0 + 8 * (kTcBarOF + bb));
+      o0 = fmaf(o0, ap0, __uint_as_float(v0)); o1 = fmaf(o1, ap1, __uint_as_float(v1));
+    }
+    const int d = wt;
+    if (rb.y == 1) {
+      p.ao[(size_t)rb.z * (kQHeads * kDim) + (2 * kvh) * kDim + d] = f2bf(o0 / L0);
+      p.ao[(size_t)rb.z * (kQHeads * kDim) + (2 * kvh + 1) * kDim + d] = f2bf(o1 / L1);
+    } else {
+      float* d0 = p.part + ((size_t)rb.x * 2) * kPartStride;
+      float* d1 = d0 + kPartStride;
+      __stcg(d0 + d, o0); __stcg(d1 + d, o1);
+      if (d == 0) { __stcg(d0 + 128, m0); __stcg(d0 + 129, L0); __stcg(d1 + 128, m1); __stcg(d1 + 129, L1); }
+    }
+  }
+#ifdef SKV_TC_PROF
+  if (wt == 0 && layer == 5 && (blockIdx.x == 0 || blockIdx.x == 77)) printf("TCPROF first_s %lld since_last_s %lld cta %d tiles %d total %lld wait_s %lld wait_o %lld per-tile total %lld wait_s %lld wait_o %lld\n", pfirst, clock64() - plast, blockIdx.x, ptiles, clock64() - pt0, pw_s, pw_o, (clock64() - pt0) / ptiles, pw_s / ptiles, pw_o / ptiles);
+#endif
+}
+
+// All roles of one attend call. ring_phase: bit 31 init, bits 24..30 item counter, bits 0..23 tile counter (identical in every thread at return).
+__device__ __forceinline__ void run_items_tc(const Params& p, int layer, unsigned char* smem, unsigned& ring_phase, const int4* rec, int ni) {
+  const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5;
+  const unsigned sbase = smaddr(smem), bar0 = sbase + kBarOff;
+  const unsigned g = ring_phase & kTcTileMask, ic = (ring_phase >> 24) & 0x7fu;
+  if (warp == 0) {
+    if (lane == 0) tc_producer<false>(p, layer, sbase, bar0, g, rec, ni);
+    __syncwarp();
+  } else if (warp == 2) {
+    if (lane == 0) tc_producer<true>(p, layer, sbase, bar0, g, rec, ni);
+    __syncwarp();
+  } else if (warp == 1) {
+#ifdef SKV_TC_NOMATH   // profiling only: the K / V rings are drained as fast as they fill (no MMA, no softmax, no output): the load pipeline of the swizzled 128 B-box access pattern
+    if (lane == 0) {
+      unsigned tot = 0;
+      for (int k = 0; k < ni; ++k) tot += (unsigned)tc_tiles(rec[2 * k]);
+      for (unsigned gg = g; gg < g + tot; ++gg) {
+        mb_wait(bar0 + 8 * (kTcBarK + gg % kTcK), (gg / kTcK) & 1); mb_arrive1(bar0 + 8 * (kTcBarKE + gg % kTcK));
+        mb_wait(bar0 + 8 * (kTcBarV + gg % kTcV), (gg / kTcV) & 1); mb_arrive1(bar0 + 8 * (kTcBarVE + gg % kTcV));
+      }
+    }
+    __syncwarp();
+#else
+    if (lane == 0) tc_mma_issuer(p, sbase, bar0, g, ic, rec, ni);
+    __syncwarp();
+  } else if (warp >= 4 && warp < 8) {
+    tc_softmax(p, layer, sbase, bar0, g, ic, rec, ni);
+#endif
+  }
+  unsigned nt = 0;
+  for (int k = 0; k < ni; ++k) nt += (unsigned)tc_tiles(rec[2 * k]);
+  tc_fence_before_();
+  __syncthreads();
+  tc_fence_after_();
+  ring_phase = (ring_phase & 0x80000000u) | ((((ring_phase >> 24) & 0x7fu) + (unsigned)ni) & 0x7fu) << 24 | ((g + nt) & kTcTileMask);
+}
+#endif  // SKV_TC
+
 // All 512 threads. Runs the CTA's items one after another. ring_phase: bit 31 = mbarriers initialised, low bits = TMA stages consumed so far;
 // start every CTA with ring_phase = 0 and pass the same variable to every layer's call.
 // SKV_HALVES: stage counters of the groups (identical in every thread at return): G = 2: bits 0..14 / 16..30; G = 4: 7 bits each at bits 0, 8, 16, 24; G = 8: 3 bits each at bits 0, 3, .., 21.
@@ -1862,7 +2187,9 @@ __device__ void attend(const Params& p, int layer, unsigned char* smem, unsigned
   // generic-proxy use of the ring bytes between calls before this call's TMA (async-proxy) writes.
   if (tma && !(ring_phase >> 31)) {
     if (tid == 0) {
-#if SKV_HALVES
+#if SKV_TC
+      for (int i = 0; i < kTcNBar; ++i) mb_init(bar0 + 8 * i, (i >= kTcBarSF && i < kTcBarSF + 2) || (i >= kTcBarP && i < kTcBarP + 2) || (i >= kTcBarOF && i < kTcBarOF + 2) ? 4 : 1);   // sfree / pfull / ofree: one arrive per softmax warp
+#elif SKV_HALVES
       for (int s = 0; s < kStages; ++s) { mb_init(bar0 + 8 * s, 1); mb_init(bar0 + 8 * (kStages + s), kHW); }   // P10: one arrive per warp of the owning group (kHW = 16 / SKV_GROUPS)
 #else
       for (int s = 0; s < kStages; ++s) { mb_init(bar0 + 8 * s, 1); mb_init(bar0 + 8 * (kStages + s), 16); }
@@ -1872,7 +2199,9 @@ __device__ void attend(const Params& p, int layer, unsigned char* smem, unsigned
     ring_phase |= 0x80000000u;
   }
   if (tma) { asm volatile("fence.proxy.async.shared::cta;" ::: "memory"); __syncthreads(); }
+#if !SKV_TC
   unsigned g = ring_phase & 0x7fffffffu;
+#endif
   const int4* rec = p.items + (size_t)blockIdx.x * p.items_stride * 2;
 #if SKV_IFACE == 2
   const int ni = rec[1].y >> 8;                                 // iface 2: n_items = S word >> 8 (word 7 is vis)
@@ -1880,7 +2209,10 @@ __device__ void attend(const Params& p, int layer, unsigned char* smem, unsigned
   const int ni = rec[1].w;                                      // n_items is stored in every record of the CTA
 #endif
   if (ni == 0) return;
-#if SKV_HALVES && SKV_GROUPS == 8
+#if SKV_TC
+  run_items_tc(p, layer, smem, ring_phase, rec, ni);
+  return;
+#elif SKV_HALVES && SKV_GROUPS == 8
   run_items_g8(p, layer, smem, g, rec, ni);
 #elif SKV_HALVES
   run_items_halves(p, layer, smem, g, rec, ni);
@@ -1893,7 +2225,9 @@ __device__ void attend(const Params& p, int layer, unsigned char* smem, unsigned
 #if SKV_TICKET
   ticket_merge(p, smem, rec, ni);
 #endif
+#if !SKV_TC
   ring_phase = (ring_phase & 0x80000000u) | (g & 0x7fffffffu);
+#endif
 }
 
 // ------------------------------------------------------------------------------------------------ combine

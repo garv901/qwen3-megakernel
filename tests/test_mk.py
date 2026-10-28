@@ -423,6 +423,10 @@ def test_skv_tune_per_bucket():
     assert B.skv_bar_bytes(dict(B.SKV_G4A)) == 128 and B.skv_bar_bytes({}) == 64 and B.skv_stage_units(dict(B.SKV_G4A)) == 2
     assert B.skv_stage_units(dict(h64)) == 2 and len(B.skv_map_specs(1000, extra=B.skv_knob_defines(dict(h64)))) == 14
     assert B.skv_tune(16, 16, [(1024, 2)]) == (("SKV_KV_EVICT_FIRST", 0),) and B.skv_tune(16, 1, []) == ()
+    tc = (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), ("SKV_TC", 1))   # MkArm skvtc 1 (MK-core A2)
+    assert B.skv_tune(16, 1, [(4096, 1)] * 8, 1) == tc == B.skv_tune(16, 1, [(32768, 1)], 1)
+    assert B.skv_tune(16, 1, [(16384, 1)], 1) == (("SKV_FORCE_ENGINE", 0),) and B.skv_tune(16, 1, [(1024, 1)] * 8, 1) == B.skv_tune(16, 1, [(1024, 1)] * 8)
+    assert B.skv_tune(32, 1, [(8192, 1)] * 32, 1) == B.skv_tune(32, 1, [(8192, 1)] * 32) and B.skv_tune(64, 1, [(8192, 1)] * 64, 1) == B.skv_tune(64, 1, [(8192, 1)] * 64) and B.skv_bar_bytes(dict(tc)) == 256 and B.skv_stage_units(dict(tc)) == 2
 
 
 def test_skv_attn_option_and_supports():

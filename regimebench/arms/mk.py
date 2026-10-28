@@ -61,7 +61,7 @@ class MkStep:
         dev = torch.device(device)
         self.attn = arm.resolve_attn(w)   # "placeholder" | "splitkv" (auto resolved per workload)
         self.qmax = B.skv_qmax_of([(s.kv_len, s.q_len) for s in w.seqs]) if self.attn == "splitkv" else 1   # R6 build (-DSKV_QMAX=16) iff some q_len > 1
-        tune = B.skv_tune(self.npad, self.qmax, [(s.kv_len, s.q_len) for s in w.seqs]) if self.attn == "splitkv" and arm.skvtune else ()
+        tune = B.skv_tune(self.npad, self.qmax, [(s.kv_len, s.q_len) for s in w.seqs], arm.skvtc) if self.attn == "splitkv" and arm.skvtune else ()
         ld = arm._kernel(self.npad, dev, self.attn, self.qmax, tune)
         self.kern = ld
         self.nb = ld.nb
@@ -212,11 +212,12 @@ class MkStep:
 class MkArm:
     name = "mk"
 
-    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, **_: Any):
+    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, skvtc: int = 1, **_: Any):
         if attn not in ATTN_OPTIONS:
             raise ValueError(f"unknown attn {attn!r} (one of {ATTN_OPTIONS})")
         self.attn = attn
         self.skvtune = int(skvtune)   # 1: per-bucket splitkv header knobs (B.skv_tune; job 9714)
+        self.skvtc = int(skvtc)       # 1 (default, job 11562): B.skv_tune(tc=1), the tcgen05 attention consumer at NPAD 16, kv >= 4K (MK-core A2)
         self.knobs = {"MK_STAMPS": int(stamps), "MK_NULL": int(null), "MK_KU": int(ku), "MK_RING": int(ring), "MK_TS": int(ts), "MK_TSB": int(tsb), "MK_LMTS": int(lmts)}
         self._loaded: dict[tuple, _Loaded] = {}
         self._wgu_cache: dict[tuple, Any] = {}
