@@ -918,6 +918,11 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
         if constexpr (!mk_null(2)) if (!MK_DBG_NOATT || ntok < 0) { MK_SKV_PARAMS(SP); skv::attend<NT>(SP, l, mk_opaque(sm + OFF_BARS - skv::kBarOff), ring_phase); }   // CTAs without items return early (no block barrier): bar_arrive below starts with __syncthreads
         bar_arrive(bar_cnt);   // always arrive first (MK_PFA 0 order would race the TMA writes with other warps' last reads of attend's ring)
         prefetch_next<PhO>(g, l);   // attend is done with the ring bytes (all its reads precede the arrive's __syncthreads): O's first units land during the barrier
+        if constexpr (CMB && !mk_null(2)) if (skv_comb) {   // P20: all split rows -> ao once (grid-strided warps), then O stages B from ao (no combine_head)
+            bar_wait(bar_cnt, bar_target);
+            { MK_SKV_PARAMS(SP); skv::combine_all_to_ao(SP, l, blockIdx.x, gridDim.x); }
+            bar_arrive(bar_cnt);
+        }
 #else
         if constexpr (!mk_null(2))
             skv_attention(l, reinterpret_cast<const unsigned short*>(qb), reinterpret_cast<const unsigned short*>(kcache),
@@ -930,11 +935,11 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
         // ---- Phase 4: O GEMM (K = 2048), B = ao, red.add -> x (residual); zero qkv ----
         {
 #ifdef MK_SKV
-            SkvB get{skv_comb, ao, ntok};   // the B tile of unit (rb, kc) is q-head kc: staged here by combine_head (writes the SW128 K-major slot at OFF_X, ends with fence.proxy.async), or (skv_comb 0) by stage_any from ao inside gemm_phase; its __syncthreads precedes the MMA
+            SkvB get{CMB ? 0 : skv_comb, ao, ntok};   // the B tile of unit (rb, kc) is q-head kc: staged here by combine_head (writes the SW128 K-major slot at OFF_X, ends with fence.proxy.async), or (skv_comb 0) by stage_any from ao inside gemm_phase; its __syncthreads precedes the MMA
             if constexpr (!mk_null(2) && !mk_null(3)) {   // MK_NULL bit 2: attention (and so the combine) skipped; bit 3: the O phase has no staging
                 const Geom<PhO> ge = geom<PhO>();
                 MK_SKV_PARAMS(SP);
-                if (skv_comb && ge.n > 0) skv::combine_head<NPAD, NT>(SP, l, ge.u0 % (PhO::K / KU), mk_opaque(sm + OFF_X), ntok);
+                if (!CMB && skv_comb && ge.n > 0) skv::combine_head<NPAD, NT>(SP, l, ge.u0 % (PhO::K / KU), mk_opaque(sm + OFF_X), ntok);
             }
 #else
             skv_combine(l, ntok, reinterpret_cast<unsigned short*>(ao), blockIdx.x, gridDim.x);   // placeholder: no splits
