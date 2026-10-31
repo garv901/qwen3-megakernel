@@ -102,7 +102,7 @@ def strip_knobs(src: str) -> str:
 
 # splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8), item prefetch (P9), merge chunk (P4), KV evict_first + 1-row tail by LDG (v5),
 # half-CTA consumers + stage geometry (splitkv-v8 P10)
-SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS", "SKV_GROUPS", "SKV_TMA_FUSE", "SKV_TC", "SKV_TC_KST", "SKV_TC_VST")
+SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS", "SKV_GROUPS", "SKV_TMA_FUSE", "SKV_TC", "SKV_TC_KST", "SKV_TC_VST", "SKV_SI", "SKV_SI_P")
 
 
 def skv_stage_units(knobs: dict) -> int:
@@ -110,6 +110,15 @@ def skv_stage_units(knobs: dict) -> int:
     if knobs.get("SKV_TC"):   # SKV_TC: K ring KST + V ring VST stages of 32 KB (kBarOff = (KST + VST) x 32 KB + 16,896 = SKV_BAR_OFF at 2 / 2)
         return -(-(int(knobs.get("SKV_TC_KST", 2)) + int(knobs.get("SKV_TC_VST", 2))) // 2)
     return int(knobs.get("SKV_STAGES", 2)) * int(knobs.get("SKV_STAGE_ROWS", 128)) // 128
+
+
+def skv_si_bytes(knobs: dict) -> int:
+    """skv::kSiBytes of an SKV_SI build (splitkv-v13 P21: item table CAP x 32 B | stage prefix | counters | P park slots x 16 x 528 B), else 0."""
+    if not knobs.get("SKV_SI"):
+        return 0
+    cap, p = 64, int(knobs.get("SKV_SI_P", 5))
+    raw = cap * 32 + ((cap + 1 + 3) // 4) * 16 + ((4 * p + 3) // 4) * 16 + p * 16 * 132 * 4
+    return (raw + 1023) // 1024 * 1024   # mk needs kBarOff % 1024 == 512 (1024 B aligned scratch base): the header must pad kSiBytes the same way (R10-2 ask)
 
 
 def skv_bar_bytes(knobs: dict) -> int:
@@ -167,7 +176,7 @@ def _ts_lay(npad: int, ku: int, ts: int, tsb: int, gu_tt: int, stamps: int = 0) 
     return ts_ring(1, tt["qkv"], 0, stamps) * (32768 + tt["qkv"] * 256)
 
 
-def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placeholder", lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, skv_stages: int = 2, gu_tt: int = 0, stamps: int = 0) -> int:
+def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placeholder", lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, skv_stages: int = 2, gu_tt: int = 0, stamps: int = 0, skv_extra: int = 0) -> int:
     """OFF_BARS of the kernel layout (mk_common.cuh): end of the overlay regions; under attn = splitkv at least kBarOff and = 512 (mod 1024).
     ``skv_stages``: SKV_STAGES of a q_len 1 build (128-row stages, 64 KB each: kBarOff = SKV_BAR_OFF + (stages - 2) * 64 KB)."""
     nbox = ku // 64
@@ -177,12 +186,12 @@ def skv_off_bars(npad: int, ku: int = 128, ring: int = 2, attn: str = "placehold
     if lmp and npad <= 64 and ku == 128:   # the LMP layout and the TS ring overlay each other (kernel OFF_BARS = max of the layouts)
         lay = max(lay, 8 * xs + lm_ring(npad, lmr) * ub)
     if attn == "splitkv":
-        lay = max(lay, SKV_BAR_OFF + (skv_stages - 2) * SKV_STAGE_BYTES)
+        lay = max(lay, SKV_BAR_OFF + (skv_stages - 2) * SKV_STAGE_BYTES + skv_extra)   # skv_extra: SKV_SI region (skv_si_bytes)
         return (lay - 512 + 1023) // 1024 * 1024 + 512
     return lay
 
 
-def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, attn: str = "placeholder", skv_stages: int = 2, gu_tt: int = 0, skv_bar: int = SKV_BAR_BYTES, stamps: int = 0) -> int:
+def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SMEM_PLACEHOLDER, lmp: int = 1, lmr: int = 0, ts: int = 0, tsb: int = 0, attn: str = "placeholder", skv_stages: int = 2, gu_tt: int = 0, skv_bar: int = SKV_BAR_BYTES, stamps: int = 0, skv_extra: int = 0) -> int:
     """Dynamic smem of a bucket (mirrors mk_common.cuh DYN_SMEM; the kernel traps if the launch gives less).
     lmp: MK_LMP (the pipelined LM head only applies at npad <= 64: smem = [8 X chunks][lmr x 32 KB ring], 384 B of barriers).
     attn = "splitkv" (SPEC-P2): OFF_BARS = skv_off_bars(..) (>= skv::kBarOff, = 512 mod 1024), A1's 64 B mbarrier tail at [OFF_BARS, +64), mk's barrier block (384 / 256 B) behind it."""
@@ -190,7 +199,7 @@ def dyn_smem(npad: int, ku: int = 128, ring: int = 2, attn_bytes: int = ATTN_SME
         if ku != 128:
             raise ValueError("MK_ATTN=splitkv needs MK_KU 128")
         tail = 384 if ((lmp and npad <= 64) or (ts and npad >= ts_min(ts))) else 256
-        return 1024 + skv_off_bars(npad, ku, ring, attn, lmp, lmr, ts, tsb, skv_stages, gu_tt, stamps) + skv_bar + tail
+        return 1024 + skv_off_bars(npad, ku, ring, attn, lmp, lmr, ts, tsb, skv_stages, gu_tt, stamps, skv_extra) + skv_bar + tail
     nbox = ku // 64
     ub, xs = nbox * 16384, nbox * npad * 128
     off_bars = ring * ub + max(2 * xs, attn_bytes)
@@ -209,7 +218,7 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     if stripped:
         src = strip_knobs(src)
     k = {**DEFAULT_KNOBS, **dict(knobs)}
-    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn, skv_stages=skv_stage_units(k), gu_tt=k["MK_GU_TT"], skv_bar=skv_bar_bytes(k), stamps=k["MK_STAMPS"]) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
+    exp = dyn_smem(npad, k["MK_KU"], k["MK_RING"], lmp=k["MK_LMP"], lmr=k["MK_LMR"], ts=k["MK_TS"], tsb=k["MK_TSB"], attn=attn, skv_stages=skv_stage_units(k), gu_tt=k["MK_GU_TT"], skv_bar=skv_bar_bytes(k), stamps=k["MK_STAMPS"], skv_extra=skv_si_bytes(k)) if attn_path is None and (attn == "placeholder" or k["MK_KU"] == 128) else 0
     defs = [f"NPAD={npad}", f"NB={nb}", f"MK_EXPECT_DYN={exp}", *knob_defines(dict(knobs))]
     defs += os.environ.get("MK_EXTRA_DEFINES", "").split()   # debug only (e.g. SKV_DEBUG_WAIT=1); not part of the knob set
     if attn == "splitkv":
@@ -322,7 +331,7 @@ SKV_G8 = (("SKV_GROUPS", 8), ("SKV_HALVES", 1), ("SKV_STAGES", 16), ("SKV_STAGE_
 SKV_FUSE_MIN_KV_32 = 1024
 
 
-def skv_tune(npad: int, qmax: int, seqs, tc: int = 0) -> tuple:
+def skv_tune(npad: int, qmax: int, seqs, tc: int = 0, si: int = 0) -> tuple:
     """Per-bucket splitkv header knobs of a workload (MkArm skvtune=1), as sorted (name, value) pairs; knobs set on the arm win.
     Job 9714 (v4, us/step vs the header default, 1 GPU x 7 rounds): at NPAD <= 32, q_len 1:
     - one sequence with kv <= SKV_LDG_MAX_KV: LDG-only (SKV_FORCE_ENGINE 0): b1 kv1K -21.8, 2K -30.0, 4K -9.1, 8K -4.5, 16K -16.6 (kv32K +4.5);
@@ -345,7 +354,8 @@ def skv_tune(npad: int, qmax: int, seqs, tc: int = 0) -> tuple:
     if tc and npad <= 16 and kv >= SKV_TC_MIN_KV and not (len(seqs) == 1 and kv <= SKV_LDG_MAX_KV):
         return (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), ("SKV_TC", 1))
     if npad > 32:
-        return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *(SKV_G8 if npad == 256 else SKV_G4A), ("SKV_TAIL_LDG", 1), ("SKV_TMA_FUSE", 1))))
+        si_k = (("SKV_SI", 1), ("SKV_SI_P", 2)) if si and npad <= 128 else ()   # R10-2 (MkArm skvsi): g8 + stage-interleaved groups at NPAD 64 / 128
+        return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *(SKV_G8 if npad == 256 or si_k else SKV_G4A), *si_k, ("SKV_TAIL_LDG", 1), ("SKV_TMA_FUSE", 1))))
     if npad > 16:
         fuse = (("SKV_TMA_FUSE", 1),) if max(k for k, _ in seqs) >= SKV_FUSE_MIN_KV_32 else ()
         return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *SKV_H64, ("SKV_MERGE_CHUNK", 20), ("SKV_TAIL_LDG", 1), *fuse)))

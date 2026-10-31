@@ -146,3 +146,9 @@
   (job 14921, auto plan -> group auto): conv-L3-n54 202.4 -> 113.9, code-L3-n40 131.6 -> 75.7, conv-L4-n87 218.1 -> 159.8, b96 kv1K / 2K / 3K
   80.6 / 149.8 / 219.0 -> 73.6 / 129.2 / 184.8, b192 kv1K / 1792 142.7 / 236.2 -> 134.9 / 218.4; other R10 points within +-0.5.
 - Planning cost 2-11 ms per step in Python (fine for offline prepare(); the serving port needs a faster planner).
+
+## splitkv-v13 (2026-10-31)
+- SKV_SI (default 0; SASS of every existing build identical when unset): stage-interleaved group consumer for SKV_HALVES 1 + SKV_GROUPS 8
+  (16 x 16 ring). Global stage s of a CTA -> group s % 8; per-item park (SKV_SI_P slots, default 5; use 2 in mk: ~166 KB attend smem)
+  and last-arriver merge in smem; SKV_SI_CAP (64) items per CTA. Host: plan(groups=1) (CTA-balanced LPT with cut). Silo jobs 14946 /
+  14947 / 14954 (PASS-21.md, P21b re-score).

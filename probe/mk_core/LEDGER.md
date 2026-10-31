@@ -39,6 +39,9 @@
 - R10-1 (accepted): import `splitkv-v12` (5308c59; host planner only, splitkv.cuh = mk-core-v18 copy, SASS unchanged) and pass
   `groups=SKV_GROUPS of the build, group_mode="auto"` to `skv_plan.plan` in MkArm prepare() for SKV_HALVES builds with q_len 1, behind
   arm knob `skvgrp` (default 0 for the A/B). S > 1 pairs use the existing partial + combine path. A/B at mk_r10, 7 rounds.
+- R10-2 (accepted, blocked): import splitkv-v13 cuh / CHANGELOG / LEDGER (done; default SASS identical), arm knob `skvsi` (default 0): g8 + SKV_SI 1 +
+  SKV_SI_P 2 at NPAD 64 / 128 and plan(groups=1); A/B skvsi 0 vs 1 at b48-b128 + 3 trace steps. Blocker: SI kBarOff = 304 mod 1024 (mk needs 512):
+  asked mk-attn to pad kSiBytes to 1024 B (splitkv-v13a); build.py skv_si_bytes() assumes the padded size.
 ## Requests from MK-attn (2026-10-23, accepted)
 - `skv_prefetch(layer, cta, nct)` call site in the QKV phase after the weight TMAs are issued (no-op in the placeholder).
   Smem for it: TBD after Pass 0b; L2 prefetch only until stated.

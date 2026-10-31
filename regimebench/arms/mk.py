@@ -42,7 +42,7 @@ class _Loaded:
         cubin, info, _ = B.compile_build(npad, self.nb, knobs, attn=attn, skv_qmax=qmax)
         self.ptxas = info
         self.knobs = d
-        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"], tsb=d["MK_TSB"], attn=attn, skv_stages=B.skv_stage_units(d), gu_tt=d["MK_GU_TT"], skv_bar=B.skv_bar_bytes(d), stamps=d["MK_STAMPS"])
+        self.dyn = B.dyn_smem(npad, d["MK_KU"], d["MK_RING"], lmp=d["MK_LMP"], lmr=d["MK_LMR"], ts=d["MK_TS"], tsb=d["MK_TSB"], attn=attn, skv_stages=B.skv_stage_units(d), gu_tt=d["MK_GU_TT"], skv_bar=B.skv_bar_bytes(d), stamps=d["MK_STAMPS"], skv_extra=B.skv_si_bytes(d))
         self.kernel = CoopKernel(cubin, B.KERNEL, self.dyn)
         self.regs, self.static_smem = self.kernel.regs, self.kernel.static_smem
         self.local_bytes, self.dyn_smem = self.kernel.local_bytes, self.kernel.dyn_smem
@@ -61,7 +61,7 @@ class MkStep:
         dev = torch.device(device)
         self.attn = arm.resolve_attn(w)   # "placeholder" | "splitkv" (auto resolved per workload)
         self.qmax = B.skv_qmax_of([(s.kv_len, s.q_len) for s in w.seqs]) if self.attn == "splitkv" else 1   # R6 build (-DSKV_QMAX=16) iff some q_len > 1
-        tune = B.skv_tune(self.npad, self.qmax, [(s.kv_len, s.q_len) for s in w.seqs], arm.skvtc) if self.attn == "splitkv" and arm.skvtune else ()
+        tune = B.skv_tune(self.npad, self.qmax, [(s.kv_len, s.q_len) for s in w.seqs], arm.skvtc, arm.skvsi) if self.attn == "splitkv" and arm.skvtune else ()
         ld = arm._kernel(self.npad, dev, self.attn, self.qmax, tune)
         self.kern = ld
         self.nb = ld.nb
@@ -102,7 +102,9 @@ class MkStep:
             from ..kernels.common.splitkv import plan as skv_plan
             assert ld.knobs["MK_KU"] == 128, "attn=splitkv needs MK_KU 128"
             grp = {}
-            if arm.skvgrp and int(ld.knobs.get("SKV_HALVES", 0)) and all(s.q_len == 1 for s in w.seqs):
+            if int(ld.knobs.get("SKV_SI", 0)):
+                grp = dict(groups=1)   # R10-2: SI builds balance one stage stream per CTA (the consumer spreads its stages over the groups)
+            elif arm.skvgrp and int(ld.knobs.get("SKV_HALVES", 0)) and all(s.q_len == 1 for s in w.seqs):
                 # R10-1 (splitkv-v12 P19): balance per consumer group (item k of a CTA runs on group k % SKV_GROUPS); host-only, auto keeps the base plan unless faster
                 grp = dict(groups=int(ld.knobs.get("SKV_GROUPS", 2)), group_mode="auto")
             pl = skv_plan.plan([(s.kv_len, s.q_len) for s in w.seqs], n_cta=self.nb, **grp)
@@ -216,13 +218,14 @@ class MkStep:
 class MkArm:
     name = "mk"
 
-    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, skvtc: int = 1, skvgrp: int = 1, **_: Any):
+    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, skvtc: int = 1, skvgrp: int = 1, skvsi: int = 0, **_: Any):
         if attn not in ATTN_OPTIONS:
             raise ValueError(f"unknown attn {attn!r} (one of {ATTN_OPTIONS})")
         self.attn = attn
         self.skvtune = int(skvtune)   # 1: per-bucket splitkv header knobs (B.skv_tune; job 9714)
         self.skvtc = int(skvtc)       # 1 (default, job 11562): B.skv_tune(tc=1), the tcgen05 attention consumer at NPAD 16, kv >= 4K (MK-core A2)
         self.skvgrp = int(skvgrp)     # 1 (default, job 14935): splitkv plan(groups=SKV_GROUPS, group_mode="auto") on SKV_HALVES builds, q_len 1 (R10-1, splitkv-v12)
+        self.skvsi = int(skvsi)       # 1: SKV_SI (stage-interleaved g8 consumer, splitkv-v13) at NPAD 64 / 128 + plan(groups=1) (R10-2 A/B)
         self.knobs = {"MK_STAMPS": int(stamps), "MK_NULL": int(null), "MK_KU": int(ku), "MK_RING": int(ring), "MK_TS": int(ts), "MK_TSB": int(tsb), "MK_LMTS": int(lmts)}
         self._loaded: dict[tuple, _Loaded] = {}
         self._wgu_cache: dict[tuple, Any] = {}
