@@ -143,7 +143,45 @@ def regime_grid() -> list[Workload]:
     for b in (1, 2, 4, 8, 16):   # iso total KV: 240K cache tokens split over b sequences
         kv = 240 * K // b
         w.append(_uniform("R9", f"R9-b{b}-kv{kv}", b, kv, 1, {"B": b, "kv": kv}))
+    w.extend(r10_points())
     return [x for x in w if x.kv_cache_bytes <= KV_BYTES_CAP]
+
+
+# R10: decode-only steps with 33-256 requests at long KV (the Azure 2024 trace, conv L3 / L4: 34-49 % of stock GPU time).
+# Census (probe/mk_core/r10/census_d33.py, stock step logs of the M2 grid): GPU-time-weighted n_req p10/p50/p90 37/54/84 (conv L3),
+# 47/87/198 (conv L4); mean kv per step p10..p90 2.3K..3.3K, max kv 5.9K..8.1K, kv CV within a step ~0.6 (code 0.8).
+# Memory cap, computed from job 11565 (R9-b1-kv245760: 6 KV copies of 26.25 GiB + 5.3 GiB other = 162.8 GiB in use, then OOM
+# on the next 26.25 GiB; device 178.35 GiB): a timed point holds 4 KV copies at once (fixture, mk:auto packed clone,
+# fi-graph graph-pdl-best and graph-pdl-cublas paged caches; run with --variants "mk=auto;fi-graph=graph-pdl-best,graph-pdl-cublas"),
+# so 4 x 40 GiB + 5.3 = 165.3 GiB (13 GiB margin). An accuracy point also holds a second-seed fixture and one temporary arm
+# copy (6 copies): <= 25 GiB. vLLM runs afterwards in its own process.
+R10_KV_CAP = 40 * 2**30
+R10_CHECK_CAP = 25 * 2**30
+_R10_GRID = ((48, (1 * K, 2 * K, 4 * K)), (64, (1 * K, 2 * K, 4 * K)), (96, (1 * K, 2 * K, 3 * K)),
+             (128, (1 * K, 2 * K, 2816)), (192, (1 * K, 1792)), (256, (1 * K, 1408)))
+_R10_CHECK = ("R10-b64-kv2048", "R10-b192-kv1024", "R10-conv-L3-n54")
+
+
+def r10_trace_steps() -> list[dict]:
+    """Real R10 steps (per-request kv lists) from regimebench/r10_steps.json (source run + line in each entry)."""
+    import json
+    from pathlib import Path
+    return json.loads((Path(__file__).with_name("r10_steps.json")).read_text())["steps"]
+
+
+def r10_points() -> list[Workload]:
+    w = [_uniform("R10", f"R10-b{b}-kv{kv}", b, kv, 1, {"B": b, "kv": kv}, check=f"R10-b{b}-kv{kv}" in _R10_CHECK)
+         for b, kvs in _R10_GRID for kv in kvs]
+    for st in r10_trace_steps():
+        kv = st["kv"]
+        w.append(Workload(st["id"], "R10", tuple(Seq(k, 1) for k in kv),
+                          {"B": len(kv), "kv": round(sum(kv) / len(kv)), "trace": st["id"].split("-", 1)[1]},
+                          check=st["id"] in _R10_CHECK))
+    for x in w:
+        cap = R10_CHECK_CAP if x.check else R10_KV_CAP
+        if x.kv_cache_bytes > cap:
+            raise ValueError(f"{x.id}: {x.kv_cache_bytes / 2**30:.1f} GiB KV > R10 cap {cap / 2**30:.0f} GiB")
+    return w
 
 
 def skipped_by_cap() -> list[str]:
@@ -169,6 +207,8 @@ OWNER_POINTS: dict[str, tuple[str, ...]] = {
     "mk_b8kv": ("R3-b8-kv1024", "R3-b8-kv4096", "R3-b8-kv16384", *(f"R9-b8-kv{kv}" for kv in (2 * K, 8 * K, 12 * K, 24 * K, 32 * K))),
     # power-of-two KV check: +-1K around 16K and 32K
     "mk_iso240": tuple(f"R9-b{b}-kv{240 * K // b}" for b in (1, 2, 4, 8, 16)),
+    # R10 (2026-10-31): decode, 33-256 requests, long KV; uniform grid + 3 real trace steps (heterogeneous kv)
+    "mk_r10": tuple(f"R10-b{b}-kv{kv}" for b, kvs in _R10_GRID for kv in kvs) + ("R10-conv-L3-n54", "R10-conv-L4-n87", "R10-code-L3-n40"),
     "mk_b8kv_p2": ("R3-b8-kv16384", *(f"R9-b8-kv{kv}" for kv in (15 * K, 17 * K, 24 * K, 31 * K, 32 * K, 33 * K))),
 }
 
