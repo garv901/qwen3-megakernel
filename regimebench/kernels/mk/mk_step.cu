@@ -684,6 +684,9 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
     __shared__ int s_bi[4][MAXTOK];
     __shared__ int s_flag;
 
+#if MK_STAMPS
+    const ull mk_t_entry = gt();   // residual probe: CTA entry, stored at mk_stamps[cta][MK_NSTAMP - 2]
+#endif  // MK_STAMPS
     const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5;
     const int gwarp = blockIdx.x * NW + warp, nwarps = gridDim.x * NW;
     const u32 raw = smem_u32(smraw), base = (raw + 1023) & ~1023u;
@@ -808,6 +811,12 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                 gemm_phase<PhQkv, mk_null(0)>(g, l, ntok, get, epi, extra);
             }
         }
+#if defined(MK_SKV) && MK_KVE
+        // MK_KVE (lead (a), PASS-C26): this CTA's QKV tiles are done (its ring drained); the QKV barrier, phase 2 and the pre-attend barrier use no ring / attention smem:
+        // issue the first past-row K / V stages of the CTA's attention items now; attend continues from the in-flight count splitkv keeps in ring_phase
+        __syncthreads();   // every warp's generic / tcgen05 use of the ring bytes (QKV drain waited by the producer) is behind this CTA barrier
+        if constexpr (!mk_null(2)) if (!MK_DBG_NOATT || ntok < 0) { MK_SKV_PARAMS(SP); skv::attend_pre<NT>(SP, l, mk_opaque(sm + OFF_BARS - skv::kBarOff), ring_phase); }
+#endif
 #ifdef MK_SKV
         if constexpr (!QR) {
         bar_arrive(bar_cnt);   // splitkv: attention's TMA ring overlays the weight ring: O's first units are prefetched after attend (phase 3 window)
@@ -1182,7 +1191,8 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
 #if MK_STAMPS
     if (tid == 0) mk_stamp();   // end of the LM phase
     __syncthreads();
-    for (int i = tid; i < MK_NSTAMP; i += NT) mk_stamps[blockIdx.x * MK_NSTAMP + i] = i < (int)mk_sk_n ? mk_sk_s[i] : 0ull;
+    for (int i = tid; i < MK_NSTAMP - 2; i += NT) mk_stamps[blockIdx.x * MK_NSTAMP + i] = i < (int)mk_sk_n ? mk_sk_s[i] : 0ull;
+    if (tid == 0) mk_stamps[blockIdx.x * MK_NSTAMP + MK_NSTAMP - 2] = mk_t_entry;
 #endif  // MK_STAMPS
 
     // ---- argmax: per-CTA best per slot -> last CTA (ticket) reduces; ties -> lowest index ----
@@ -1229,4 +1239,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             atomicExch(bar_cnt, 0u);   // every CTA has passed its last barrier poll
         }
     }
+#if MK_STAMPS
+    if (tid == 0) mk_stamps[blockIdx.x * MK_NSTAMP + MK_NSTAMP - 1] = gt();   // residual probe: CTA exit (after the argmax)
+#endif  // MK_STAMPS
 }

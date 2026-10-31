@@ -79,6 +79,9 @@
 #ifndef MK_GU_TT
 #define MK_GU_TT 0   // P6: GU token tile override (0 = 96 at NPAD 256 (job 9757: -59.6 us vs 128), 48 at 128 (job 9758: -42.3 us vs 64)); multiple of 16, <= 128 (two accumulators in 256 TMEM columns). xover4 job 9756: GU T=256 TT 96 8.45 vs TT 128 8.85 us
 #endif
+#ifndef MK_KVE
+#define MK_KVE 0       // lead (a): skv::attend_pre after the CTA's QKV tiles (needs SKV_EARLY in splitkv); 0 = off
+#endif
 #ifndef MK_DBG_WAIT
 #define MK_DBG_WAIT 0   // debug: bounded spins (grid barrier, mbarriers, tickets): after ~2^31 cycles print the site and give up (results wrong, the kernel ends and printf flushes)
 #endif

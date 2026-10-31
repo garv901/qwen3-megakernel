@@ -28,7 +28,7 @@ ATTN_SPLITKV = COMMON / "splitkv" / "splitkv.cuh"
 SKV_STAGE_BYTES = 128 * 512   # one 128-row K + V ring stage of the q_len 1 build
 SKV_BAR_OFF, SKV_BAR_BYTES = 147968, 64   # splitkv-v1 (128 x 2 TMA ring): skv::kBarOff, skv::kBarBytes; attend scratch = kBarOff + kBarBytes = 148,032 B (compile-checked by MK_EXPECT_DYN)
 OWN_SOURCES = ("mk_common.cuh", "mk_step.cu")
-DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 128, "MK_TSB": 1, "MK_LMTS": 1, "MK_DBG_NOATT": 0, "MK_GU_TT": 0, "MK_FIN": -1, "MK_PFE": 0, "MK_QR": 0, "MK_L2PF": 0, "MK_WU": -1, "MK_CMB": -1}
+DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 128, "MK_TSB": 1, "MK_LMTS": 1, "MK_DBG_NOATT": 0, "MK_GU_TT": 0, "MK_FIN": -1, "MK_PFE": 0, "MK_QR": 0, "MK_L2PF": 0, "MK_WU": -1, "MK_CMB": -1, "MK_KVE": 0}
 WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map order (kernel: maps 0..7)
 WORKSPACE_MAPS = ("xb",)   # kernel map 8 (MK_TS): bf16 [MAXTOK_MK][H] workspace of the tile-stream QKV (B tiles by TMA)
 TSB_MAPS = ("xb2", "wgu", "act")   # kernel maps 9, 10, 11 (MK_TSB): xb2 bf16 [MAXTOK][H] (B of GU), wgu bf16 [NL * 6144][H] (A of GU), act bf16 [MAXTOK][INTER] (B of D)
@@ -102,7 +102,7 @@ def strip_knobs(src: str) -> str:
 
 # splitkv header knobs that mk passes through when set (else the header default applies): engine (MK-attn P8), item prefetch (P9), merge chunk (P4), KV evict_first + 1-row tail by LDG (v5),
 # half-CTA consumers + stage geometry (splitkv-v8 P10)
-SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS", "SKV_GROUPS", "SKV_TMA_FUSE", "SKV_TC", "SKV_TC_KST", "SKV_TC_VST", "SKV_SI", "SKV_SI_P")
+SKV_PASS = ("SKV_FORCE_ENGINE", "SKV_ITEM_PREFETCH", "SKV_MERGE_CHUNK", "SKV_KV_EVICT_FIRST", "SKV_TAIL_LDG", "SKV_COMBINE_HALF", "SKV_STAGES", "SKV_HALVES", "SKV_STAGE_ROWS", "SKV_GROUPS", "SKV_TMA_FUSE", "SKV_TC", "SKV_TC_KST", "SKV_TC_VST", "SKV_SI", "SKV_SI_P", "SKV_EARLY")
 
 
 def skv_stage_units(knobs: dict) -> int:
