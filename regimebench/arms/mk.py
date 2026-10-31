@@ -218,14 +218,14 @@ class MkStep:
 class MkArm:
     name = "mk"
 
-    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, skvtc: int = 1, skvgrp: int = 1, skvsi: int = 0, **_: Any):
+    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, skvtc: int = 1, skvgrp: int = 1, skvsi: int = -1, **_: Any):
         if attn not in ATTN_OPTIONS:
             raise ValueError(f"unknown attn {attn!r} (one of {ATTN_OPTIONS})")
         self.attn = attn
         self.skvtune = int(skvtune)   # 1: per-bucket splitkv header knobs (B.skv_tune; job 9714)
         self.skvtc = int(skvtc)       # 1 (default, job 11562): B.skv_tune(tc=1), the tcgen05 attention consumer at NPAD 16, kv >= 4K (MK-core A2)
         self.skvgrp = int(skvgrp)     # 1 (default, job 14935): splitkv plan(groups=SKV_GROUPS, group_mode="auto") on SKV_HALVES builds, q_len 1 (R10-1, splitkv-v12)
-        self.skvsi = int(skvsi)       # 1: SKV_SI (stage-interleaved g8 consumer, splitkv-v13) at NPAD 64 / 128 + plan(groups=1) (R10-2 A/B)
+        self.skvsi = int(skvsi)       # SKV_SI (stage-interleaved g8 consumer, splitkv-v13a) at NPAD 64 / 128 + plan(groups=1): 1 on, 0 off, -1 (default, job 14991) iff max kv >= B.SKV_SI_MIN_KV
         self.knobs = {"MK_STAMPS": int(stamps), "MK_NULL": int(null), "MK_KU": int(ku), "MK_RING": int(ring), "MK_TS": int(ts), "MK_TSB": int(tsb), "MK_LMTS": int(lmts)}
         self._loaded: dict[tuple, _Loaded] = {}
         self._wgu_cache: dict[tuple, Any] = {}

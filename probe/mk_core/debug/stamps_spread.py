@@ -11,8 +11,9 @@ from regimebench.arms.base import load_arm
 from regimebench.fixture import make_inputs
 from regimebench.workload import select
 
-PH = ("QKV", "RoPE", "attn", "O", "GU", "D")
-UNITS = {0: 256, 3: 128, 4: 384, 5: 192}   # KU 128 split-K units per GEMM phase
+PH6 = ("QKV", "RoPE", "attn", "O", "GU", "D")
+PH7 = ("QKV", "RoPE", "attn", "comb", "O", "GU", "D")   # MK_CMB with a split plan (P20): the combine is its own barrier phase
+UNITS6 = {0: 256, 3: 128, 4: 384, 5: 192}   # KU 128 split-K units per GEMM phase
 mask = int(sys.argv[2], 0) if len(sys.argv) > 2 else 0
 arm = load_arm("mk", stamps=1, null=mask)
 if len(sys.argv) > 3:
@@ -27,13 +28,18 @@ for w in select(sys.argv[1].split(",")):
     torch.cuda.synchronize()
     st = step.stamps().astype(np.int64)
     G = st.shape[0]
-    nbar = 1 + 6 * 28
+    cmb = int(step.kern.knobs.get("MK_CMB", -1))
+    cmb = (cmb if cmb >= 0 else int(step.npad >= 64)) and getattr(step, "plan", None) is not None and step.plan.s_max > 1
+    NP = 7 if cmb else 6
+    PH = PH7 if cmb else PH6
+    UNITS = {(k + 1 if cmb and k >= 3 else k): v for k, v in UNITS6.items()}
+    nbar = 1 + NP * 28
     arr, wex = st[:, 0:2 * nbar:2], st[:, 1:2 * nbar:2]
     print(f"{w.id} null=0x{mask:x} (G {G}): phase | work med | spread (last-med arrive) | lat (med exit - last arrive) | last arriver has max units")
-    for p in range(6):
+    for p in range(NP):
         sp, lat, wk, lastmax = [], [], [], []
         for layer in range(4, 24):
-            b = 1 + 6 * layer + p
+            b = 1 + NP * layer + p
             a = arr[:, b]
             sp.append(a.max() - np.median(a)); lat.append(np.median(wex[:, b]) - a.max())
             wk.append(np.median(a - wex[:, b - 1]))

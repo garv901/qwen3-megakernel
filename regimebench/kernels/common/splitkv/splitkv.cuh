@@ -53,6 +53,10 @@
 #define SKV_STAGES 2        // TMA engine: ring stages (2..8). Ring bytes = stages * rows * 512. v1 = 4
 #endif
 #endif
+#ifndef SKV_PAGED
+#define SKV_PAGED 0         // 1 = serving mode (mk MK_SERVE): KV in the vLLM paged cache [blocks, 8, kPageRows rows, 256] (K | V per row, 512 B), read through a device block table (Params::bt).
+#endif                      // Item word 0 = the request index (not a packed row base). 4D (5D with SKV_TMA_FUSE) tensor maps (build.py skv_map_specs paged=True). Items start at multiples of the
+                            // stage rows (plan.py align), so a stage never crosses a block. q_len 1 / R6 TMA engines only (no LDG engine, no SKV_IFACE 2).
 #ifndef SKV_TMA_RELEASE
 #define SKV_TMA_RELEASE 1   // 0 = v1 (__syncthreads after every stage, then thread 0 refills); 1 = per-slot "empty" mbarrier (16 warp arrivals), no CTA barrier in the stage loop
 #endif
@@ -144,6 +148,12 @@
 #if SKV_TC && (SKV_TC_KST < 2 || SKV_TC_KST > 3 || SKV_TC_VST < 2 || SKV_TC_VST > 3)
 #error "SKV_TC_KST / SKV_TC_VST must be 2 or 3"
 #endif
+#if SKV_PAGED && !(SKV_IFACE == 1 && SKV_TMA_MMA && SKV_FORCE_ENGINE == 1 && SKV_TICKET == 0)
+#error "SKV_PAGED needs SKV_IFACE 1, SKV_TMA_MMA 1, SKV_FORCE_ENGINE 1 and SKV_TICKET 0"
+#endif
+#if SKV_PAGED && SKV_TC
+#error "SKV_PAGED is not ported to the SKV_TC consumer (splitkv-v15): use the mma.sync consumers at NPAD 16 / 32 in serving"
+#endif
 
 namespace skv {
 
@@ -184,7 +194,7 @@ constexpr int kBarBytes = (16 * kStages > 64 ? 16 * kStages : 64);   // mbarrier
 constexpr int kSiP = SKV_SI_P, kSiCap = SKV_SI_CAP;
 constexpr int kSiTabOff = kMrgOff + kMrgBytes, kSiGsOff = kSiTabOff + kSiCap * 32;
 constexpr int kSiCtrOff = kSiGsOff + ((kSiCap + 1 + 3) / 4) * 16, kSiParkOff = kSiCtrOff + ((4 * kSiP + 3) / 4) * 16;
-constexpr int kSiBytes = kSiParkOff + kSiP * 16 * kPartStride * 4 - kSiTabOff;
+constexpr int kSiBytes = ((kSiParkOff + kSiP * 16 * kPartStride * 4 - kSiTabOff + 1023) / 1024) * 1024;   // padded to 1 KB: keeps kBarOff % 1024 (mk_step.cu static_assert)
 constexpr int kBarOff = kMrgOff + kMrgBytes + kSiBytes, kSmemBytes = kBarOff + kBarBytes;
 #else
 constexpr int kBarOff = kMrgOff + kMrgBytes, kSmemBytes = kBarOff + kBarBytes;
@@ -237,6 +247,10 @@ struct Params {                    // filled by the host planner (plan.py) + cal
   int total_q;
 #if SKV_TC
   unsigned tmem;                   // SKV_TC: TMEM base address (column 0 of >= 64 allocated columns, warp-aligned lane 0) owned by the caller; attend uses columns 0..63 only during the call
+#endif
+#if SKV_PAGED
+  const int* bt; int bt_stride;    // block table [requests][bt_stride] int32 (vLLM block ids)
+  int blk_per_layer;               // blocks between layers: the maps' last dim is layer * blk_per_layer + block
 #endif
 #if SKV_TICKET
   unsigned* tickets;               // [n_pairs = 8 * n_seq] u32, zeroed once per plan, never reset: tickets[seq * 8 + kvh] gains S per layer (SKV_TICKET)
@@ -328,7 +342,7 @@ __device__ __forceinline__ void tma3d(unsigned dst, const void* map, int c0, int
 #endif
 }
 
-#if SKV_TMA_FUSE
+#if SKV_TMA_FUSE || SKV_PAGED
 __device__ __forceinline__ void tma4d(unsigned dst, const void* map, int c0, int c1, int c2, int c3, unsigned b) {
 #if SKV_KV_EVICT_FIRST
   asm volatile("cp.async.bulk.tensor.4d.shared::cluster.global.mbarrier::complete_tx::bytes.L2::cache_hint [%0], [%1, {%2, %3, %4, %5}], [%6], %7;"
@@ -338,6 +352,39 @@ __device__ __forceinline__ void tma4d(unsigned dst, const void* map, int c0, int
                ::"r"(dst), "l"(map), "r"(c0), "r"(c1), "r"(c2), "r"(c3), "r"(b) : "memory");
 #endif
 }
+#endif
+
+#if SKV_PAGED && SKV_TMA_FUSE
+__device__ __forceinline__ void tma5d(unsigned dst, const void* map, int c0, int c1, int c2, int c3, int c4, unsigned b) {
+#if SKV_KV_EVICT_FIRST
+  asm volatile("cp.async.bulk.tensor.5d.shared::cluster.global.mbarrier::complete_tx::bytes.L2::cache_hint [%0], [%1, {%2, %3, %4, %5, %6}], [%7], %8;"
+               ::"r"(dst), "l"(map), "r"(c0), "r"(c1), "r"(c2), "r"(c3), "r"(c4), "r"(b), "l"(kv_policy()) : "memory");
+#else
+  asm volatile("cp.async.bulk.tensor.5d.shared::cluster.global.mbarrier::complete_tx::bytes [%0], [%1, {%2, %3, %4, %5, %6}], [%7];"
+               ::"r"(dst), "l"(map), "r"(c0), "r"(c1), "r"(c2), "r"(c3), "r"(c4), "r"(b) : "memory");
+#endif
+}
+#endif
+
+#if SKV_PAGED
+constexpr int kPageRows = 128;   // rows per cache block (the serving cache uses block size 128)
+static_assert(kPageRows == 128 && (kPageRows % kStageRows) == 0, "paged: 128-row blocks, stage rows divide the block");
+// block coordinate (last map dim) of position pos of request req in layer `layer`
+__device__ __forceinline__ int page_cb(const Params& p, int layer, int req, int pos) {
+  return layer * p.blk_per_layer + __ldg(p.bt + (size_t)req * p.bt_stride + (pos / kPageRows));
+}
+// address of this lane's 16 B of row `pos` of item `a` (a.x = request, a.y & 15 = kv head): lanes 0..15 the K row, lanes 16..31 the V row (K | V per 512 B cache row)
+__device__ __forceinline__ const char* page_row_ptr(const Params& p, int layer, const int4& a, int pos, int lane) {
+  const size_t blk = (size_t)page_cb(p, layer, a.x, pos);
+  return (const char*)p.kc + (((blk * kKvHeads + (a.y & 15)) * kPageRows + (pos % kPageRows)) * 512) + (lane < 16 ? 0 : 256) + (lane & 15) * 16;
+}
+#define SKV_TAIL_ADDR(a) page_row_ptr(p, layer, (a), (a).w - 1, lane)
+#define SKV_BOX(dst, map, c0) tma4d(dst, map, c0, rc, pkvh, cb, bar)
+#define SKV_FBOX(dst, map) tma5d(dst, map, 0, rc, 0, pkvh, cb, bar)
+#else
+#define SKV_TAIL_ADDR(a) ((const char*)(lane < 16 ? p.kc : p.vc) + item_off(a) + (size_t)((a).w - 1) * 2048)
+#define SKV_BOX(dst, map, c0) tma3d(dst, map, c0, pkvh, rc, bar)
+#define SKV_FBOX(dst, map) tma4d(dst, map, 0, rc, 0, pkvh, bar)
 #endif
 
 // per-slot online-softmax state: two q-heads, m / l replicated over the 16 lanes of a half-warp, o = this lane's 8 dims
@@ -566,6 +613,9 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
   // ---- TMA producer state (thread 0 only)
   int pk = -1, pp = 0, pend = 0, pkvh = 0;
   size_t prow = 0;
+#if SKV_PAGED
+  int pcb = 0;                                                 // block coordinate of position pp
+#endif
   int4 pnxt = zero4;
   auto produce = [&](int slot) {                               // issue the next stage of the CTA's flat stage sequence into `slot`
 #if SKV_IFACE == 2
@@ -578,6 +628,9 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
       const int4 it = pnxt;
       pnxt = (pk + 1 < ni) ? rec[2 * (pk + 1)] : zero4;
       pp = it.z; pend = it.w; pkvh = it.y & 15; prow = layer_row + (size_t)it.x;
+#if SKV_PAGED
+      pcb = page_cb(p, layer, it.x, pp);
+#endif
 #if SKV_IFACE == 2
       if (it.w == rec[2 * pk + 1].w) --pend;                   // the piece ending at vis owns the new row: not written yet, the stream stops at vis - 1
 #endif
@@ -586,7 +639,12 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
     const int n = min(kStageRows, pend - pp);
     const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
     mb_expect(bar, (unsigned)n * 512u);
+#if SKV_PAGED
+    int off = 0, rc = pp & (kPageRows - 1);
+    const int cb = pcb;
+#else
     int off = 0, rc = (int)(prow + pp);
+#endif
 #pragma unroll
     for (int rs = 0; rs < kNumMaps; ++rs) {
       const int rows = kStageRows >> rs;
@@ -594,10 +652,10 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
 #if SKV_TMA_MMA
         const char* mk = (const char*)p.tmaps + (0 * kNumMaps + rs) * 128;   // swizzled maps, box 64 dims x 1 x rows: lo half (dims 0-63), hi half (64-127)
         const char* mv = (const char*)p.tmaps + (1 * kNumMaps + rs) * 128;
-        tma3d(dst + off * 128, mk, 0, pkvh, rc, bar);
-        tma3d(dst + kHalfBytes + off * 128, mk, 64, pkvh, rc, bar);
-        tma3d(dst + 2 * kHalfBytes + off * 128, mv, 0, pkvh, rc, bar);
-        tma3d(dst + 3 * kHalfBytes + off * 128, mv, 64, pkvh, rc, bar);
+        SKV_BOX(dst + off * 128, mk, 0);
+        SKV_BOX(dst + kHalfBytes + off * 128, mk, 64);
+        SKV_BOX(dst + 2 * kHalfBytes + off * 128, mv, 0);
+        SKV_BOX(dst + 3 * kHalfBytes + off * 128, mv, 64);
 #else
         tma3d(dst + off * 256, (const char*)p.tmaps + (0 * kNumMaps + rs) * 128, 0, pkvh, rc, bar);
         tma3d(dst + kStageRows * 256 + off * 256, (const char*)p.tmaps + (1 * kNumMaps + rs) * 128, 0, pkvh, rc, bar);
@@ -606,6 +664,9 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
       }
     }
     pp += n;
+#if SKV_PAGED
+    if (pp < pend && !(pp & (kPageRows - 1))) pcb = page_cb(p, layer, (int)prow, pp);   // next stage starts a new block
+#endif
   };
   if (TMA && tid == 0) {
     pnxt = rec[0];
@@ -640,7 +701,7 @@ __device__ __forceinline__ void run_items(const Params& p, int layer, unsigned c
   auto load_tail = [&](const int4& a, uint4& t) {
     t = make_uint4(0, 0, 0, 0);
     if (warp == 0 && a.w - a.z > 1 && (a.w - a.z) % kStageRows == 1)
-      t = ldg_nc((const char*)(lane < 16 ? p.kc : p.vc) + item_off(a) + (size_t)(a.w - 1) * 2048);
+      t = ldg_nc(SKV_TAIL_ADDR(a));
   };
   uint4 tra = make_uint4(0, 0, 0, 0), trb = tra;                // current item's / next item's tail row (kTail only)
   constexpr bool kPre = (SKV_LDG_DB != 0);                     // single-buffered LDG loads inside the step loop: nothing to issue ahead
@@ -1104,6 +1165,9 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
   // ---- TMA producer (thread 256 h): the half's stage sequence into its own slots
   int pk = -1, pp = 0, pend = 0, pkvh = 0;
   size_t prow = 0;
+#if SKV_PAGED
+  int pcb = 0;                                                 // block coordinate of position pp
+#endif
   int4 pnxt = zero4;
   auto produce = [&](int slot) {
     if (pp >= pend) {
@@ -1112,16 +1176,24 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
       const int4 it = pnxt;
       pnxt = (pk + 1 < nih) ? rh[2 * kG * (pk + 1)] : zero4;
       pp = it.z; pend = it.w; pkvh = it.y & 15; prow = layer_row + (size_t)it.x;
+#if SKV_PAGED
+      pcb = page_cb(p, layer, it.x, pp);
+#endif
       if (kTail && it.w - it.z > 1 && (it.w - it.z) % kStageRows == 1) --pend;   // P9d tail rule (as the consumer)
     }
     const int n = min(kStageRows, pend - pp);
     const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
     mb_expect(bar, (unsigned)n * 512u);
+#if SKV_PAGED
+    int off = 0, rc = pp & (kPageRows - 1);
+    const int cb = pcb;
+#else
     int off = 0, rc = (int)(prow + pp);
+#endif
 #if SKV_TMA_FUSE
     if (n == kStageRows) {   // P13: one 4D box per tensor covers both 64-dim halves (K lo | K hi, V lo | V hi)
-      tma4d(dst, (const char*)p.tmaps + (2 * kNumMaps + 0) * 128, 0, rc, 0, pkvh, bar);
-      tma4d(dst + 2 * kHalfBytes, (const char*)p.tmaps + (2 * kNumMaps + 1) * 128, 0, rc, 0, pkvh, bar);
+      SKV_FBOX(dst, (const char*)p.tmaps + (2 * kNumMaps + 0) * 128);
+      SKV_FBOX(dst + 2 * kHalfBytes, (const char*)p.tmaps + (2 * kNumMaps + 1) * 128);
     } else
 #endif
 #pragma unroll
@@ -1130,14 +1202,17 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
       if (n & rows) {
         const char* mk = (const char*)p.tmaps + (0 * kNumMaps + rs) * 128;
         const char* mv = (const char*)p.tmaps + (1 * kNumMaps + rs) * 128;
-        tma3d(dst + off * 128, mk, 0, pkvh, rc, bar);
-        tma3d(dst + kHalfBytes + off * 128, mk, 64, pkvh, rc, bar);
-        tma3d(dst + 2 * kHalfBytes + off * 128, mv, 0, pkvh, rc, bar);
-        tma3d(dst + 3 * kHalfBytes + off * 128, mv, 64, pkvh, rc, bar);
+        SKV_BOX(dst + off * 128, mk, 0);
+        SKV_BOX(dst + kHalfBytes + off * 128, mk, 64);
+        SKV_BOX(dst + 2 * kHalfBytes + off * 128, mv, 0);
+        SKV_BOX(dst + 3 * kHalfBytes + off * 128, mv, 64);
         off += rows; rc += rows;
       }
     }
     pp += n;
+#if SKV_PAGED
+    if (pp < pend && !(pp & (kPageRows - 1))) pcb = page_cb(p, layer, (int)prow, pp);   // next stage starts a new block
+#endif
   };
   if (t == 0 && nih > 0) {
     pnxt = rh[0];
@@ -1153,7 +1228,7 @@ __device__ __forceinline__ void run_items_halves(const Params& p, int layer, uns
   auto load_tail = [&](const int4& a, uint4& tr) {             // the half's first warp (warp 8 h): lanes 0..15 = K row, lanes 16..31 = V row of position p1 - 1
     tr = make_uint4(0, 0, 0, 0);
     if (lw == 0 && a.w - a.z > 1 && (a.w - a.z) % kStageRows == 1)
-      tr = ldg_nc((const char*)(lane < 16 ? p.kc : p.vc) + item_off(a) + (size_t)(a.w - 1) * 2048);
+      tr = ldg_nc(SKV_TAIL_ADDR(a));
   };
   uint4 tra = make_uint4(0, 0, 0, 0), trb = tra;
   int4 ra = nih > 0 ? rh[0] : zero4;                           // (a half without items must not read past the CTA's records)
@@ -1355,6 +1430,9 @@ __device__ __forceinline__ void run_items_g8(const Params& p, int layer, unsigne
   // ---- TMA producer (lane 0 of warp 2 h): the group's stage sequence into its own slots
   int pk = -1, pp = 0, pend = 0, pkvh = 0;
   size_t prow = 0;
+#if SKV_PAGED
+  int pcb = 0;                                                 // block coordinate of position pp
+#endif
   int4 pnxt = zero4;
   auto produce = [&](int slot) {
     if (pp >= pend) {
@@ -1363,16 +1441,24 @@ __device__ __forceinline__ void run_items_g8(const Params& p, int layer, unsigne
       const int4 it = pnxt;
       pnxt = (pk + 1 < nih) ? rh[16 * (pk + 1)] : zero4;
       pp = it.z; pend = it.w; pkvh = it.y & 15; prow = layer_row + (size_t)it.x;
+#if SKV_PAGED
+      pcb = page_cb(p, layer, it.x, pp);
+#endif
       if (kTail && it.w - it.z > 1 && (it.w - it.z) % kStageRows == 1) --pend;   // P9d tail rule (as the consumer)
     }
     const int n = min(kStageRows, pend - pp);
     const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
     mb_expect(bar, (unsigned)n * 512u);
+#if SKV_PAGED
+    int off = 0, rc = pp & (kPageRows - 1);
+    const int cb = pcb;
+#else
     int off = 0, rc = (int)(prow + pp);
+#endif
 #if SKV_TMA_FUSE
     if (n == kStageRows) {   // P13: one 4D box per tensor covers both 64-dim halves (K lo | K hi, V lo | V hi)
-      tma4d(dst, (const char*)p.tmaps + (2 * kNumMaps + 0) * 128, 0, rc, 0, pkvh, bar);
-      tma4d(dst + 2 * kHalfBytes, (const char*)p.tmaps + (2 * kNumMaps + 1) * 128, 0, rc, 0, pkvh, bar);
+      SKV_FBOX(dst, (const char*)p.tmaps + (2 * kNumMaps + 0) * 128);
+      SKV_FBOX(dst + 2 * kHalfBytes, (const char*)p.tmaps + (2 * kNumMaps + 1) * 128);
     } else
 #endif
 #pragma unroll
@@ -1381,14 +1467,17 @@ __device__ __forceinline__ void run_items_g8(const Params& p, int layer, unsigne
       if (n & rows) {
         const char* mk = (const char*)p.tmaps + (0 * kNumMaps + rs) * 128;
         const char* mv = (const char*)p.tmaps + (1 * kNumMaps + rs) * 128;
-        tma3d(dst + off * 128, mk, 0, pkvh, rc, bar);
-        tma3d(dst + kHalfBytes + off * 128, mk, 64, pkvh, rc, bar);
-        tma3d(dst + 2 * kHalfBytes + off * 128, mv, 0, pkvh, rc, bar);
-        tma3d(dst + 3 * kHalfBytes + off * 128, mv, 64, pkvh, rc, bar);
+        SKV_BOX(dst + off * 128, mk, 0);
+        SKV_BOX(dst + kHalfBytes + off * 128, mk, 64);
+        SKV_BOX(dst + 2 * kHalfBytes + off * 128, mv, 0);
+        SKV_BOX(dst + 3 * kHalfBytes + off * 128, mv, 64);
         off += rows; rc += rows;
       }
     }
     pp += n;
+#if SKV_PAGED
+    if (pp < pend && !(pp & (kPageRows - 1))) pcb = page_cb(p, layer, (int)prow, pp);   // next stage starts a new block
+#endif
   };
   if (t == 0 && nih > 0) {
     pnxt = rh[0];
@@ -1404,7 +1493,7 @@ __device__ __forceinline__ void run_items_g8(const Params& p, int layer, unsigne
   auto load_tail = [&](const int4& a, uint4& tr) {              // every warp: lanes 0..15 = K row, lanes 16..31 = V row of position p1 - 1
     tr = make_uint4(0, 0, 0, 0);
     if (a.w - a.z > 1 && (a.w - a.z) % kStageRows == 1)
-      tr = ldg_nc((const char*)(lane < 16 ? p.kc : p.vc) + item_off(a) + (size_t)(a.w - 1) * 2048);
+      tr = ldg_nc(SKV_TAIL_ADDR(a));
   };
   uint4 tra = make_uint4(0, 0, 0, 0), trb = tra;
   int4 ra = nih > 0 ? rh[0] : zero4;                            // (a group without items must not read past the CTA's records)
@@ -1647,14 +1736,20 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
     const int j = sp - gs[pk];
     const int n = min(kStageRows, len - j * kStageRows);
     const int pkvh = it.y & 15;
+#if SKV_PAGED
+    const int pos0 = it.z + j * kStageRows;                     // a stage never crosses a cache block (items start at multiples of the stage rows: plan align)
+    int rc = pos0 & (kPageRows - 1);
+    const int cb = page_cb(p, layer, it.x, pos0);
+#else
     int rc = (int)(layer_row + (size_t)it.x) + it.z + j * kStageRows;
+#endif
     const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
     mb_expect(bar, (unsigned)n * 512u);
     int off = 0;
 #if SKV_TMA_FUSE
     if (n == kStageRows) {   // P13: one 4D box per tensor covers both 64-dim halves (K lo | K hi, V lo | V hi)
-      tma4d(dst, (const char*)p.tmaps + (2 * kNumMaps + 0) * 128, 0, rc, 0, pkvh, bar);
-      tma4d(dst + 2 * kHalfBytes, (const char*)p.tmaps + (2 * kNumMaps + 1) * 128, 0, rc, 0, pkvh, bar);
+      SKV_FBOX(dst, (const char*)p.tmaps + (2 * kNumMaps + 0) * 128);
+      SKV_FBOX(dst + 2 * kHalfBytes, (const char*)p.tmaps + (2 * kNumMaps + 1) * 128);
     } else
 #endif
 #pragma unroll
@@ -1663,10 +1758,10 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
       if (n & rows) {
         const char* mk = (const char*)p.tmaps + (0 * kNumMaps + rs) * 128;
         const char* mv = (const char*)p.tmaps + (1 * kNumMaps + rs) * 128;
-        tma3d(dst + off * 128, mk, 0, pkvh, rc, bar);
-        tma3d(dst + kHalfBytes + off * 128, mk, 64, pkvh, rc, bar);
-        tma3d(dst + 2 * kHalfBytes + off * 128, mv, 0, pkvh, rc, bar);
-        tma3d(dst + 3 * kHalfBytes + off * 128, mv, 64, pkvh, rc, bar);
+        SKV_BOX(dst + off * 128, mk, 0);
+        SKV_BOX(dst + kHalfBytes + off * 128, mk, 64);
+        SKV_BOX(dst + 2 * kHalfBytes + off * 128, mv, 0);
+        SKV_BOX(dst + 3 * kHalfBytes + off * 128, mv, 64);
         off += rows; rc += rows;
       }
     }
@@ -1684,7 +1779,11 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
   auto load_tail = [&](const int4& a, uint4& tr) {              // every warp: lanes 0..15 = K row, lanes 16..31 = V row of position p1 - 1
     tr = make_uint4(0, 0, 0, 0);
     if (a.w - a.z > 1 && (a.w - a.z) % kStageRows == 1)
+#if SKV_PAGED
+      tr = ldg_nc(page_row_ptr(p, layer, a, a.w - 1, lane));
+#else
       tr = ldg_nc((const char*)(lane < 16 ? p.kc : p.vc) + ((((layer_row + (size_t)a.x) * kKvHeads + (a.y & 15)) * 256 + l16 * 16)) + (size_t)(a.w - 1) * 2048);
+#endif
   };
   uint4 tra = make_uint4(0, 0, 0, 0), trb = tra;
   uint4 qa = make_uint4(0, 0, 0, 0), qb = qa;
@@ -1927,6 +2026,9 @@ __device__ __forceinline__ void run_items_r6(const Params& p, int layer, unsigne
   // ---- TMA producer state (thread 0 only): as the mma consumer of run_items (interface v1)
   int pk = -1, pp = 0, pend = 0, pkvh = 0;
   size_t prow = 0;
+#if SKV_PAGED
+  int pcb = 0;                                                 // block coordinate of position pp
+#endif
   int4 pnxt = zero4;
   auto produce = [&](int slot) {
     if (pp >= pend) {
@@ -1935,25 +2037,36 @@ __device__ __forceinline__ void run_items_r6(const Params& p, int layer, unsigne
       const int4 it = pnxt;
       pnxt = (pk + 1 < ni) ? rec[2 * (pk + 1)] : zero4;
       pp = it.z; pend = it.w; pkvh = it.y & 15; prow = layer_row + (size_t)it.x;
+#if SKV_PAGED
+      pcb = page_cb(p, layer, it.x, pp);
+#endif
     }
     const int n = min(kStageRows, pend - pp);
     const unsigned dst = sbase + kRingOff + slot * kStageBytes, bar = bar0 + 8 * slot;
     mb_expect(bar, (unsigned)n * 512u);
+#if SKV_PAGED
+    int off = 0, rc = pp & (kPageRows - 1);
+    const int cb = pcb;
+#else
     int off = 0, rc = (int)(prow + pp);
+#endif
 #pragma unroll
     for (int rs = 0; rs < kNumMaps; ++rs) {
       const int rows = kStageRows >> rs;
       if (n & rows) {
         const char* mk = (const char*)p.tmaps + (0 * kNumMaps + rs) * 128;
         const char* mv = (const char*)p.tmaps + (1 * kNumMaps + rs) * 128;
-        tma3d(dst + off * 128, mk, 0, pkvh, rc, bar);
-        tma3d(dst + kHalfBytes + off * 128, mk, 64, pkvh, rc, bar);
-        tma3d(dst + 2 * kHalfBytes + off * 128, mv, 0, pkvh, rc, bar);
-        tma3d(dst + 3 * kHalfBytes + off * 128, mv, 64, pkvh, rc, bar);
+        SKV_BOX(dst + off * 128, mk, 0);
+        SKV_BOX(dst + kHalfBytes + off * 128, mk, 64);
+        SKV_BOX(dst + 2 * kHalfBytes + off * 128, mv, 0);
+        SKV_BOX(dst + 3 * kHalfBytes + off * 128, mv, 64);
         off += rows; rc += rows;
       }
     }
     pp += n;
+#if SKV_PAGED
+    if (pp < pend && !(pp & (kPageRows - 1))) pcb = page_cb(p, layer, (int)prow, pp);   // next stage starts a new block
+#endif
   };
   if (tid == 0) {
     pnxt = rec[0];

@@ -83,10 +83,9 @@
 #define MK_DBG_NOATT 0   // debug (MK_SKV builds): 1 = attend is compiled in but skipped at run time (guard ntok < 0): separates its code-gen cost from its run-time cost; output is wrong
 #endif
 #ifndef MK_CMB
-#define MK_CMB -1   // R10 P20 (jobs 14986 / 14987): -1 = 1 at NPAD >= 64 unless MK_STAMPS (default); 1 = (MK_SKV, plans with S > 1) combine all split rows into ao on every CTA (skv::combine_all_to_ao) + one grid barrier after attend, instead of combine_head of the unit's head in the O phase (8 O units per head repeat it)
+#define MK_CMB -1   // R10 P20 (jobs 14986 / 14987): -1 = 1 at NPAD >= 64 (default; stamps: one more barrier per layer when the plan splits, stamps_spread.py reads it); 1 = (MK_SKV, plans with S > 1) combine all split rows into ao on every CTA (skv::combine_all_to_ao) + one grid barrier after attend, instead of combine_head of the unit's head in the O phase (8 O units per head repeat it)
 #endif
-constexpr int CMB = MK_CMB >= 0 ? MK_CMB : (MK_STAMPS ? 0 : (NPAD >= 64 ? 1 : 0));   // default measured at NPAD >= 64 only
-static_assert(!(CMB && MK_STAMPS), "MK_CMB adds a grid barrier: stamps_spread.py phase order assumes the default barrier set");
+constexpr int CMB = MK_CMB >= 0 ? MK_CMB : (NPAD >= 64 ? 1 : 0);   // default measured at NPAD >= 64 only
 #ifndef MK_STG
 #define MK_STG 4   // staging chunks (16 B) in flight per thread
 #endif
@@ -173,7 +172,7 @@ constexpr int OFF_MB = OFF_BARS;
 constexpr int BARS_BYTES = (LMP || TS) ? 384 : 256;
 #endif
 constexpr int DYN_SMEM = 1024 + OFF_BARS + BARS_BYTES;
-constexpr int N_BARRIERS = 1 + 6 * NLAY;      // grid barriers per launch
+constexpr int N_BARRIERS = 1 + (6 + CMB) * NLAY;   // grid barriers per launch (max: CMB adds one per layer when the plan splits)
 #if MK_STAMPS
 constexpr int MK_NSTAMP = 2 * N_BARRIERS + 8; // arrive + wait-exit per barrier, then the end of the LM phase
 #endif  // MK_STAMPS

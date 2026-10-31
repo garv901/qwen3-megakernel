@@ -19,7 +19,7 @@ REF_CAP = 25 * 2**30
 arms = []
 for ks in sets:
     ks = dict(ks)
-    a = load_arm("mk", attn=ks.pop("attn", "auto"), skvtc=ks.pop("skvtc", 1), skvgrp=ks.pop("skvgrp", 1), skvsi=ks.pop("skvsi", 0))   # keys "attn", "skvtc", "skvgrp": MkArm options, the rest are knobs
+    a = load_arm("mk", attn=ks.pop("attn", "auto"), skvtc=ks.pop("skvtc", 1), skvgrp=ks.pop("skvgrp", 1), skvsi=ks.pop("skvsi", -1))   # keys "attn", "skvtc", "skvgrp": MkArm options, the rest are knobs
     a.knobs.update({k: int(v) for k, v in ks.items()})
     arms.append(a)
 

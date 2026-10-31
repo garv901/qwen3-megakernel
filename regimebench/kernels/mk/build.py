@@ -112,6 +112,9 @@ def skv_stage_units(knobs: dict) -> int:
     return int(knobs.get("SKV_STAGES", 2)) * int(knobs.get("SKV_STAGE_ROWS", 128)) // 128
 
 
+SKV_SI_MIN_KV = 4096   # R10-2 (job 14991): SKV_SI at NPAD 64 / 128 iff max kv >= this (MkArm skvsi -1)
+
+
 def skv_si_bytes(knobs: dict) -> int:
     """skv::kSiBytes of an SKV_SI build (splitkv-v13 P21: item table CAP x 32 B | stage prefix | counters | P park slots x 16 x 528 B), else 0."""
     if not knobs.get("SKV_SI"):
@@ -150,7 +153,7 @@ def lm_ring(npad: int, lmr: int) -> int:
     return lmr if lmr else {16: 4, 32: 3}.get(npad, 2)
 
 
-STAMP_SMEM = 8 * (2 * (1 + 6 * 28) + 8)   # MK_STAMPS: static smem of mk_sk_s (MK_NSTAMP u64)
+STAMP_SMEM = 8 * (2 * (1 + 7 * 28) + 8)   # MK_STAMPS: static smem of mk_sk_s (MK_NSTAMP u64; 7 barriers per layer with MK_CMB)
 
 
 def ts_min(ts: int) -> int:
@@ -332,6 +335,7 @@ SKV_FUSE_MIN_KV_32 = 1024
 
 
 def skv_tune(npad: int, qmax: int, seqs, tc: int = 0, si: int = 0) -> tuple:
+    # si: 0 off, 1 on (NPAD 64 / 128), -1 = on iff max kv >= SKV_SI_MIN_KV (MkArm default)
     """Per-bucket splitkv header knobs of a workload (MkArm skvtune=1), as sorted (name, value) pairs; knobs set on the arm win.
     Job 9714 (v4, us/step vs the header default, 1 GPU x 7 rounds): at NPAD <= 32, q_len 1:
     - one sequence with kv <= SKV_LDG_MAX_KV: LDG-only (SKV_FORCE_ENGINE 0): b1 kv1K -21.8, 2K -30.0, 4K -9.1, 8K -4.5, 16K -16.6 (kv32K +4.5);
@@ -354,7 +358,8 @@ def skv_tune(npad: int, qmax: int, seqs, tc: int = 0, si: int = 0) -> tuple:
     if tc and npad <= 16 and kv >= SKV_TC_MIN_KV and not (len(seqs) == 1 and kv <= SKV_LDG_MAX_KV):
         return (("SKV_KV_EVICT_FIRST", 1), ("SKV_MERGE_CHUNK", 20), ("SKV_TC", 1))
     if npad > 32:
-        si_k = (("SKV_SI", 1), ("SKV_SI_P", 2)) if si and npad <= 128 else ()   # R10-2 (MkArm skvsi): g8 + stage-interleaved groups at NPAD 64 / 128
+        si_on = si > 0 or (si < 0 and kv >= SKV_SI_MIN_KV)   # R10-2 job 14991: SI wins at max kv >= 4K (b48-kv4K -442, conv-L3 -132, conv-L4 -251, code-L3 -221 us/step), loses at short kv (b64-kv1K +274)
+        si_k = (("SKV_SI", 1), ("SKV_SI_P", 2)) if si_on and npad <= 128 else ()   # MkArm skvsi: g8 + stage-interleaved groups at NPAD 64 / 128
         return tuple(sorted((("SKV_KV_EVICT_FIRST", 1), *(SKV_G8 if npad == 256 or si_k else SKV_G4A), *si_k, ("SKV_TAIL_LDG", 1), ("SKV_TMA_FUSE", 1))))
     if npad > 16:
         fuse = (("SKV_TMA_FUSE", 1),) if max(k for k, _ in seqs) >= SKV_FUSE_MIN_KV_32 else ()

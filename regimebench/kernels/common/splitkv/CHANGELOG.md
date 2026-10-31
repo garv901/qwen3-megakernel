@@ -152,3 +152,24 @@
   (16 x 16 ring). Global stage s of a CTA -> group s % 8; per-item park (SKV_SI_P slots, default 5; use 2 in mk: ~166 KB attend smem)
   and last-arriver merge in smem; SKV_SI_CAP (64) items per CTA. Host: plan(groups=1) (CTA-balanced LPT with cut). Silo jobs 14946 /
   14947 / 14954 (PASS-21.md, P21b re-score).
+
+## splitkv-v13a (2026-10-31)
+- SKV_SI: kSiBytes padded to a multiple of 1024 (P 2: 19456 B) so kBarOff % 1024 stays 512 (mk_step.cu static_assert). Only SI builds change.
+
+## splitkv-v14 (2026-10-31)
+- plan.py: mk-serve's `align` / `paged` (serving mode; defaults keep every plan identical); the group plan runs on the unit axis then
+  is scaled. group_mode "auto" exits early (no group plan computed) when the base plan's sim is within the margin of the lower bound
+  total bytes / HBM + fix (exact: the group plan could not be kept there).
+- plan_fast.py (new here; mk-serve's numba fill_step + groups=G, group_mode 1 auto / 0 force; old callers unchanged). Item-for-item
+  parity with plan.plan(..., paged=True) (tests/test_splitkv_fast.py). fill_step us (align 64, auto, median): b64kv2048 G0 / G4 / G8
+  21 / 27 / 154; b96kv3072 31 / 126 / 43; b256kv1408 122 / 135 / 140; conv-L4 G4 / G8 ~139 / ~234 (worker, before the early exit,
+  which does not fire there).
+
+## splitkv-v15 (2026-10-31)
+- SKV_PAGED (serving, default 0) ported from mk-serve (diff 7978724..mk-serve) onto v14: Params bt / bt_stride / blk_per_layer, page_cb /
+  page_row_ptr, 4D (5D fused) paged boxes in run_items / run_items_halves / run_items_g8 / run_items_r6, tail address. Unused pcb guarded
+  by #if SKV_PAGED (else g8's register allocation changed).
+- SKV_SI ported to paged (producer: block coordinate per stage, stages never cross a block given plan align = stage rows; tail via
+  page_row_ptr). Compile-checked only; correctness to be gated by the serving build's check.
+- SKV_PAGED && SKV_TC: #error (tcgen05 consumer not ported).
+- SASS (nvcc sm_100a, a1ub.cu harness) identical to v14 for default, mma, tc, h64, g4a, g8, si8 builds; paged g4a / g8 / si8 / mma compile.
