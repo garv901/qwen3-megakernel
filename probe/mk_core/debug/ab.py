@@ -15,10 +15,11 @@ from regimebench.workload import select
 
 sets = json.loads(sys.argv[2])
 rounds = int(sys.argv[3]) if len(sys.argv) > 3 else 7
+REF_CAP = 25 * 2**30
 arms = []
 for ks in sets:
     ks = dict(ks)
-    a = load_arm("mk", attn=ks.pop("attn", "auto"), skvtc=ks.pop("skvtc", 1))   # keys "attn", "skvtc": MkArm options, the rest are knobs
+    a = load_arm("mk", attn=ks.pop("attn", "auto"), skvtc=ks.pop("skvtc", 1), skvgrp=ks.pop("skvgrp", 1))   # keys "attn", "skvtc", "skvgrp": MkArm options, the rest are knobs
     a.knobs.update({k: int(v) for k, v in ks.items()})
     arms.append(a)
 
@@ -34,13 +35,15 @@ def batch(step, n=20):
 
 for w in select(sys.argv[1].split(",")):
     inputs = make_inputs(w, 7401, "cuda")
-    ref16, ref32 = forward(w, inputs, torch.bfloat16), forward(w, inputs, torch.float32)
-    band = accuracy.oracle_band(ref16, ref32)
+    grade = w.kv_cache_bytes <= REF_CAP   # R10: the FP32 / BF16 references at > 25 GiB of KV do not fit next to the arm copies (job 11565 OOM)
+    if grade:
+        ref16, ref32 = forward(w, inputs, torch.bfloat16), forward(w, inputs, torch.float32)
+        band = accuracy.oracle_band(ref16, ref32)
     steps = [a.prepare(w, inputs, "auto", "cuda") for a in arms]
     grades = []
     for s in steps:
         s.launch(); torch.cuda.synchronize()
-        grades.append(accuracy.grade_vs_oracle(accuracy.compare(s.outputs(), ref32), band)["worst_ratio"])
+        grades.append(accuracy.grade_vs_oracle(accuracy.compare(s.outputs(), ref32), band)["worst_ratio"] if grade else float("nan"))
         for _ in range(3):
             s.launch()
     torch.cuda.synchronize()
@@ -59,4 +62,6 @@ for w in select(sys.argv[1].split(",")):
     for s in steps:
         s.close()
     del steps, inputs
+    if grade:
+        del ref16, ref32
     torch.cuda.empty_cache()

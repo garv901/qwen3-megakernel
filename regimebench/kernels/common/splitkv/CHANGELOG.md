@@ -135,3 +135,14 @@
 ## splitkv-v11 (P13 result, job 9790)
 - SKV_TMA_FUSE=1 on the group builds: g8 b256kv128 27.22 -> 26.55, g4a 32.08 -> 30.23, b128 g4a 17.73 -> 16.93, b64 g8 11.41 -> 10.37 us/layer; faster at every timed point.
   Host: 2 more maps after the 2 * kNumMaps (K then V fused 4D, see kNumTmaps).
+
+## splitkv-v12 (R10 P19, jobs 14914, 14915, 14917, 14921, 14922; header = mk-core-v18's, incl. P17 SKV_TC)
+- Host planner only (splitkv.cuh unchanged vs mk-core-v18, so every build's SASS is unchanged). `plan(..., groups=G, group_mode="force"|"auto",
+  group_eps=0.02, group_exact=0)`: balance positions per consumer group (item k of a CTA runs on group k % G in the SKV_HALVES builds)
+  by LPT with cut over n_cta x G bins; per-CTA group item counts within 1, longer lists on lower group indices. group_mode "auto" keeps the
+  base plan unless the fluid model `sim_us()` (fit to job 14914) predicts the group plan faster by 2 % + 3 us x split-pair fraction.
+  Default groups=0: plans identical to v11 (test_groups_zero_is_default).
+- Use at R10 (q_len 1, NPAD >= 64): groups = SKV_GROUPS of the build (g4a 4, g8 8), group_mode "auto". Standalone A + C us/layer
+  (job 14921, auto plan -> group auto): conv-L3-n54 202.4 -> 113.9, code-L3-n40 131.6 -> 75.7, conv-L4-n87 218.1 -> 159.8, b96 kv1K / 2K / 3K
+  80.6 / 149.8 / 219.0 -> 73.6 / 129.2 / 184.8, b192 kv1K / 1792 142.7 / 236.2 -> 134.9 / 218.4; other R10 points within +-0.5.
+- Planning cost 2-11 ms per step in Python (fine for offline prepare(); the serving port needs a faster planner).

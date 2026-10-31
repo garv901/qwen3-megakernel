@@ -1,0 +1,69 @@
+== x6
+xover6.cu(101): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+xover6.cu(196): warning #550-D: variable "cur_p" was set but never used
+    int cur_p = 0;
+        ^
+
+xover6.cu(32): warning #177-D: variable "GRID" was declared but never referenced
+  constexpr int NT = 512, GRID = 148, MAXRING = 16, TMEM_COLS = 512;
+                          ^
+
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z4k_kv14CUtensorMap_stiiiiPyPiPjS2_' for 'sm_100a'
+ptxas info    : Function properties for _Z4k_kv14CUtensorMap_stiiiiPyPiPjS2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 23 registers, used 1 barriers
+ptxas info    : Compile time = 19.706 ms
+ptxas info    : Compiling entry function '_Z5k_refPK13__nv_bfloat16S1_PKfiiiiPjS4_' for 'sm_100a'
+ptxas info    : Function properties for _Z5k_refPK13__nv_bfloat16S1_PKfiiiiPjS4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers
+ptxas info    : Compile time = 9.494 ms
+ptxas info    : Compiling entry function '_Z6k_initP13__nv_bfloat16mj' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_initP13__nv_bfloat16mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.698 ms
+ptxas info    : Compiling entry function '_Z4k_ts14CUtensorMap_stS_PfiiiiiiixiPjPyiS1_' for 'sm_100a'
+ptxas info    : Function properties for _Z4k_ts14CUtensorMap_stS_PfiiiiiiixiPjPyiS1_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 72 registers, used 1 barriers
+ptxas info    : Compile time = 123.404 ms
+== ref148 (xover4.cu -DCG=1 -DGRID_N=148)
+../xover4/xover4.cu(100): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+../xover4/xover4.cu(195): warning #550-D: variable "cur_p" was set but never used
+    int cur_p = 0;
+        ^
+
+== ref111 (xover4.cu -DCG=1 -DGRID_N=111)
+../xover4/xover4.cu(100): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+../xover4/xover4.cu(195): warning #550-D: variable "cur_p" was set but never used
+    int cur_p = 0;
+        ^
+
+== ref74 (xover4.cu -DCG=1 -DGRID_N=74)
+../xover4/xover4.cu(100): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+../xover4/xover4.cu(195): warning #550-D: variable "cur_p" was set but never used
+    int cur_p = 0;
+        ^
+

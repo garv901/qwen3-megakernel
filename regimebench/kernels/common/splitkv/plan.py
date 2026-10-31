@@ -210,23 +210,128 @@ def _lpt_cut(vis: list, n_cta: int):
     return out
 
 
+def _lptcut_groups(vis: list, n_cta: int, groups: int, gran: int, eps: float, smax: int, exact_counts: int = 0):
+    """R10 P19 (groups >= 1): balance positions per CONSUMER GROUP, not per CTA. The SKV_HALVES consumers run item k of a CTA on group k % G with
+    1/G of the ring, so a CTA whose positions sit in one group streams at about one group's rate (job 14897: conv-L3-n54 2.85 TB/s, plan group
+    max / ideal 3.86). Bins = n_cta * G (bin = b * G + h). LPT with cut: pairs longest first onto the least loaded bin; a pair that would push the
+    bin over cap = T * (1 + eps) (T = ceil(total / bins)) fills it to T and the rest goes on (S > 1 only for the cut pairs). Then each CTA's
+    G bins are made equal in item count to within 1 (exact_counts 1: equal) (split the longest piece of the shortest list; an empty bin takes half of the CTA's longest piece) and
+    interleaved (CTA item k = bin k % G, position k // G). -> per-CTA [(pair, p0, p1)] or None if counts cannot be equalised or S > smax."""
+    pair_len = [vis[s] for s in range(len(vis)) for _ in range(KVH)]
+    total = sum(pair_len)
+    nb = n_cta * groups
+    if total == 0 or nb == 0:
+        return None
+    half = max(gran // 2, 1)
+    T = -(-total // nb)
+    cap = int(T * (1.0 + eps)) + 1
+    heap = [(0, b) for b in range(nb)]
+    load_of = [0] * nb
+    bins = [[] for _ in range(nb)]
+    for i in sorted(range(len(pair_len)), key=lambda i: -pair_len[i]):
+        p0, rem = 0, pair_len[i]
+        while rem > 0:
+            if heap:
+                load, b = heapq.heappop(heap)
+                if load + rem <= cap:
+                    take = rem
+                else:
+                    take = T - load
+                    if take < half:                    # bin full: retire it
+                        continue
+                    if rem - take < half:              # no tail piece shorter than gran / 2
+                        take = rem - half
+                    if take < half:
+                        take = rem
+            else:                                      # every bin retired (rounding): the least loaded bin takes the rest
+                b = min(range(nb), key=lambda x: load_of[x])
+                load, take = load_of[b], rem
+            bins[b].append((i, p0, p0 + take))
+            p0, rem = p0 + take, rem - take
+            load_of[b] = load + take
+            if not (load_of[b] >= T and rem > 0):
+                heapq.heappush(heap, (load_of[b], b))
+    out = []
+    for c in range(n_cta):
+        L = [bins[c * groups + h] for h in range(groups)]
+        for _ in range(4096):
+            cnt = [len(x) for x in L]
+            if max(cnt) - min(cnt) <= exact_counts ^ 1:      # counts within 1: group h of a CTA with ni items runs ceil((ni - h) / G) of them
+                break
+            h = cnt.index(min(cnt))
+            if cnt[h] == 0:                            # empty bin: half of the CTA's longest piece
+                hs, k = max(((g, k) for g in range(groups) for k in range(len(L[g]))), key=lambda t: L[t[0]][t[1]][2] - L[t[0]][t[1]][1])
+            else:
+                hs, k = h, max(range(cnt[h]), key=lambda k: L[h][k][2] - L[h][k][1])
+            pr, a, z = L[hs][k]
+            if z - a < 2 * half:
+                return None
+            m = a + (z - a) // 2
+            L[hs][k] = (pr, a, m)
+            L[h].append((pr, m, z))
+        else:
+            return None
+        L.sort(key=len, reverse=True)                  # bins of a CTA are interchangeable: longer lists on the lower group indices
+        ni = sum(len(x) for x in L)
+        out.append([L[k % groups][k // groups] for k in range(ni)])
+    cnt = {}
+    for pieces in out:
+        for pr, _, _ in pieces:
+            cnt[pr] = cnt.get(pr, 0) + 1
+    if cnt and max(cnt.values()) > min(smax, 255):
+        return None
+    return out
+
+
 def _imbalance(cut) -> float:
     pos = [sum(p1 - p0 for _, p0, p1 in pieces) for pieces in cut]
     mean = sum(pos) / max(len(pos), 1)
     return max(pos) / mean if mean else 1.0
 
 
+# R10 P19 fluid model of the KV stream (fit to job 14914, 19 points x 7 arms, rms log error 0.061): every busy consumer group streams at
+# min(SIM_RG4 * 4 / G, SIM_HBM / busy groups) bytes/s (the per-group cap scales with its ring share), + SIM_FIX us.
+SIM_HBM, SIM_RG4, SIM_FIX = 6.6e12, 25e9, 5.0
+GROUP_AUTO_MARGIN, GROUP_AUTO_SPLIT_US = 0.02, 3.0     # group plan iff sim * (1 + margin) + split_us * (split pairs / pairs) < sim of the base plan
+
+
+def _group_loads(cut, groups: int) -> list:
+    """bytes per (CTA, group) of a per-CTA cut whose item k runs on group k % groups"""
+    out = []
+    for pieces in cut:
+        gl = [0] * groups
+        for k, (_, p0, p1) in enumerate(pieces):
+            gl[k % groups] += (p1 - p0) * POS_BYTES
+        out += gl
+    return out
+
+
+def sim_us(cut, groups: int, hbm: float = None, rg4: float = None, fix: float = None) -> float:
+    """predicted attend time (us) of a cut on a build with `groups` consumer groups (fluid model above)"""
+    hbm, rg4, fix = hbm or SIM_HBM, rg4 or SIM_RG4, SIM_FIX if fix is None else fix
+    rem = sorted(x for x in _group_loads(cut, max(groups, 1)) if x > 0)
+    cap = rg4 * 4 / max(groups, 1)
+    t, done, n = 0.0, 0.0, len(rem)
+    for i, x in enumerate(rem):
+        t += (x - done) / min(cap, hbm / (n - i))
+        done = x
+    return t * 1e6 + fix
+
+
 # P6 job 9692 [M]: no_split (A only) beats split (A + C) at b32kv1K (29.15 vs 32.35 us), b64kv128 (17.06 vs 24.0), b256kv128 (60.2 vs 74.5);
 # their LPT imbalance is 1.156, so the auto limit is 1.20 (not 1.10). b8kv1K (64 pairs < n_cta) keeps the cut (14.0 vs 13.5).
 LPT_MAX_IMB = 1.20
 
-def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024, smax: int = 32, one_item: bool = True, iface: int = 1, no_split="auto") -> Plan:
+def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024, smax: int = 32, one_item: bool = True, iface: int = 1, no_split="auto",
+         groups: int = 0, group_eps: float = 0.02, group_exact: int = 0, group_mode: str = "force") -> Plan:
     """seqs: list of (kv_len, q_len). q_len must be 1 unless iface == 1 and (1 <= q_len <= 16, sum q_len <= 256, nseq < 4096): R6, see the module docstring. Raises if a pair would need more than smax splits that cannot be avoided.
     one_item: when n_pairs <= n_cta, cut every pair into S_i ~ n_cta * len_i / total pieces, one item per CTA; used only if max/mean CTA positions <= 1.10,
     otherwise (and for one_item=False) the greedy cut. ldg_max_bytes: LDG engine iff the largest CTA share is <= this many KV bytes (160 KB: with the mma TMA consumer, job 9661, TMA wins at 226 KB/CTA, ties at 113 KB).
     iface: 1 or 2, only the item record differs (see the module docstring); the cut is the same.
     no_split: "auto" | True | False (ints 0 / 1 accepted). True: every pair is one item (S = 1), LPT-packed whole onto the CTAs (raises if a CTA's item count does not fit the record
-    word). "auto": True iff n_pairs >= n_cta and LPT max / mean CTA load <= LPT_MAX_IMB (1.20), else the cut above."""
+    word). "auto": True iff n_pairs >= n_cta and LPT max / mean CTA load <= LPT_MAX_IMB (1.20), else the cut above.
+    groups: 0 (default) = the modes above, unchanged. G >= 1 (q_len 1 only): balance per consumer group (_lptcut_groups; G = SKV_GROUPS of an SKV_HALVES build, 1 for
+    the single consumers), max bin load <= T * (1 + group_eps); group_mode "auto": only if sim_us() says it beats the base plan by the margin; falls back to the modes above if the group counts cannot be equalised. Plan.no_split is True iff every pair stayed whole."""
     assert iface in (1, 2), iface
     assert isinstance(no_split, str) and no_split == "auto" or not isinstance(no_split, str), f"no_split must be 'auto', True or False, got {no_split!r}"
     if not isinstance(no_split, str):
@@ -274,6 +379,24 @@ def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024
         used_one = oi is not None and balance["one_item"] <= 1.10
         cut = oi if used_one else gcut
         balance["chosen"] = balance["one_item"] if used_one else balance["greedy"]
+    grp = _lptcut_groups(vis, n_cta, int(groups), gran, group_eps, smax, int(group_exact)) if groups and not multi and n_pairs and n_cta else None
+    if grp is not None and group_mode == "auto":             # keep the base cut unless the model says the group plan is faster by the margin
+        g = int(groups)
+        cntg = {}
+        for pc in grp:
+            for pr, _, _ in pc:
+                cntg[pr] = cntg.get(pr, 0) + 1
+        nsplit = sum(1 for v in cntg.values() if v > 1)
+        s_base, s_grp = sim_us(cut, g), sim_us(grp, g)
+        balance["sim_base"], balance["sim_groups"] = s_base, s_grp
+        if not (s_grp * (1 + GROUP_AUTO_MARGIN) + GROUP_AUTO_SPLIT_US * nsplit / max(n_pairs, 1) < s_base):
+            grp = None
+    if grp is not None:                                      # groups >= 1 (R10 P19): group-balanced LPT with cut replaces the modes above
+        g = int(groups)
+        balance["groups"] = _imbalance([[p for k, p in enumerate(pc) if k % g == h] for pc in grp for h in range(g)])
+        balance["chosen"] = balance["groups"]
+        cut, used_one = grp, False
+        used_lpt = len({pr for pc in grp for pr, _, _ in pc}) == sum(len(pc) for pc in grp)   # every pair whole: S == 1 (no combine)
     cnt = {}
     for pieces in cut:
         for pr, _, _ in pieces:

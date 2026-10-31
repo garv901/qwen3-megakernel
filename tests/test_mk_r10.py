@@ -45,3 +45,18 @@ def test_mk_supports_and_plans_every_r10_point():
         npad = B.bucket_for(w.total_q)
         assert npad in (64, 128, 256)
         assert isinstance(B.skv_tune(npad, 1, seqs, tc=1), tuple)
+
+
+def test_skvgrp_group_plans_are_valid_and_host_only():
+    """R10-1 (splitkv-v12): plan(groups=SKV_GROUPS, group_mode="auto") keeps mk's row layout; unchanged plan where the model keeps the base cut."""
+    from regimebench.kernels.common.splitkv import plan as P
+    assert MkArm().skvgrp == 1 and MkArm(skvgrp=0).skvgrp == 0
+    changed = 0
+    for w in r10_points():
+        seqs = [(s.kv_len, s.q_len) for s in w.seqs]
+        k = dict(B.skv_tune(B.bucket_for(w.total_q), 1, seqs, tc=1))
+        assert k.get("SKV_HALVES") == 1, w.id
+        p0, p1 = P.plan(seqs, n_cta=B.GRID), P.plan(seqs, n_cta=B.GRID, groups=k.get("SKV_GROUPS", 2), group_mode="auto")
+        assert list(p1.row_base) == list(p0.row_base) and p1.total_q == p0.total_q and p1.cache_rows == p0.cache_rows, w.id
+        changed += p1.summary() != p0.summary()
+    assert changed >= 3   # the trace steps at least

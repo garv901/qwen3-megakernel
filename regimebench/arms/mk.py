@@ -101,7 +101,11 @@ class MkStep:
         if self.attn == "splitkv":   # A1: plan once per prepare (every replay attends over the same visible lengths: the cache does not grow between replays)
             from ..kernels.common.splitkv import plan as skv_plan
             assert ld.knobs["MK_KU"] == 128, "attn=splitkv needs MK_KU 128"
-            pl = skv_plan.plan([(s.kv_len, s.q_len) for s in w.seqs], n_cta=self.nb)
+            grp = {}
+            if arm.skvgrp and int(ld.knobs.get("SKV_HALVES", 0)) and all(s.q_len == 1 for s in w.seqs):
+                # R10-1 (splitkv-v12 P19): balance per consumer group (item k of a CTA runs on group k % SKV_GROUPS); host-only, auto keeps the base plan unless faster
+                grp = dict(groups=int(ld.knobs.get("SKV_GROUPS", 2)), group_mode="auto")
+            pl = skv_plan.plan([(s.kv_len, s.q_len) for s in w.seqs], n_cta=self.nb, **grp)
             tok0 = [sum(x.q_len for x in w.seqs[:i]) for i in range(len(w.seqs))]   # t_base is per token, row_base per seq (equal lists only when every q_len is 1)
             assert list(pl.row_base) == [int(d.t_base[t]) for t in tok0], "A1 row_base != mk t_base of the seq's first token (fixture packs seq s at the sum of the previous kv_len + q_len)"
             assert pl.total_q == c.ntok == w.total_q and pl.cache_rows == rows
@@ -212,12 +216,13 @@ class MkStep:
 class MkArm:
     name = "mk"
 
-    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, skvtc: int = 1, **_: Any):
+    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, skvtc: int = 1, skvgrp: int = 1, **_: Any):
         if attn not in ATTN_OPTIONS:
             raise ValueError(f"unknown attn {attn!r} (one of {ATTN_OPTIONS})")
         self.attn = attn
         self.skvtune = int(skvtune)   # 1: per-bucket splitkv header knobs (B.skv_tune; job 9714)
         self.skvtc = int(skvtc)       # 1 (default, job 11562): B.skv_tune(tc=1), the tcgen05 attention consumer at NPAD 16, kv >= 4K (MK-core A2)
+        self.skvgrp = int(skvgrp)     # 1 (default, job 14935): splitkv plan(groups=SKV_GROUPS, group_mode="auto") on SKV_HALVES builds, q_len 1 (R10-1, splitkv-v12)
         self.knobs = {"MK_STAMPS": int(stamps), "MK_NULL": int(null), "MK_KU": int(ku), "MK_RING": int(ring), "MK_TS": int(ts), "MK_TSB": int(tsb), "MK_LMTS": int(lmts)}
         self._loaded: dict[tuple, _Loaded] = {}
         self._wgu_cache: dict[tuple, Any] = {}
