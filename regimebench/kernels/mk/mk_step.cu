@@ -569,9 +569,11 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
         unsigned* tick = tk + (IS_O ? 0 : TK_D) + job;
         if (tid == 0) {
             unsigned v;
+            MK_DBG_T0(t0);
             do {
                 asm volatile("ld.acquire.gpu.global.u32 %0, [%1];" : "=r"(v) : "l"(tick) : "memory");
                 if (v != TARGET) __nanosleep(64);
+                MK_DBG_SPIN(t0, 3, v, job)
             } while (v != TARGET);
             atomicExch(tick, 0u);   // reset: every worker add of this layer has landed (the target is reached); the next use is a layer later, behind grid barriers
         }
@@ -606,9 +608,11 @@ __device__ __forceinline__ void idle_finalize(const float* x, const bf16_t* lnw,
         unsigned* tick = tk + (IS_O ? 0 : TK_D) + job;
         if (tid == 0) {
             unsigned v;
+            MK_DBG_T0(t0);
             do {
                 asm volatile("ld.acquire.gpu.global.u32 %0, [%1];" : "=r"(v) : "l"(tick) : "memory");
                 if (v != TARGET) __nanosleep(64);
+                MK_DBG_SPIN(t0, 4, v, job)
             } while (v != TARGET);
             if (nsub == 1) atomicExch(tick, 0u);
             else {
@@ -829,10 +833,12 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
                         unsigned* tq = tk + TK_Q + rbk * NTT + tt;
                         unsigned* tv = rbv >= 0 ? tk + TK_Q + rbv * NTT + tt : tq;
                         unsigned v0, v1;
+                        MK_DBG_T0(t0);
                         do {
                             asm volatile("ld.acquire.gpu.global.u32 %0, [%1];" : "=r"(v0) : "l"(tq) : "memory");
                             asm volatile("ld.acquire.gpu.global.u32 %0, [%1];" : "=r"(v1) : "l"(tv) : "memory");
                             if (v0 != (unsigned)TS_KS || v1 != (unsigned)TS_KS) __nanosleep(64);
+                            MK_DBG_SPIN(t0, 5, v0, v1)
                         } while (v0 != (unsigned)TS_KS || v1 != (unsigned)TS_KS);
                         if (nsub == 1) { atomicExch(tq, 0u); if (tv != tq) atomicExch(tv, 0u); }
                         else {

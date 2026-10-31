@@ -79,6 +79,16 @@
 #ifndef MK_GU_TT
 #define MK_GU_TT 0   // P6: GU token tile override (0 = 96 at NPAD 256 (job 9757: -59.6 us vs 128), 48 at 128 (job 9758: -42.3 us vs 64)); multiple of 16, <= 128 (two accumulators in 256 TMEM columns). xover4 job 9756: GU T=256 TT 96 8.45 vs TT 128 8.85 us
 #endif
+#ifndef MK_DBG_WAIT
+#define MK_DBG_WAIT 0   // debug: bounded spins (grid barrier, mbarriers, tickets): after ~2^31 cycles print the site and give up (results wrong, the kernel ends and printf flushes)
+#endif
+#if MK_DBG_WAIT
+#define MK_DBG_SPIN(t0, site, a, b) if (clock64() - (t0) > (1ll << 31)) { printf("MK_DBG_WAIT site %d cta %d tid %d a %u b %u\n", (site), (int)blockIdx.x, (int)threadIdx.x, (unsigned)(a), (unsigned)(b)); break; }
+#define MK_DBG_T0(t0) const long long t0 = clock64()
+#else
+#define MK_DBG_SPIN(t0, site, a, b)
+#define MK_DBG_T0(t0)
+#endif
 #ifndef MK_DBG_NOATT
 #define MK_DBG_NOATT 0   // debug (MK_SKV builds): 1 = attend is compiled in but skipped at run time (guard ntok < 0): separates its code-gen cost from its run-time cost; output is wrong
 #endif
@@ -210,9 +220,11 @@ __device__ __forceinline__ void mbar_init(u32 a, u32 cnt) { asm volatile("mbarri
 __device__ __forceinline__ void mbar_fence_init() { asm volatile("fence.mbarrier_init.release.cluster;" ::: "memory"); }
 __device__ __forceinline__ void mbar_wait(u32 a, u32 parity) {
     u32 ok;
+    MK_DBG_T0(t0);
     while (true) {
         asm volatile("{\n\t.reg .pred P;\n\tmbarrier.try_wait.parity.acquire.cta.shared::cta.b64 P, [%1], %2;\n\tselp.u32 %0, 1, 0, P;\n\t}" : "=r"(ok) : "r"(a), "r"(parity) : "memory");
         if (ok) break;
+        MK_DBG_SPIN(t0, 1, a, parity)
     }
 }
 __device__ __forceinline__ void mbar_arrive(u32 a) { asm volatile("mbarrier.arrive.release.cta.shared::cta.b64 _, [%0];" :: "r"(a) : "memory"); }
@@ -277,8 +289,10 @@ __device__ __forceinline__ void bar_wait(const unsigned* cnt, unsigned& target) 
     target += gridDim.x;
     if (threadIdx.x == 0) {
         unsigned v;
+        MK_DBG_T0(t0);
         do {
             asm volatile("ld.relaxed.gpu.global.u32 %0, [%1];" : "=r"(v) : "l"(cnt) : "memory");
+            MK_DBG_SPIN(t0, 2, v, target)
         } while (v < target);
         asm volatile("fence.acquire.gpu;" ::: "memory");   // one acquire after the relaxed poll succeeds
 #if MK_STAMPS
