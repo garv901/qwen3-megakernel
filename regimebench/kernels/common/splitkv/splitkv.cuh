@@ -133,6 +133,23 @@
 #define SKV_SI_CAP 64       // SKV_SI: max items per CTA (the records are copied to smem; more traps)
 #endif
 
+#ifndef SKV_POOL
+#define SKV_POOL 0          // (P25, default 0, opt-in) 1 = guided static list + atomic pool: the plan (plan(pool=f)) gives each CTA a static list (items row b) and puts the smallest items in a global pool (items row gridDim.x,
+#endif                      // count npool in the ni word of its record 0); after its static list a CTA claims pool items one at a time (atomicAdd on p.pool_ctr[layer], the next claim is issued one item ahead).
+                            // The counter resets itself (the CTA that gets ticket npool + grid - 1 writes 0); the host zeroes it once. Every CTA makes exactly one failing claim. Not with SKV_TC / SKV_TICKET
+#if SKV_POOL && (SKV_TC || SKV_TICKET)
+#error "SKV_POOL does not combine with SKV_TC or SKV_TICKET"
+#endif
+// (P25b) SKV_POOL 2 (only with SKV_SI) = the pool claim happens INSIDE the SI stage stream (see run_items_si): the static list and the pool are one call, no drain / refill per claimed item.
+#if SKV_POOL > 2 || SKV_POOL < 0
+#error "SKV_POOL must be 0, 1 or 2"
+#endif
+#if SKV_POOL == 2 && !SKV_SI
+#error "SKV_POOL 2 (in-stream claim) is only implemented for the SI consumer: build with SKV_SI=1 (g8 / ring builds: use SKV_POOL 1)"
+#endif
+#ifndef SKV_LOOKAHEAD
+#define SKV_LOOKAHEAD 48    // SKV_POOL 2: the claimer (group 0's producer thread) claims the next pool item while (known stages - its next stage to produce) < SKV_LOOKAHEAD (about 6 per group)
+#endif
 #ifndef SKV_TC
 #define SKV_TC 0            // (default 0, opt-in; MK-core tcgen05 pass) 1 = q_len 1 tcgen05 consumer: S^T = K Q^T and O_t^T = V^T P^T on the tensor core (M = 128 positions / dims, N = 16 = 2 real q heads),
 #endif                      // separate K / V TMA rings, softmax warpgroup (warps 4-7) in registers + TMEM, O accumulated in registers. Needs Params::tmem (64 TMEM columns); TMA engine only
@@ -187,14 +204,24 @@ constexpr int kBarBytes = 256;
 constexpr int kBarOff = kTcXOff + 512, kSmemBytes = kBarOff + kBarBytes;   // kBarOff % 1024 == 512 (mk_step.cu static_assert)
 static_assert(kBarOff % 1024 == 512, "SKV_TC kBarOff");
 #else
-constexpr int kBarBytes = (16 * kStages > 64 ? 16 * kStages : 64);   // mbarriers: full[s] at +8 s, empty[s] at +8 (kStages + s)
+constexpr int kBarBytes0 = (16 * kStages > 64 ? 16 * kStages : 64);   // mbarriers: full[s] at +8 s, empty[s] at +8 (kStages + s)
+#if SKV_POOL
+constexpr int kBarBytes = kBarBytes0 + 64, kPoolSlot = kBarBytes0;    // SKV_POOL: 64 B after the mbarriers (offset kBarOff + kPoolSlot): the claimed ticket (2 words, alternating by iteration)
+#else
+constexpr int kBarBytes = kBarBytes0;
+#endif
 #if SKV_SI
 // P21 SI region between the merge buffer and the mbarriers: item records (CAP x 2 int4) | prefix of stages gs[CAP + 1] (padded to 16 B) | ctr (arrivals [P][2], gens [P][2]; padded to 16 B) |
 // park area P slots x 16 entries (dh * 8 + group) x kPartStride floats (o[2 heads][64 dims], m[2], l[2]).
 constexpr int kSiP = SKV_SI_P, kSiCap = SKV_SI_CAP;
 constexpr int kSiTabOff = kMrgOff + kMrgBytes, kSiGsOff = kSiTabOff + kSiCap * 32;
 constexpr int kSiCtrOff = kSiGsOff + ((kSiCap + 1 + 3) / 4) * 16, kSiParkOff = kSiCtrOff + ((4 * kSiP + 3) / 4) * 16;
-constexpr int kSiBytes = ((kSiParkOff + kSiP * 16 * kPartStride * 4 - kSiTabOff + 1023) / 1024) * 1024;   // padded to 1 KB: keeps kBarOff % 1024 (mk_step.cu static_assert)
+#if SKV_POOL == 2
+constexpr int kSiStOff = kSiParkOff + kSiP * 16 * kPartStride * 4, kSiStBytes = 16;   // SKV_POOL 2: 16 B behind the park area: [0] = T_known (stages known), [1] = done
+#else
+constexpr int kSiStBytes = 0;
+#endif
+constexpr int kSiBytes = ((kSiParkOff + kSiP * 16 * kPartStride * 4 + kSiStBytes - kSiTabOff + 1023) / 1024) * 1024;   // padded to 1 KB: keeps kBarOff % 1024 (mk_step.cu static_assert)
 constexpr int kBarOff = kMrgOff + kMrgBytes + kSiBytes, kSmemBytes = kBarOff + kBarBytes;
 #else
 constexpr int kBarOff = kMrgOff + kMrgBytes, kSmemBytes = kBarOff + kBarBytes;
@@ -251,6 +278,9 @@ struct Params {                    // filled by the host planner (plan.py) + cal
 #if SKV_PAGED
   const int* bt; int bt_stride;    // block table [requests][bt_stride] int32 (vLLM block ids)
   int blk_per_layer;               // blocks between layers: the maps' last dim is layer * blk_per_layer + block
+#endif
+#if SKV_POOL
+  unsigned* pool_ctr;              // SKV_POOL: [n_layers] u32, zeroed once by the host; attend resets counter [layer] itself
 #endif
 #if SKV_TICKET
   unsigned* tickets;               // [n_pairs = 8 * n_seq] u32, zeroed once per plan, never reset: tickets[seq * 8 + kvh] gains S per layer (SKV_TICKET)
@@ -1682,8 +1712,25 @@ __device__ __forceinline__ void run_items_g8(const Params& p, int layer, unsigne
 // stages of the visit (the producer thread waited the group's empty barrier of the last stage and already refilled it: the next visit's two stages are in flight), so a parked-waiting group blocks nothing but itself.
 // Let k* be the lowest item not fully merged: every contributor either has parked k* or will reach its park (items < k* are merged, so it never waited on them; its ring data does not depend on any other
 // group), and gen(sl*) == k* / P since all earlier items of the slot are merged: nobody waits for k*, the last arrival merges it, so progress. The merge itself waits for nothing.
+// P25b, SKV_POOL 2 (in-stream claim): the item list GROWS while the stream runs; attend passes the first pool ticket and the call claims pool items itself (no per-item call, no CTA barrier, no ring drain).
+// Shared state: T_known = stages known (gs[nt]), done. Only thread 0 (group 0's producer, the claimer) writes them, after the record (tab) and prefix gs[nt + 1] are written and a __threadfence_block. An item is
+// appended whole. The claimer claims (one atomicAdd on p.pool_ctr[layer], always one claim in flight) while T_known - 8 pc < SKV_LOOKAHEAD (pc = group 0's produced stages): in setup (first ticket), after each consumed
+// stage of group 0 and in its wait loop. Success: append, publish T_known, issue the next claim. Failure: done = 1 (after the last publish), the ticket npool + grid - 1 resets the counter. Every CTA makes exactly one failing
+// claim (a success with kSiCap items traps: the claim cannot be returned and the counter reset needs it). Readers read done BEFORE T_known (done = 1 then makes T_known final), then fence, then read tab / gs.
+// Producers never wait for an unknown stage: try_produce (thread 0 of each group) produces the stages pc < consumed + kHS that are known and defers the rest; the deferred ones are produced when thread 0
+// pumps again (after each consumption, at the top of each visit, in the wait loop). A consumer waits for an unknown next stage only at the top of a visit, i.e. AFTER it parked and merged the previous visit
+// (the next visit's q is prefetched only when its stage was already known at the visit start). Deadlock argument (extends the one above): the new waits are (c) a group waiting for an unknown stage: it holds no
+// park entry and no open item, so no merge needs it; and (d) the claimer's progress, which every such wait needs. The claimer is blocked only by what blocks any group (ring barriers of known stages, park wait).
+// Let k* be the lowest item not fully merged (all appended items are whole and known to every contributor): items < k* are merged, so no warp waits on them; every contributor reaches park of k* using only stages
+// of known items, which its group's thread 0 produces without waiting (produce needs the partner warp's read of stage - kHS: an earlier stage, whose consumer is not blocked, as before; a warp parked-waiting on
+// an item >= k* has consumed everything it was asked to read, and every stage the partner still needs was produced before thread 0 consumed it); so k* merges. When all appended items are merged nobody holds
+// a park wait, the claimer is free: its lookahead test holds once group 0 produced all known stages (8 pc >= T_known - 7), so it claims until the failure sets done and every group's wait ends.
 // Records and prefix are copied to smem once per call (warp 0 scan, one __syncthreads); counters / gens are zeroed per call. ring_phase: group q's counter + its stage total (T - q + 7) / 8.
-__device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigned char* smem, unsigned& g, const int4* rec, int ni) {
+__device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigned char* smem, unsigned& g, const int4* rec, int ni
+#if SKV_POOL == 2
+                                             , unsigned tk0      // the first pool ticket (issued by attend before the call, valid in thread 0 only)
+#endif
+                                             ) {
   const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, l16 = lane & 15;
   const int h = tid >> 6, t = tid & 63, dh = warp & 1;          // h = group index
   const unsigned sbase = smaddr(smem);
@@ -1696,6 +1743,43 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
   const size_t layer_row = (size_t)layer * p.cache_rows;
   const int4 zero4 = make_int4(0, 0, 0, 0);
   constexpr bool kTail = (SKV_TAIL_LDG != 0);
+
+#if SKV_POOL == 2
+  // ---- P25b in-stream pool: shared state T_known / done, the claimer (thread 0) and the producer position of group 0 (pc), see the header comment
+  volatile int* tkp = reinterpret_cast<volatile int*>(smem + kSiStOff);
+  volatile int* donep = tkp + 1;
+  const int4* pool = p.items + (size_t)gridDim.x * p.items_stride * 2;
+#if SKV_IFACE == 2
+  const int npool = pool[1].y >> 8;
+#else
+  const int npool = pool[1].w;
+#endif
+  int pc = 0, pk = 0;                                           // producer position of this group (stages produced, item of the next one)
+  unsigned tkc = tk0;                                           // claimer (tid 0 only): the ticket in flight
+  int ntc = ni, Tc = 0;                                         // claimer: items known, stages known
+  bool cdone = false;
+  auto claim_step = [&](bool force) {                           // tid 0 only. One claim at most: resolve the ticket in flight; success = append + publish + issue the next one, failure = done
+    if (cdone) return;
+    if (!force && Tc - 8 * pc >= SKV_LOOKAHEAD) return;
+    const unsigned tt = tkc;
+    if (tt < (unsigned)npool) {
+      if (ntc >= kSiCap) __trap();                              // no room for a claimed item: cannot be given back (the counter reset needs every CTA's failing claim)
+      const int4 ra = pool[2 * (size_t)tt], rb = pool[2 * (size_t)tt + 1];
+      tab[2 * ntc] = ra; tab[2 * ntc + 1] = rb;
+      const int ln = ra.w - ra.z;
+      Tc += (ln - ((kTail && ln > 1 && ln % kStageRows == 1) ? 1 : 0) + kStageRows - 1) / kStageRows;
+      gs[ntc + 1] = Tc; ++ntc;
+      __threadfence_block();                                    // record + prefix before the publish
+      *tkp = Tc;
+      tkc = atomicAdd(&p.pool_ctr[layer], 1u);                  // the next claim, in flight until the next step
+    } else {
+      cdone = true;
+      if (tt == (unsigned)npool + gridDim.x - 1) p.pool_ctr[layer] = 0;   // the last failing claim of the layer: every other claim is done (as SKV_POOL 1)
+      __threadfence_block();                                    // every append is published before done
+      *donep = 1;
+    }
+  };
+#endif
 
   // ---- per-call setup: item records + stage prefix (warp 0), counters
   if (ni > kSiCap) __trap();
@@ -1718,16 +1802,26 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
       if (i < ni) gs[i + 1] = carry + incl;
       carry += __shfl_sync(0xffffffffu, incl, 31);
     }
+#if SKV_POOL == 2
+    __syncwarp();
+    if (lane == 0) { Tc = carry; *donep = 0; *tkp = Tc; claim_step(true); }   // resolve the first claim now (its latency hid behind attend's setup)
+#endif
   }
   __syncthreads();
+#if SKV_POOL != 2
   const int T = gs[ni];                                         // total stages of the CTA
   const int nstg = (T - h + 7) >> 3;                            // this group's stages: s = h + 8 c, c < nstg
+#endif
   const int gh0 = (int)((g >> (3 * h)) & 7u);                   // this group's ring counter at entry
 
   // ---- TMA producer (lane 0 of warp 2 h): the group's stage sequence into its own slots
+#if SKV_POOL != 2
   int pc = 0, pk = 0;
+#endif
   auto produce = [&](int slot) {
+#if SKV_POOL != 2
     if (pc >= nstg) return;
+#endif
     const int sp = h + 8 * pc;
     while (gs[pk + 1] <= sp) ++pk;
     const int4 it = tab[2 * pk];
@@ -1767,10 +1861,42 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
     }
     ++pc;
   };
+#if SKV_POOL == 2
+  // known-stage count with acquire semantics (volatile read, then a fence: the table / prefix reads that follow see the publisher's writes)
+  auto rd_known = [&]() -> int { const int v = *tkp; __threadfence_block(); return v; };
+  // t == 0 only. Produce the group's next stages while a ring slot is free (pc < cons + kHS: stage pc - kHS was consumed by both warps, its empty barrier is waited) and the stage is known.
+  // Never waits for a stage to become known: a deferred stage is produced by a later call.
+  auto try_produce = [&](int cons) {
+    while (pc < cons + kHS) {
+      if (h + 8 * pc >= rd_known()) break;
+      produce(h * kHS + (gh0 + pc) % kHS);
+    }
+  };
+  // All threads of the group. true = stage sp is known; false = no such stage (done and sp >= T_known). done is read BEFORE T_known: done = 1 implies the T_known read after it is final.
+  // Thread 0 pumps while it waits: group 0's thread 0 claims, every group's thread 0 produces the stages that became known.
+  auto wait_stage = [&](int sp, int cons) -> bool {
+#if defined(SKV_DEBUG_WAIT) && (SKV_DEBUG_WAIT + 0)
+    unsigned long long polls = 0;
+#endif
+    for (;;) {
+      const int d = *donep;
+      __threadfence_block();
+      if (sp < *tkp) { __threadfence_block(); return true; }
+      if (d) return false;
+      if (t == 0) { if (h == 0) claim_step(false); try_produce(cons); }
+      __nanosleep(32);
+#if defined(SKV_DEBUG_WAIT) && (SKV_DEBUG_WAIT + 0)
+      if (++polls == (1ull << 26) && lane == 0) printf("SKV_DEBUG_WAIT si-stream cta %d layer %d warp %d sp %d T_known %d done %d\n", blockIdx.x, layer, warp, sp, (int)*tkp, (int)*donep);
+#endif
+    }
+  };
+  if (t == 0) { try_produce(0); if (h == 0) claim_step(false); }
+#else
   if (t == 0 && nstg > 0) {
 #pragma unroll
     for (int s = 0; s < kHS; ++s) produce(h * kHS + (gh0 + s) % kHS);
   }
+#endif
 
   auto load_q = [&](const int4& a, int tok, uint4& x, uint4& y) {
     const bf16* qp = p.q + (size_t)(tok * kQHeads + 2 * (a.y & 15)) * kDim + l16 * 8;
@@ -1788,17 +1914,35 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
   uint4 tra = make_uint4(0, 0, 0, 0), trb = tra;
   uint4 qa = make_uint4(0, 0, 0, 0), qb = qa;
   int kc = 0;                                                   // item of this group's next stage
+#if SKV_POOL == 2
+  bool pre = false;                                             // q of the next visit prefetched (its first stage was known at the start of the previous visit)
+#else
   if (nstg > 0) {
     while (gs[kc + 1] <= h) ++kc;
     load_q(tab[2 * kc], tab[2 * kc + 1].z, qa, qb);
     if (kTail && h == gs[kc]) load_tail(tab[2 * kc], tra);
   }
+#endif
   float* nbp = mrg + kP8Park + 64 * warp;                       // this warp's tail park (64 dims of the tail V row)
   float* qsp = mrg + kP8Q + 128 * warp;                         // this warp's q scratch
   int gh = gh0;
 
+#if SKV_POOL == 2
+  for (int c = 0;;) {
+    const int s0 = h + 8 * c;
+    if (!pre) {                                                 // nothing parked or pending here: wait for the stage to be known (or for the end)
+      if (!wait_stage(s0, c)) break;
+      __syncwarp();
+      if (c > 0) ++kc;                                          // the next stage's item is after the visited one
+      while (gs[kc + 1] <= s0) ++kc;
+      load_q(tab[2 * kc], tab[2 * kc + 1].z, qa, qb);
+      if (kTail && s0 == gs[kc]) load_tail(tab[2 * kc], tra);
+    }
+    if (t == 0) try_produce(c);                                 // stage s0 is known: produced (deferred refills of the previous visit)
+#else
   for (int c = 0; c < nstg;) {
     const int s0 = h + 8 * c;
+#endif
     const int4 ra = tab[2 * kc], rb = tab[2 * kc + 1];
     const int kvh = ra.y & 15, p0 = ra.z, p1 = ra.w;
     const int gsk = gs[kc], gse = gs[kc + 1];
@@ -1806,7 +1950,11 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
     const int len = p1 - p0 - ((kTail && p1 - p0 > 1 && (p1 - p0) % kStageRows == 1) ? 1 : 0);
     const int nv = (gse - 1 - s0) / 8 + 1;                      // stages of this visit
     const int cn = c + nv;
+#if SKV_POOL == 2
+    const bool has_next = __shfl_sync(0xffffffffu, rd_known(), 0) > h + 8 * cn;   // snapshot (lane 0's read, so the warp agrees), never waits: an unknown next stage is waited for after this visit's park
+#else
     const bool has_next = cn < nstg;
+#endif
     int kn = kc, ntok = 0;
     int4 na = zero4;
     bool nown = false;
@@ -1912,7 +2060,15 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
 #pragma unroll
         for (int gi = 0; gi < kMmaG; ++gi) hmma16816(oacc[g0 + gi], vf[gi], pb0, pb1);
       }
+#if SKV_POOL == 2
+      if (t == 0) {
+        if (h == 0) claim_step(false);                          // before the empty wait: the claim hides behind the partner warp's read of the stage
+        mb_wait(bar0 + 8 * (kStages + slot), par);              // both warps of the group have read the stage
+        try_produce(c + jj + 1);
+      }
+#else
       if (t == 0) { mb_wait(bar0 + 8 * (kStages + slot), par); produce(slot); }   // both warps of the group have read the stage
+#endif
       __syncwarp();
     }
     float l0 = lp0, l1 = lp1;
@@ -1938,7 +2094,17 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
     const int cnt = min(8, gse - gsk);                          // contributing groups = expected arrivals per dh
     int* arrp = ctr + 2 * sl + dh;
     volatile int* genp = ctr + 2 * kSiP + 2 * sl + dh;
+#if defined(SKV_DEBUG_WAIT) && (SKV_DEBUG_WAIT + 0)
+    if (lane == 0) {                                            // debug: count the polls, report once after 2^26, keep spinning
+      unsigned long long polls = 0;
+      while (*genp != tk) {
+        __nanosleep(20);
+        if (++polls == (1ull << 26)) printf("SKV_DEBUG_WAIT si-park cta %d layer %d warp %d item %d slot %d gen %d want %d\n", blockIdx.x, layer, warp, kc, sl, (int)*genp, tk);
+      }
+    }
+#else
     if (lane == 0) { while (*genp != tk) __nanosleep(20); }
+#endif
     __syncwarp();
     __threadfence_block();
     float* ent = park + ((size_t)sl * 16 + dh * 8 + h) * kPartStride;
@@ -1982,8 +2148,14 @@ __device__ __forceinline__ void run_items_si(const Params& p, int layer, unsigne
     }
     qa = nqa; qb = nqb; if (kTail) tra = trb;
     kc = kn; c = cn;
+#if SKV_POOL == 2
+    pre = has_next;
+#endif
   }
   __syncthreads();                                              // all groups done (a group without stages arrives here directly); attend ends with this barrier
+#if SKV_POOL == 2
+  const int T = *tkp;                                           // final: done was set after the last append, every group left the loop only after reading done
+#endif
   unsigned gout = 0;                                            // every thread stores the same packed counters: group q's counter + its stage total of this call
 #pragma unroll
   for (int q = 0; q < 8; ++q) gout |= (((g >> (3 * q)) + (unsigned)((T - q + 7) >> 3)) & 7u) << (3 * q);
@@ -2657,12 +2829,22 @@ __device__ void attend(const Params& p, int layer, unsigned char* smem, unsigned
 #else
   const int ni = rec[1].w;                                      // n_items is stored in every record of the CTA
 #endif
+#if SKV_POOL
+  unsigned tk = 0;
+  if (tid == 0) tk = atomicAdd(&p.pool_ctr[layer], 1u);        // first claim, before the static run (its latency hides behind it)
+  if (SKV_POOL == 2 || ni > 0) {                               // a CTA without static items still runs the pool loop (POOL 1) / claims at once inside run_items_si (POOL 2)
+#else
   if (ni == 0) return;
+#endif
 #if SKV_TC
   run_items_tc(p, layer, smem, ring_phase, rec, ni);
   return;
 #elif SKV_SI
+#if SKV_POOL == 2
+  run_items_si(p, layer, smem, g, rec, ni, tk);                // static list + pool in one stage stream
+#else
   run_items_si(p, layer, smem, g, rec, ni);
+#endif
 #elif SKV_HALVES && SKV_GROUPS == 8
   run_items_g8(p, layer, smem, g, rec, ni);
 #elif SKV_HALVES
@@ -2672,6 +2854,44 @@ __device__ void attend(const Params& p, int layer, unsigned char* smem, unsigned
 #else
   if (tma) run_items<true>(p, layer, smem, g, rec, ni);
   else run_items<false>(p, layer, smem, g, rec, ni);
+#endif
+#if SKV_POOL
+  }
+#if SKV_POOL == 1
+  {
+    const int4* pool = p.items + (size_t)gridDim.x * p.items_stride * 2;
+#if SKV_IFACE == 2
+    const int npool = pool[1].y >> 8;
+#else
+    const int npool = pool[1].w;
+#endif
+    volatile unsigned* slot = reinterpret_cast<volatile unsigned*>(smem + kBarOff + kPoolSlot);
+    for (int it = 0;; ++it) {
+      __syncthreads();                                         // the previous call's groups are done with the smem its setup rewrites (SI table / counters)
+      if (tid == 0) slot[it & 1] = tk;
+      __syncthreads();
+      const unsigned t = slot[it & 1];                         // slot parity: the next iteration's write cannot race this read (a sync sits between)
+      if (t >= (unsigned)npool) {
+        if (tid == 0 && t == (unsigned)npool + gridDim.x - 1) p.pool_ctr[layer] = 0;   // the last failing claim of the layer: every other claim is done
+        break;
+      }
+      if (tid == 0) tk = atomicAdd(&p.pool_ctr[layer], 1u);    // next claim, one item ahead
+      const int4* pr = pool + 2 * (size_t)t;
+#if SKV_SI
+      run_items_si(p, layer, smem, g, pr, 1);
+#elif SKV_HALVES && SKV_GROUPS == 8
+      run_items_g8(p, layer, smem, g, pr, 1);
+#elif SKV_HALVES
+      run_items_halves(p, layer, smem, g, pr, 1);
+#elif SKV_QMAX > 1
+      run_items_r6(p, layer, smem, g, pr, 1);
+#else
+      if (tma) run_items<true>(p, layer, smem, g, pr, 1);
+      else run_items<false>(p, layer, smem, g, pr, 1);
+#endif
+    }
+  }
+#endif
 #endif
 #if SKV_TICKET
   ticket_merge(p, smem, rec, ni);

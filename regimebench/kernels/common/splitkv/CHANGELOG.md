@@ -179,3 +179,12 @@
   0 without split pairs, else COMB_FIX_US 2.5 + COMB_PER_PART_US 0.0017 x partials (fit to mk-core-v21 MK_CMB stamps, job 15005:
   conv-L3 2.78, b48kv4K 3.29, b96kv2K 4.12, b192kv1K 6.03 us/layer). Same in plan_fast (numba), parity tests pass. Early exit adds
   comb_us(base). Choice unchanged at all 19 mk_r10 points (CPU check); matters on serving steps near the margin. splitkv.cuh = v15.
+
+## splitkv-v17 (2026-10-31)
+- New knob SKV_POOL (default 0; P25 / P25b, both killed in silo 15044-15045 and 15056-15057):
+  - 1 = guided static list plus a per-layer atomic pool claim, one consumer call per item;
+  - 2 = the claim is appended inside the SI stage stream.
+- plan(pool=f): f = 0 keeps the output byte-identical.
+- SKV_DEBUG_WAIT now also bounds and reports SI's park and stream spins.
+- Default SASS is identical to v16 for every consumer (and identical with SKV_DEBUG_WAIT=0).
+- No call-site change. Importing is optional; it is only useful for the SI park-spin debug coverage.

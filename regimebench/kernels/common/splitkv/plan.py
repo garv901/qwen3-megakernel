@@ -23,6 +23,9 @@ Device encoding (matches splitkv.cuh):
   no_split (plan(no_split=...)): every (seq, kvh) pair is ONE item (S = 1, attend writes ao directly, no combine), pairs packed whole onto CTAs by LPT
       (longest first, to the least loaded CTA). "auto" (default): used iff n_pairs >= n_cta and the LPT max / mean CTA load <= LPT_MAX_IMB (1.20), else the cut above.
       Plan.no_split / summary()["no_split"] tell which mode was used. SKV_TICKET builds (splitkv.cuh) use `Plan.n_pairs` (tickets[pair], pair = seq * 8 + kvh, zeroed once per plan).
+  pool (plan(pool=f), SKV_POOL builds, q_len 1 and iface 1 / 2): items gets n_cta + 1 rows. Row b < n_cta = CTA b's static list; row n_cta = the pool (npool records, in claim order; the ni word of
+      every pool record = npool; stride >= npool). Static lists = LPT (longest item first, onto the least loaded CTA) up to f * total / n_cta positions per CTA; the first item that does not fit and
+      every later (shorter) item go to the pool. Records keep their words (split slot, part slot, S), so pair_info / part / the combine are unchanged. item_off counts static items only.
   partial layout (floats): part[((part_base + split) * 2 + hq) * 132 + {0..127 o, 128 m, 129 l, 130..131 pad}]
 """
 from __future__ import annotations
@@ -57,6 +60,8 @@ class Plan:
     iface: int = 1                                       # record format: 1 = n_items in word 7; 2 = S | n_items << 8 in word 5, vis in word 7
     tok0s: list = field(default_factory=list)            # first token row of each sequence
     no_split: bool = False                               # True: every pair is one item (S = 1), pairs packed whole by LPT
+    npool: int = 0                                       # pool(f) plans: items in the pool row (items[n_cta]); 0 if none or no pool row
+    has_pool_row: bool = False                           # items has n_cta + 1 rows, row n_cta = the pool
 
     @property
     def stride(self) -> int:
@@ -69,9 +74,15 @@ class Plan:
         return np.concatenate([self.items[b, :int(n[b])] for b in range(self.n_cta)]) if self.n_cta else self.items.reshape(0, 8)
 
     @property
+    def pool_items(self) -> np.ndarray:
+        """Pool records (claim order): int32 [npool, 8]; empty without a pool row."""
+        return self.items[self.n_cta, :self.npool] if self.has_pool_row else self.items.reshape(-1, 8)[:0]
+
+    @property
     def n_items_per_cta(self) -> np.ndarray:
         """int32 [n_cta]: items of each CTA as stored in the records (word 7 in iface 1, word 5 >> 8 in iface 2)."""
-        return (self.items[:, 0, 5] >> 8) if self.iface == 2 else self.items[:, 0, 7]
+        it = self.items[:self.n_cta]
+        return (it[:, 0, 5] >> 8) if self.iface == 2 else it[:, 0, 7]
 
     @property
     def n_pairs(self) -> int:
@@ -121,7 +132,7 @@ class Plan:
 
     def summary(self) -> dict:
         return {"engine": self.engine_name, "s_max": self.s_max, "items_per_cta_max": self.max_items, "part_bytes": self.part_bytes,
-                "cta_bytes_max": max(self.cta_bytes), "cta_bytes_min": min(self.cta_bytes), "n_items": int(self.item_off[-1]),
+                "cta_bytes_max": max(self.cta_bytes), "cta_bytes_min": min(self.cta_bytes), "n_items": int(self.item_off[-1]) + self.npool, "npool": self.npool,
                 "one_item": self.one_item, "balance_one_item": self.balance.get("one_item"), "balance_greedy": self.balance.get("greedy"),
                 "no_split": self.no_split, "balance_lpt": self.balance.get("lpt")}
 
@@ -283,6 +294,25 @@ def _lptcut_groups(vis: list, n_cta: int, groups: int, gran: int, eps: float, sm
     return out
 
 
+def _pool_split(cut, n_cta: int, f: float):
+    """SKV_POOL guided split of a finished cut. Items (pieces) sorted by length descending (stable), LPT onto the least loaded CTA (ties: lowest index) while load + len <= f * total / n_cta;
+    the first item that does not fit and all later ones form the pool, in that order. -> (per-CTA static lists (longest first), pool list)"""
+    items = [pc for pieces in cut for pc in pieces]
+    items = sorted(items, key=lambda pc: -(pc[2] - pc[1]))
+    total = sum(p1 - p0 for _, p0, p1 in items)
+    cap = f * total / n_cta
+    heap = [(0, b) for b in range(n_cta)]
+    out = [[] for _ in range(n_cta)]
+    for k, pc in enumerate(items):
+        ln = pc[2] - pc[1]
+        load, b = heap[0]
+        if load + ln > cap:
+            return out, items[k:]
+        heapq.heapreplace(heap, (load + ln, b))
+        out[b].append(pc)
+    return out, []
+
+
 def _imbalance(cut) -> float:
     pos = [sum(p1 - p0 for _, p0, p1 in pieces) for pieces in cut]
     mean = sum(pos) / max(len(pos), 1)
@@ -343,7 +373,7 @@ def _scale_cut(cut, align: int, vis: list):
 
 def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024, smax: int = 32, one_item: bool = True, iface: int = 1, no_split="auto",
          groups: int = 0, group_eps: float = 0.02, group_exact: int = 0, group_mode: str = "force",
-         align: int = 1, paged: bool = False) -> Plan:
+         align: int = 1, paged: bool = False, pool: float = 0.0) -> Plan:
     """seqs: list of (kv_len, q_len). q_len must be 1 unless iface == 1 and (1 <= q_len <= 16, sum q_len <= 256, nseq < 4096): R6, see the module docstring. Raises if a pair would need more than smax splits that cannot be avoided.
     one_item: when n_pairs <= n_cta, cut every pair into S_i ~ n_cta * len_i / total pieces, one item per CTA; used only if max/mean CTA positions <= 1.10,
     otherwise (and for one_item=False) the greedy cut. ldg_max_bytes: LDG engine iff the largest CTA share is <= this many KV bytes (160 KB: with the mma TMA consumer, job 9661, TMA wins at 226 KB/CTA, ties at 113 KB).
@@ -351,6 +381,7 @@ def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024
     align / paged (serving mode, SKV_PAGED builds): every item starts at a multiple of `align` positions (the build's stage rows; the cut runs on units of `align` positions, so the balance is in units;
     the group plan too: it runs on the unit axis and is then scaled, sim_us stays in positions)
     and, with paged = True (iface 1), record word 0 is the request index (sequence number) instead of the packed row base; row_base / cache_rows of the Plan are then meaningless.
+    pool: 0 (default) = byte-identical plans. 0 < f < 1 (SKV_POOL builds, q_len 1): after the plan above is built (any mode) the items are re-dealt, see "pool" in the module docstring: LPT static lists up to f * mean load per CTA, the rest in a pool row (items[n_cta]).
     no_split: "auto" | True | False (ints 0 / 1 accepted). True: every pair is one item (S = 1), LPT-packed whole onto the CTAs (raises if a CTA's item count does not fit the record
     word). "auto": True iff n_pairs >= n_cta and LPT max / mean CTA load <= LPT_MAX_IMB (1.20), else the cut above.
     groups: 0 (default) = the modes above, unchanged. G >= 1 (q_len 1 only): balance per consumer group (_lptcut_groups; G = SKV_GROUPS of an SKV_HALVES build, 1 for
@@ -431,8 +462,16 @@ def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024
         balance["chosen"] = balance["groups"]
         cut, used_one = grp, False
         used_lpt = len({pr for pc in grp for pr, _, _ in pc}) == sum(len(pc) for pc in grp)   # every pair whole: S == 1 (no combine)
+    pool_list = []
+    pool = float(pool)
+    assert 0.0 <= pool < 1.0, f"pool must be in [0, 1), got {pool}"
+    if pool > 0.0:
+        assert not multi, "pool is q_len 1 only"
+        cut, pool_list = _pool_split(cut, n_cta, pool)
+        balance["pool"] = _imbalance(cut)
+        balance["chosen"] = balance["pool"]
     cnt = {}
-    for pieces in cut:
+    for pieces in list(cut) + [pool_list]:
         for pr, _, _ in pieces:
             cnt[pr] = cnt.get(pr, 0) + 1
     nseq = len(seqs)
@@ -449,15 +488,25 @@ def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024
     for pr in range(nseq * KVH):
         s, kvh = divmod(pr, KVH)
         pbase[pr] = int(pair_info[tok0s[s] * KVH + kvh, 0])
-    stride = max([len(p) for p in cut] + [1])
-    recs = np.zeros((n_cta, stride, 8), np.int32)
+    stride = max([len(p) for p in cut] + [len(pool_list), 1])
+    recs = np.zeros((n_cta + (1 if pool > 0.0 else 0), stride, 8), np.int32)
     seen = {}
+    spos = {}
+    if pool > 0.0:
+        byp = {}
+        for pieces in list(cut) + [pool_list]:
+            for pr, p0, _ in pieces:
+                byp.setdefault(pr, []).append(p0)
+        spos = {(pr, p0): i for pr, v in byp.items() for i, p0 in enumerate(sorted(v))}
     item_off, cta_pos, n_items = [0], [], 0
-    for b, pieces in enumerate(cut):
+    for b, pieces in enumerate(list(cut) + ([pool_list] if pool > 0.0 else [])):
+        is_pool = b == n_cta
         npos = 0
         for k, (pr, p0, p1) in enumerate(pieces):
             sp = seen.get(pr, 0)
             seen[pr] = sp + 1
+            if pool > 0.0:
+                sp = spos[(pr, p0)]                           # re-dealt pieces are no longer in position order: split id = rank of the piece's p0 within its pair
             s, kvh = divmod(pr, KVH)
             y = kvh | (sp << Y_SPLIT_SHIFT) | (s << Y_SEQ_SHIFT) | ((seqs[s][1] - 1) << Y_QLEN_SHIFT)
             if iface == 2:
@@ -466,12 +515,14 @@ def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024
             else:
                 recs[b, k] = (s if paged else row_base[s], y, p0, p1, pbase[pr] + sp, cnt[pr], tok0s[s], len(pieces))
             npos += p1 - p0
+        if is_pool:
+            continue                                          # the pool row: ni word = npool in every record (iface 1: word 7, iface 2: word 5 >> 8)
         n_items += len(pieces)
         item_off.append(n_items)
         cta_pos.append(npos)
     engine = int(max(cta_pos, default=0) * POS_BYTES > ldg_max_bytes) or int(multi)   # q_len > 1: no LDG path
     return Plan(n_cta, gran, seqs, row_base, int(sum(vis)), recs, np.array(item_off, np.int32), pair_info,
-                base * 2 * PSTRIDE, engine, total_q, cta_pos, used_one, balance, iface, tok0s, used_lpt)
+                base * 2 * PSTRIDE, engine, total_q, cta_pos, used_one, balance, iface, tok0s, used_lpt, len(pool_list), pool > 0.0)
 
 
 def decode_item(y: int):
