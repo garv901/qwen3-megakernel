@@ -173,3 +173,9 @@
   page_row_ptr). Compile-checked only; correctness to be gated by the serving build's check.
 - SKV_PAGED && SKV_TC: #error (tcgen05 consumer not ported).
 - SASS (nvcc sm_100a, a1ub.cu harness) identical to v14 for default, mma, tc, h64, g4a, g8, si8 builds; paged g4a / g8 / si8 / mma compile.
+
+## splitkv-v16 (2026-10-31)
+- plan auto model: the split charge GROUP_AUTO_SPLIT_US x split fraction (grp only) is replaced by comb_us(cut) on both sides:
+  0 without split pairs, else COMB_FIX_US 2.5 + COMB_PER_PART_US 0.0017 x partials (fit to mk-core-v21 MK_CMB stamps, job 15005:
+  conv-L3 2.78, b48kv4K 3.29, b96kv2K 4.12, b192kv1K 6.03 us/layer). Same in plan_fast (numba), parity tests pass. Early exit adds
+  comb_us(base). Choice unchanged at all 19 mk_r10 points (CPU check); matters on serving steps near the margin. splitkv.cuh = v15.

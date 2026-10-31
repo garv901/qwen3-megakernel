@@ -292,7 +292,20 @@ def _imbalance(cut) -> float:
 # R10 P19 fluid model of the KV stream (fit to job 14914, 19 points x 7 arms, rms log error 0.061): every busy consumer group streams at
 # min(SIM_RG4 * 4 / G, SIM_HBM / busy groups) bytes/s (the per-group cap scales with its ring share), + SIM_FIX us.
 SIM_HBM, SIM_RG4, SIM_FIX = 6.6e12, 25e9, 5.0
-GROUP_AUTO_MARGIN, GROUP_AUTO_SPLIT_US = 0.02, 3.0     # group plan iff sim * (1 + margin) + split_us * (split pairs / pairs) < sim of the base plan
+GROUP_AUTO_MARGIN = 0.02            # group plan iff sim * (1 + margin) + comb_us(group plan) < sim + comb_us(base plan)
+# combine cost in mk (MK_CMB, mk-core-v20/v21 stamps job 15005: comb work + spread + lat): 0 without split pairs, else FIX + PER x partials
+# (fit: conv-L3 171 partials 2.78, b48kv4K 218 3.29, b96kv2K 901 4.12, b192kv1K 2091 6.03 us/layer)
+COMB_FIX_US, COMB_PER_PART_US = 2.5, 0.0017
+
+
+def comb_us(cut) -> float:
+    """predicted combine cost (us / layer) of a cut: 0 if every pair is whole, else COMB_FIX_US + COMB_PER_PART_US * partials of split pairs"""
+    cnt = {}
+    for pc in cut:
+        for pr, _, _ in pc:
+            cnt[pr] = cnt.get(pr, 0) + 1
+    parts = sum(v for v in cnt.values() if v > 1)
+    return COMB_FIX_US + COMB_PER_PART_US * parts if parts else 0.0
 
 
 def _group_loads(cut, groups: int) -> list:
@@ -322,12 +335,22 @@ def sim_us(cut, groups: int, hbm: float = None, rg4: float = None, fix: float = 
 # their LPT imbalance is 1.156, so the auto limit is 1.20 (not 1.10). b8kv1K (64 pairs < n_cta) keeps the cut (14.0 vs 13.5).
 LPT_MAX_IMB = 1.20
 
+def _scale_cut(cut, align: int, vis: list):
+    """Paged serving (align > 1): a cut computed on a position axis in units of `align` positions -> positions: every piece starts at a multiple of `align`
+    (the stage rows, so a TMA stage never crosses a 128-row cache block) and ends at one, except the last piece of a sequence, clamped to its row count vis."""
+    return [[(pr, u0 * align, min(u1 * align, vis[pr // KVH])) for pr, u0, u1 in pieces] for pieces in cut]
+
+
 def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024, smax: int = 32, one_item: bool = True, iface: int = 1, no_split="auto",
-         groups: int = 0, group_eps: float = 0.02, group_exact: int = 0, group_mode: str = "force") -> Plan:
+         groups: int = 0, group_eps: float = 0.02, group_exact: int = 0, group_mode: str = "force",
+         align: int = 1, paged: bool = False) -> Plan:
     """seqs: list of (kv_len, q_len). q_len must be 1 unless iface == 1 and (1 <= q_len <= 16, sum q_len <= 256, nseq < 4096): R6, see the module docstring. Raises if a pair would need more than smax splits that cannot be avoided.
     one_item: when n_pairs <= n_cta, cut every pair into S_i ~ n_cta * len_i / total pieces, one item per CTA; used only if max/mean CTA positions <= 1.10,
     otherwise (and for one_item=False) the greedy cut. ldg_max_bytes: LDG engine iff the largest CTA share is <= this many KV bytes (160 KB: with the mma TMA consumer, job 9661, TMA wins at 226 KB/CTA, ties at 113 KB).
     iface: 1 or 2, only the item record differs (see the module docstring); the cut is the same.
+    align / paged (serving mode, SKV_PAGED builds): every item starts at a multiple of `align` positions (the build's stage rows; the cut runs on units of `align` positions, so the balance is in units;
+    the group plan too: it runs on the unit axis and is then scaled, sim_us stays in positions)
+    and, with paged = True (iface 1), record word 0 is the request index (sequence number) instead of the packed row base; row_base / cache_rows of the Plan are then meaningless.
     no_split: "auto" | True | False (ints 0 / 1 accepted). True: every pair is one item (S = 1), LPT-packed whole onto the CTAs (raises if a CTA's item count does not fit the record
     word). "auto": True iff n_pairs >= n_cta and LPT max / mean CTA load <= LPT_MAX_IMB (1.20), else the cut above.
     groups: 0 (default) = the modes above, unchanged. G >= 1 (q_len 1 only): balance per consumer group (_lptcut_groups; G = SKV_GROUPS of an SKV_HALVES build, 1 for
@@ -346,15 +369,22 @@ def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024
         assert len(seqs) < 4096 and sum(q for _, q in seqs) <= 256, "q_len > 1: seq < 4096 (y bits 24..27 hold q_len - 1) and sum q_len <= 256"
     assert len(seqs) < (1 << 19)
     vis = [k + q for k, q in seqs]                           # rows of each sequence (items cut [0, kv_len + q_len))
+    assert align >= 1 and (align == 1 or (align & (align - 1)) == 0)
+    vis_c = [-(-v // align) for v in vis] if align > 1 else vis   # axis the cut runs on (units of `align` positions)
+    gran_c = max(gran // align, 1) if align > 1 else gran
     row_base = [int(x) for x in np.concatenate([[0], np.cumsum(vis)[:-1]])] if seqs else []
     tok0s = [int(x) for x in np.concatenate([[0], np.cumsum([q for _, q in seqs])[:-1]])] if seqs else []
     balance = {"one_item": None, "greedy": None}
     cut = None
-    oi = _one_item_cut(vis, n_cta, smax) if one_item else None
+    oi = _one_item_cut(vis_c, n_cta, smax) if one_item else None
+    if oi is not None and align > 1:
+        oi = _scale_cut(oi, align, vis)
     if oi is not None:
         balance["one_item"] = _imbalance(oi)
     n_pairs = len(vis) * KVH
-    lcut = _lpt_cut(vis, n_cta) if (no_split is True or (no_split == "auto" and n_pairs >= n_cta and n_cta > 0)) and n_pairs else None
+    lcut = _lpt_cut(vis_c, n_cta) if (no_split is True or (no_split == "auto" and n_pairs >= n_cta and n_cta > 0)) and n_pairs else None
+    if lcut is not None and align > 1:
+        lcut = _scale_cut(lcut, align, vis)
     balance["lpt"] = _imbalance(lcut) if lcut is not None else None
     used_lpt = lcut is not None and (no_split is True or balance["lpt"] <= LPT_MAX_IMB)
     if used_lpt:
@@ -366,7 +396,9 @@ def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024
     else:
         min_target = 1
         while True:
-            gcut = _cut(vis, n_cta, gran, min_target)
+            gcut = _cut(vis_c, n_cta, gran_c, min_target)
+            if align > 1:
+                gcut = _scale_cut(gcut, align, vis)
             cnt = {}
             for pieces in gcut:
                 for pr, _, _ in pieces:
@@ -379,17 +411,19 @@ def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024
         used_one = oi is not None and balance["one_item"] <= 1.10
         cut = oi if used_one else gcut
         balance["chosen"] = balance["one_item"] if used_one else balance["greedy"]
-    grp = _lptcut_groups(vis, n_cta, int(groups), gran, group_eps, smax, int(group_exact)) if groups and not multi and n_pairs and n_cta else None
+    skip_grp = False
+    if groups and group_mode == "auto" and not multi and n_pairs and n_cta:   # P22: s_grp >= total bytes / HBM + fix, so a base plan within the margin of that bound keeps (cheap exit)
+        lb = sum(vis) * KVH * POS_BYTES / SIM_HBM * 1e6 + SIM_FIX
+        skip_grp = sim_us(cut, int(groups)) + comb_us(cut) <= lb * (1 + GROUP_AUTO_MARGIN)
+    grp = _lptcut_groups(vis_c, n_cta, int(groups), gran_c, group_eps, smax, int(group_exact)) if groups and not multi and n_pairs and n_cta and not skip_grp else None
+    if grp is not None and align > 1:
+        grp = _scale_cut(grp, align, vis)
     if grp is not None and group_mode == "auto":             # keep the base cut unless the model says the group plan is faster by the margin
         g = int(groups)
-        cntg = {}
-        for pc in grp:
-            for pr, _, _ in pc:
-                cntg[pr] = cntg.get(pr, 0) + 1
-        nsplit = sum(1 for v in cntg.values() if v > 1)
         s_base, s_grp = sim_us(cut, g), sim_us(grp, g)
-        balance["sim_base"], balance["sim_groups"] = s_base, s_grp
-        if not (s_grp * (1 + GROUP_AUTO_MARGIN) + GROUP_AUTO_SPLIT_US * nsplit / max(n_pairs, 1) < s_base):
+        c_base, c_grp = comb_us(cut), comb_us(grp)
+        balance["sim_base"], balance["sim_groups"], balance["comb_base"], balance["comb_groups"] = s_base, s_grp, c_base, c_grp
+        if not (s_grp * (1 + GROUP_AUTO_MARGIN) + c_grp < s_base + c_base):
             grp = None
     if grp is not None:                                      # groups >= 1 (R10 P19): group-balanced LPT with cut replaces the modes above
         g = int(groups)
@@ -430,7 +464,7 @@ def plan(seqs, n_cta: int = 148, gran: int = 16, ldg_max_bytes: int = 160 * 1024
                 assert cnt[pr] < 256
                 recs[b, k] = (row_base[s], y, p0, p1, pbase[pr] + sp, cnt[pr] | (len(pieces) << 8), s, vis[s])
             else:
-                recs[b, k] = (row_base[s], y, p0, p1, pbase[pr] + sp, cnt[pr], tok0s[s], len(pieces))
+                recs[b, k] = (s if paged else row_base[s], y, p0, p1, pbase[pr] + sp, cnt[pr], tok0s[s], len(pieces))
             npos += p1 - p0
         n_items += len(pieces)
         item_off.append(n_items)
