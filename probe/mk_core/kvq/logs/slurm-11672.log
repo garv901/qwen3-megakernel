@@ -1,0 +1,35 @@
+REPO=/raid/garv901/regime-mk-core mk-core c2bc494
+GPU 0: NVIDIA B200 (UUID: GPU-c88e489a-0693-2c29-a1e3-30952377f742)
+== 1. calibration
+kernel.cu(28): warning #177-D: variable "kHalf" was declared but never referenced
+  constexpr int kHalf = kStageRows * 128;                         // KVQ_SWIZ 1: one 64-dim half of K or V
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+ptxas info    : 28 bytes gmem
+ptxas info    : Compiling entry function 'kvq' for 'sm_100a'
+ptxas info    : Function properties for kvq
+ptxas         .     0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 80 registers, used 1 barriers
+ptxas info    : Compile time = 60.404 ms
+ptxas: {'stack': 0, 'spill_stores': 0, 'spill_loads': 0} regs 80 local 0 dyn_smem 165248 swiz 0
+CHECK b8kv32768 static C=0 -: PASS (cover True, visited True, xor True, units 211)
+b8kv32768    static    C=    0 -    A   153.63 imb   3.58 tail   4.67 spread   8.18 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4
+CALIBRATION vs a1ub ld: A 153.63 (156.864, -2.1%)  imb 3.58 (4.352, -17.6%)
+done; check FAIL count 0
+exit 0
+ptxas info    : 28 bytes gmem
+ptxas info    : Compiling entry function 'kvq' for 'sm_100a'
+ptxas info    : Function properties for kvq
+ptxas         .     0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 81 registers, used 1 barriers
+ptxas info    : Compile time = 72.669 ms
+ptxas: {'stack': 0, 'spill_stores': 0, 'spill_loads': 0} regs 81 local 0 dyn_smem 165248 swiz 1
+CHECK b8kv32768 static C=0 -: PASS (cover True, visited True, xor True, units 211)
+b8kv32768    static    C=    0 -    A   154.75 imb   3.84 tail   5.12 spread   8.67 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4
+CALIBRATION vs a1ub ld: A 154.75 (156.864, -1.3%)  imb 3.84 (4.352, -11.8%)
+done; check FAIL count 0
+exit 0
+gate pass for swiz builds: '1'
+no sweep (STAGE=calib or swiz-0 calibration gate failed)

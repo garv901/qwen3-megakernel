@@ -1,0 +1,55 @@
+GPU 0: NVIDIA B200 (UUID: GPU-019267a2-092a-6798-3cc5-57ffc761e004)
+PASS static nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_rot37 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_rot74 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_rot111 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_il nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS il_shift3 nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_perm nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_perm nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_lpt nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_contig nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_contig_rj nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_contig_ro nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_al nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_rot74_al nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_il_al nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS il_shift3_al nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_perm_al nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_al nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_perm_al nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_lpt_al nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_contig_al nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_contig_rj_al nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_contig_ro_al nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_sync1 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_sync2 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_sync4 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_sync16 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_sync64 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_al_sync1 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_al_sync4 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_al_sync16 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_sh1 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_sh8 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_sh8_sync4 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_sh1 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_sh2 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_sh8 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_il_sh1 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_il_sh2 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_il_sh8 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+ALL PASS
+lat: wrote /raid/garv901/regime-mk-core/results/2026-10-28-why/lat_11648.u16 [3][256][16384] uint16 cycles (median of 5 launches)
+ncu static rc=0
+ncu static_il rc=0
+ncu queue rc=0
+ncu static_perm rc=0
+ncu static_al rc=0
+ncu static_il_al rc=0
+ncu queue_al rc=0
+ncu static_perm_al rc=0
+ncu queue_sh1 rc=0
+ncu static_sync4 rc=0
+ncu static_contig rc=0

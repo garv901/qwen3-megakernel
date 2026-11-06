@@ -1,0 +1,218 @@
+arm           make us   tail   sprd     p50   GB/s       B/SM MB
+static          187.9   8.10  17.20   180.7   5714   7.26-7.26  n=10
+static_rot37    186.2   5.48  13.44   181.1   5766   7.26-7.26  n=10
+static_rot74    187.3   6.64  15.71   180.1   5733   7.26-7.26  n=10
+static_rot111    188.5   7.05  15.60   181.5   5695   7.26-7.26  n=10
+static_il       164.8   1.60   5.28   163.0   6514   7.25-7.26  n=10
+il_shift3       165.3   2.18   4.74   163.2   6496   7.25-7.26  n=10
+static_perm     167.2   3.98  10.16   163.2   6422   7.25-7.26  n=10
+queue           169.8   2.47   4.64   167.3   6323   7.00-7.51  n=10
+queue_perm      170.5   2.03   4.74   168.4   6298   7.00-7.51  n=10
+static_lpt      166.7   4.60   9.65   161.7   6440   7.00-7.51  n=10
+static_contig    167.8   4.64  10.70   163.3   6399   7.26-7.26  n=10
+static_contig_rj    165.8   4.26  11.34   161.3   6475   7.26-7.26  n=10
+static_contig_ro    167.2   4.55  10.38   162.8   6423   7.26-7.26  n=10
+static_al       167.7   5.93  14.64   161.9   6402   7.08-7.34  n=10
+static_rot74_al    168.2   5.83  13.22   162.1   6383   7.08-7.34  n=10
+static_il_al    159.6   3.18   7.50   156.1   6727   7.08-7.34  n=10
+il_shift3_al    160.0   2.99   8.43   157.3   6711   7.08-7.34  n=10
+static_perm_al    166.1   6.03  15.20   160.2   6463   7.08-7.34  n=10
+queue_al        162.9   2.35   4.67   160.5   6593   6.82-7.60  n=10
+queue_perm_al    165.1   2.13   4.64   162.9   6505   6.82-7.60  n=10
+static_lpt_al    161.2   4.56   9.36   156.6   6662   7.08-7.60  n=10
+static_contig_al    165.0   4.90  12.74   160.0   6506   7.08-7.34  n=10
+static_contig_rj_al    165.8   6.34  16.88   158.6   6476   7.08-7.34  n=10
+static_contig_ro_al    165.4   6.29  15.12   159.0   6491   7.08-7.34  n=10
+static_sync1    167.5   5.30  12.74   162.2   6412   7.26-7.26  n=10
+static_sync2    167.9   4.98  12.88   162.9   6395   7.26-7.26  n=10
+static_sync4    168.6   5.80  14.51   162.8   6369   7.26-7.26  n=10
+static_sync16    171.5   6.26  15.63   165.2   6261   7.26-7.26  n=10
+static_sync64    179.0   5.92  17.76   172.7   5999   7.26-7.26  n=10
+static_al_sync1    165.3   5.90  17.84   159.0   6496   7.08-7.34  n=10
+static_al_sync4    165.9   6.01  16.14   160.0   6472   7.08-7.34  n=10
+static_al_sync16    167.0   6.86  17.62   160.4   6431   7.08-7.34  n=10
+static_sh1      191.6   8.23  19.20   182.9   5603   7.08-7.34  n=10
+static_sh8      176.0   7.49  15.97   168.5   6102   7.08-7.34  n=10
+static_sh8_sync4    169.6   7.24  18.14   162.4   6329   7.08-7.34  n=10
+static_wrot1    178.1   4.86  10.51   173.2   6030   7.26-7.26  n=10
+static_wrot3    178.7   5.02  12.22   173.4   6008   7.26-7.26  n=10
+static_al_wrot1    172.0   6.91  14.53   165.0   6242   7.08-7.34  n=10
+static_sh1_wrot1    179.4   6.34  15.97   173.8   5985   7.08-7.34  n=10
+static_sh8_wrot1    172.7   5.86  13.84   166.9   6218   7.08-7.34  n=10
+static_wrot1_sync64    178.7   5.46  13.57   173.3   6010   7.26-7.26  n=10
+queue_sh1       165.9   2.26   4.75   163.9   6471   6.82-7.60  n=10
+queue_sh2       165.8   2.16   4.53   163.5   6476   6.82-7.60  n=10
+queue_sh8       165.5   2.06   4.69   163.5   6489   6.82-7.60  n=10
+static_il_sh1    161.7   3.03   7.39   158.3   6639   7.08-7.34  n=10
+static_il_sh2    161.8   3.25   7.62   158.6   6637   7.08-7.34  n=10
+static_il_sh8    161.4   3.44   8.03   158.0   6651   7.08-7.34  n=10
+
+== per-SM normalized throughput (SM bytes / SM finish; imbalance-free): median over SMs and reps ==
+static               per-SM rate median 40.17 GB/s p5 38.41 p95 41.41  => x148 = 5.95 TB/s
+static_rot37         per-SM rate median 40.07 GB/s p5 39.14 p95 41.18  => x148 = 5.93 TB/s
+static_rot74         per-SM rate median 40.13 GB/s p5 39.06 p95 41.38  => x148 = 5.94 TB/s
+static_rot111        per-SM rate median 39.94 GB/s p5 38.76 p95 41.33  => x148 = 5.91 TB/s
+static_il            per-SM rate median 44.51 GB/s p5 43.82 p95 45.28  => x148 = 6.59 TB/s
+il_shift3            per-SM rate median 44.43 GB/s p5 43.68 p95 44.97  => x148 = 6.58 TB/s
+static_perm          per-SM rate median 44.44 GB/s p5 43.73 p95 45.46  => x148 = 6.58 TB/s
+queue                per-SM rate median 43.33 GB/s p5 41.85 p95 44.77  => x148 = 6.41 TB/s
+queue_perm           per-SM rate median 43.05 GB/s p5 41.53 p95 44.74  => x148 = 6.37 TB/s
+static_lpt           per-SM rate median 44.79 GB/s p5 43.99 p95 45.59  => x148 = 6.63 TB/s
+static_contig        per-SM rate median 44.44 GB/s p5 43.65 p95 45.46  => x148 = 6.58 TB/s
+static_contig_rj     per-SM rate median 45.00 GB/s p5 44.19 p95 46.18  => x148 = 6.66 TB/s
+static_contig_ro     per-SM rate median 44.59 GB/s p5 43.88 p95 45.71  => x148 = 6.60 TB/s
+static_al            per-SM rate median 44.82 GB/s p5 43.42 p95 46.50  => x148 = 6.63 TB/s
+static_rot74_al      per-SM rate median 44.78 GB/s p5 43.51 p95 46.22  => x148 = 6.63 TB/s
+static_il_al         per-SM rate median 46.67 GB/s p5 45.85 p95 47.48  => x148 = 6.91 TB/s
+il_shift3_al         per-SM rate median 46.46 GB/s p5 45.79 p95 47.03  => x148 = 6.88 TB/s
+static_perm_al       per-SM rate median 45.47 GB/s p5 44.20 p95 46.64  => x148 = 6.73 TB/s
+queue_al             per-SM rate median 45.30 GB/s p5 43.76 p95 46.85  => x148 = 6.70 TB/s
+queue_perm_al        per-SM rate median 44.70 GB/s p5 43.20 p95 46.32  => x148 = 6.62 TB/s
+static_lpt_al        per-SM rate median 46.54 GB/s p5 45.66 p95 47.27  => x148 = 6.89 TB/s
+static_contig_al     per-SM rate median 45.47 GB/s p5 44.29 p95 46.54  => x148 = 6.73 TB/s
+static_contig_rj_al  per-SM rate median 45.81 GB/s p5 44.28 p95 47.34  => x148 = 6.78 TB/s
+static_contig_ro_al  per-SM rate median 45.77 GB/s p5 44.54 p95 46.99  => x148 = 6.77 TB/s
+static_sync1         per-SM rate median 44.72 GB/s p5 43.77 p95 46.07  => x148 = 6.62 TB/s
+static_sync2         per-SM rate median 44.56 GB/s p5 43.68 p95 45.90  => x148 = 6.59 TB/s
+static_sync4         per-SM rate median 44.54 GB/s p5 43.51 p95 46.15  => x148 = 6.59 TB/s
+static_sync16        per-SM rate median 43.91 GB/s p5 42.92 p95 45.23  => x148 = 6.50 TB/s
+static_sync64        per-SM rate median 41.98 GB/s p5 40.84 p95 43.57  => x148 = 6.21 TB/s
+static_al_sync1      per-SM rate median 45.57 GB/s p5 44.18 p95 47.80  => x148 = 6.75 TB/s
+static_al_sync4      per-SM rate median 45.38 GB/s p5 44.02 p95 47.29  => x148 = 6.72 TB/s
+static_al_sync16     per-SM rate median 45.24 GB/s p5 43.87 p95 47.16  => x148 = 6.70 TB/s
+static_sh1           per-SM rate median 39.65 GB/s p5 37.97 p95 41.11  => x148 = 5.87 TB/s
+static_sh8           per-SM rate median 42.97 GB/s p5 41.58 p95 44.36  => x148 = 6.36 TB/s
+static_sh8_sync4     per-SM rate median 44.87 GB/s p5 43.38 p95 46.36  => x148 = 6.64 TB/s
+static_wrot1         per-SM rate median 41.90 GB/s p5 41.01 p95 42.87  => x148 = 6.20 TB/s
+static_wrot3         per-SM rate median 41.86 GB/s p5 40.88 p95 42.75  => x148 = 6.20 TB/s
+static_al_wrot1      per-SM rate median 43.96 GB/s p5 42.43 p95 45.55  => x148 = 6.51 TB/s
+static_sh1_wrot1     per-SM rate median 41.88 GB/s p5 40.61 p95 43.06  => x148 = 6.20 TB/s
+static_sh8_wrot1     per-SM rate median 43.50 GB/s p5 42.30 p95 44.66  => x148 = 6.44 TB/s
+static_wrot1_sync64  per-SM rate median 41.86 GB/s p5 40.89 p95 43.09  => x148 = 6.20 TB/s
+queue_sh1            per-SM rate median 44.41 GB/s p5 42.84 p95 45.95  => x148 = 6.57 TB/s
+queue_sh2            per-SM rate median 44.44 GB/s p5 42.89 p95 45.97  => x148 = 6.58 TB/s
+queue_sh8            per-SM rate median 44.51 GB/s p5 42.96 p95 46.11  => x148 = 6.59 TB/s
+static_il_sh1        per-SM rate median 46.03 GB/s p5 45.28 p95 46.66  => x148 = 6.81 TB/s
+static_il_sh2        per-SM rate median 45.92 GB/s p5 45.09 p95 46.59  => x148 = 6.80 TB/s
+static_il_sh8        per-SM rate median 46.11 GB/s p5 45.31 p95 46.78  => x148 = 6.82 TB/s
+
+== E1 attribution: chunk duration ~ SM + address region (pooled reps; R^2) ==
+static_il    R2 start-time(8us bin) 0.623  time+SM+2M 0.701
+static_il    R2 SM 0.001  page2M 0.698  region32M 0.622  SM+32M 0.627  SM+2M 0.700
+             per-SM mean chunk dur: min 5.64 max 5.76 cv 0.37%  overall mean 5.74 us
+il_shift3    R2 start-time(8us bin) 0.629  time+SM+2M 0.693
+il_shift3    R2 SM 0.001  page2M 0.689  region32M 0.634  SM+32M 0.638  SM+2M 0.691
+             per-SM mean chunk dur: min 5.68 max 5.79 cv 0.26%  overall mean 5.75 us
+static_perm  R2 start-time(8us bin) 0.531  time+SM+2M 0.560
+static_perm  R2 SM 0.004  page2M 0.086  region32M 0.005  SM+32M 0.009  SM+2M 0.092
+             per-SM mean chunk dur: min 5.62 max 5.82 cv 0.75%  overall mean 5.74 us
+queue        R2 start-time(8us bin) 0.633  time+SM+2M 0.732
+queue        R2 SM 0.007  page2M 0.724  region32M 0.612  SM+32M 0.620  SM+2M 0.729
+             per-SM mean chunk dur: min 5.40 max 5.66 cv 1.04%  overall mean 5.54 us
+queue_perm   R2 start-time(8us bin) 0.609  time+SM+2M 0.636
+queue_perm   R2 SM 0.004  page2M 0.089  region32M 0.005  SM+32M 0.010  SM+2M 0.094
+             per-SM mean chunk dur: min 5.44 max 5.68 cv 0.84%  overall mean 5.56 us
+static_lpt   R2 start-time(8us bin) 0.642  time+SM+2M 0.715
+static_lpt   R2 SM 0.005  page2M 0.700  region32M 0.627  SM+32M 0.637  SM+2M 0.708
+             per-SM mean chunk dur: min 5.59 max 5.83 cv 0.75%  overall mean 5.70 us
+static_contig R2 start-time(8us bin) 0.591  time+SM+2M 0.623
+static_contig R2 SM 0.004  page2M 0.063  region32M 0.002  SM+32M 0.022  SM+2M 0.285
+             per-SM mean chunk dur: min 5.59 max 5.84 cv 0.83%  overall mean 5.74 us
+static_contig_rj R2 start-time(8us bin) 0.499  time+SM+2M 0.543
+static_contig_rj R2 SM 0.006  page2M 0.062  region32M 0.001  SM+32M 0.009  SM+2M 0.092
+             per-SM mean chunk dur: min 5.51 max 5.77 cv 0.96%  overall mean 5.66 us
+static_contig_ro R2 start-time(8us bin) 0.510  time+SM+2M 0.541
+static_contig_ro R2 SM 0.003  page2M 0.061  region32M 0.002  SM+32M 0.009  SM+2M 0.088
+             per-SM mean chunk dur: min 5.60 max 5.83 cv 0.75%  overall mean 5.72 us
+static_il_al R2 start-time(8us bin) 0.555  time+SM+2M 0.690
+static_il_al R2 SM 0.004  page2M 0.684  region32M 0.596  SM+32M 0.606  SM+2M 0.687
+             per-SM mean chunk dur: min 5.46 max 5.62 cv 0.73%  overall mean 5.53 us
+il_shift3_al R2 start-time(8us bin) 0.621  time+SM+2M 0.712
+il_shift3_al R2 SM 0.003  page2M 0.706  region32M 0.642  SM+32M 0.649  SM+2M 0.708
+             per-SM mean chunk dur: min 5.50 max 5.63 cv 0.56%  overall mean 5.56 us
+static_perm_al R2 start-time(8us bin) 0.429  time+SM+2M 0.463
+static_perm_al R2 SM 0.006  page2M 0.067  region32M 0.006  SM+32M 0.012  SM+2M 0.077
+             per-SM mean chunk dur: min 5.53 max 5.86 cv 1.05%  overall mean 5.68 us
+queue_al     R2 start-time(8us bin) 0.616  time+SM+2M 0.752
+queue_al     R2 SM 0.007  page2M 0.744  region32M 0.603  SM+32M 0.611  SM+2M 0.749
+             per-SM mean chunk dur: min 5.22 max 5.48 cv 1.05%  overall mean 5.35 us
+queue_perm_al R2 start-time(8us bin) 0.585  time+SM+2M 0.616
+queue_perm_al R2 SM 0.006  page2M 0.097  region32M 0.006  SM+32M 0.012  SM+2M 0.102
+             per-SM mean chunk dur: min 5.32 max 5.57 cv 1.01%  overall mean 5.44 us
+static_lpt_al R2 start-time(8us bin) 0.600  time+SM+2M 0.709
+static_lpt_al R2 SM 0.004  page2M 0.692  region32M 0.615  SM+32M 0.626  SM+2M 0.698
+             per-SM mean chunk dur: min 5.48 max 5.70 cv 0.72%  overall mean 5.55 us
+static_contig_al R2 start-time(8us bin) 0.502  time+SM+2M 0.543
+static_contig_al R2 SM 0.005  page2M 0.045  region32M 0.002  SM+32M 0.016  SM+2M 0.225
+             per-SM mean chunk dur: min 5.57 max 5.85 cv 0.99%  overall mean 5.68 us
+static_contig_rj_al R2 start-time(8us bin) 0.443  time+SM+2M 0.492
+static_contig_rj_al R2 SM 0.010  page2M 0.052  region32M 0.003  SM+32M 0.012  SM+2M 0.077
+             per-SM mean chunk dur: min 5.45 max 5.87 cv 1.41%  overall mean 5.64 us
+static_contig_ro_al R2 start-time(8us bin) 0.422  time+SM+2M 0.459
+static_contig_ro_al R2 SM 0.006  page2M 0.058  region32M 0.002  SM+32M 0.009  SM+2M 0.073
+             per-SM mean chunk dur: min 5.46 max 5.84 cv 1.10%  overall mean 5.64 us
+
+== E1 rotation: static share s on CTA (s+R)%148; does slowness follow share or SM? ==
+rep-averaged finish per share: mean 181.0 us  sd 2.79 us
+corr(share finish) between rotations (follow-address -> high):
+[[1.   0.22 0.17 0.14]
+ [0.22 1.   0.36 0.3 ]
+ [0.17 0.36 1.   0.25]
+ [0.14 0.3  0.25 1.  ]]
+corr(SM finish) between rotations (follow-SM -> high):
+[[1.   0.83 0.88 0.92]
+ [0.83 1.   0.82 0.83]
+ [0.88 0.82 1.   0.88]
+ [0.92 0.83 0.88 1.  ]]
+R2 finish ~ share: 0.408  ~ SM: 0.866  ~ share+SM: 0.931
+
+== E2 latency probe (SM clock cycles) ==  active SMs: 148  regions: 16384
+pass0 same-addr cold race: median 622 p5 436 p95 981 sd 178; share by bin {np.int64(0): np.float64(0.0), np.int64(300): np.float64(0.054), np.int64(450): np.float64(0.711), np.int64(700): np.float64(0.026), np.int64(850): np.float64(0.195), np.int64(1100): np.float64(0.011), np.int64(1400): np.float64(0.003)}
+   variance share: SM 0.0000  region(64KB) 0.3491  interaction+noise 0.6509
+   interaction SVD (2MB-smoothed) top5 [2004.7  158.2   33.6   26.8   26.4]  shuffled-null top5 [250.4 245.4 243.8 241.6 237. ]
+   per-SM mean min/max 670/671
+pass1 same-addr L2-warm: median 281 p5 256 p95 317 sd 21; share by bin {np.int64(0): np.float64(0.766), np.int64(300): np.float64(0.234), np.int64(450): np.float64(0.0), np.int64(700): np.float64(0.0), np.int64(850): np.float64(0.0), np.int64(1100): np.float64(0.0), np.int64(1400): np.float64(0.0)}
+   variance share: SM 0.1034  region(64KB) 0.0793  interaction+noise 0.8174
+   interaction SVD (2MB-smoothed) top5 [410.3 201.9 105.1  93.9  91.3]  shuffled-null top5 [76.3 71.4 70.3 68.6 67.3]
+   per-SM mean min/max 271/299
+pass2 SM-specific line (DRAM): median 922 p5 569 p95 1013 sd 200; share by bin {np.int64(0): np.float64(0.001), np.int64(300): np.float64(0.001), np.int64(450): np.float64(0.473), np.int64(700): np.float64(0.013), np.int64(850): np.float64(0.487), np.int64(1100): np.float64(0.021), np.int64(1400): np.float64(0.003)}
+   variance share: SM 0.0069  region(64KB) 0.0055  interaction+noise 0.9876
+   interaction SVD (2MB-smoothed) top5 [4787.7  556.7  534.4  511.4  509.8]  shuffled-null top5 [829.  826.9 817.1 801.1 783.5]
+   per-SM mean min/max 611/814
+pass1 full-res interaction SVD top5 [26254.5  5313.8  4121.3  3897.   3308.1]
+SM groups: [70 78]  region groups: [7661 8723]
+  SMgrp0: mean latency to homegrp0 298.0  homegrp1 267.5
+  SMgrp1: mean latency to homegrp0 266.5  homegrp1 300.4
+
+== E4 ncu (sum over instances unless noted) ==
+metric                                                               queue      queue_al     queue_sh1        static     static_al static_contig     static_il  static_il_al   static_permstatic_perm_al  static_sync4  static_wrot1
+dram__bytes_read.sum                                             1.074e+09     1.074e+09     1.074e+09     1.074e+09     1.074e+09     1.074e+09     1.074e+09     1.074e+09     1.074e+09     1.074e+09     1.074e+09     1.074e+09
+dram__cycles_active_read.avg                                     5.243e+05     5.243e+05     5.244e+05     5.244e+05     5.243e+05     5.244e+05     5.243e+05     5.244e+05     5.244e+05     5.243e+05     5.243e+05     5.243e+05
+dram__sectors_read.sum                                           3.356e+07     3.356e+07     3.356e+07     3.356e+07     3.356e+07     3.356e+07     3.356e+07     3.356e+07     3.356e+07     3.356e+07     3.356e+07     3.356e+07
+dram__throughput.avg.pct_of_peak_sustained_elapsed                   60.25         60.37         59.59         59.39         59.82         59.32         60.12         60.37         60.25         60.15         60.89         59.35
+gpu__time_duration.sum                                           2.337e+05     2.327e+05     2.356e+05     2.367e+05     2.349e+05     2.368e+05     2.336e+05     2.328e+05     2.331e+05     2.335e+05     2.307e+05     2.367e+05
+lts__ltcfabric2lts_cycles_active.sum                             1.681e+07     1.681e+07     1.681e+07     1.681e+07     1.682e+07     1.681e+07     1.681e+07     1.682e+07     1.682e+07     1.682e+07     1.681e+07     1.681e+07
+lts__ltcfabric2lts_cycles_stalled.sum                                    0             0             0             0             0             0             0             0             0             0             0             0
+lts__t_requests_srcunit_l1.sum                                           0             0             0             0             0             0             0             0             0             0             0             0
+lts__t_requests_srcunit_ltcfabric.sum                            8.114e+06     8.115e+06     8.116e+06     8.116e+06     8.126e+06     8.109e+06     8.114e+06     8.115e+06     8.113e+06     8.112e+06     8.113e+06     8.112e+06
+lts__t_sectors_lookup_hit.sum                                    4.297e+06      4.29e+06     4.299e+06     4.294e+06     4.304e+06       4.3e+06     4.304e+06     4.295e+06     4.298e+06     4.296e+06     4.289e+06     4.298e+06
+lts__t_sectors_lookup_miss.sum                                   5.048e+07     5.048e+07     5.048e+07     5.049e+07     5.053e+07     5.047e+07     5.049e+07      5.05e+07     5.048e+07     5.047e+07     5.048e+07     5.048e+07
+lts__t_sectors_srcnode_gpc.sum                                   3.787e+07     3.788e+07     3.788e+07     3.788e+07     3.788e+07     3.787e+07     3.787e+07     3.787e+07     3.788e+07     3.788e+07     3.788e+07     3.787e+07
+lts__t_sectors_srcunit_l1.sum                                            0             0             0             0             0             0             0             0             0             0             0             0
+lts__t_sectors_srcunit_ltcfabric.sum                             1.686e+07     1.685e+07     1.686e+07     1.685e+07     1.686e+07     1.685e+07     1.684e+07     1.686e+07     1.686e+07     1.686e+07     1.685e+07     1.685e+07
+per-instance dram__bytes_read imbalance (max/mean, n instances):
+
+== E2b DRAM-miss latency, identical addresses, one SM at a time ==
+L2-warm groups: SM [70 78] region [7661 8723]
+  SMgrp0 x home0 (far ): L2-hit  298.0  DRAM-miss   830.1  p50 955
+  SMgrp0 x home1 (near): L2-hit  267.5  DRAM-miss   797.5  p50 926
+  SMgrp1 x home0 (near): L2-hit  266.5  DRAM-miss   798.7  p50 926
+  SMgrp1 x home1 (far ): L2-hit  300.4  DRAM-miss   830.3  p50 956
+DRAM-miss: var share SM 0.0011 region 0.0348; interaction SVD top5 [294740.  38442.  34731.  34032.  28565.]
+DRAM latency bins {np.int64(0): np.float64(0.0), np.int64(450): np.float64(0.454), np.int64(700): np.float64(0.016), np.int64(850): np.float64(0.484), np.int64(1100): np.float64(0.046)}
+  frac of probes >750 cycles for home0: 0.542
+  frac of probes >750 cycles for home1: 0.541
+SM group 0: near-homed fraction of the 148 shares: mean 0.532 min 0.486 max 0.604
+SM group 1: near-homed fraction of the 148 shares: mean 0.468 min 0.396 max 0.514
+static finish by SM die group: 181.27 us (n=70) vs 180.88 us (n=78)
+corr(static share finish, near-homed fraction of the share on its own SM): 0.018

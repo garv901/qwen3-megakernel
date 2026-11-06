@@ -1,0 +1,1 @@
+{"bench":"b0_calib","arm":"c_idle","tag":"free","N":148,"W_ns":3000,"mode":0,"reps":0,"nph":112,"launches":12512,"wall_ms":6012.4673,"us_T":4.3520,"us_launch_per_phase":4.2905,"mhz":1964.4509,"mhz_min":1963.8161,"mhz_max":1964.9155,"mhz_first10pct":1964.4984,"mhz_last10pct":1964.3923,"pass":1,"regs":39,"spill":0,"smem":134144,"job":"14277"}

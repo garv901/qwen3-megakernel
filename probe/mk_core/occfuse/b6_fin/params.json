@@ -1,0 +1,127 @@
+{
+ "a_idle": {
+  "formula": "t_fin = a_us*x0 + b_us_per_32tok_iter*x1 + extra_job_us_per_iter*x2 + extra_job_us*x3; a/b: x = [1, n_it, (m-1)*n_it, (m-1)], n_it = ceil(min(T,128)/32), m = jobs per finalizing CTA (a: ceil(NJOB/nidle), b: ceil(T/128)); c: x = [1, min(T,128)]; NJOB = (H/128)*ceil(T/128)",
+  "coeffs": {
+   "a_us": 1.0091325760822991,
+   "b_us_per_32tok_iter": 0.6238108658379767,
+   "extra_job_us_per_iter": 0.6983036769958738,
+   "extra_job_us": 0.1745759192489685
+  },
+  "units": "us",
+  "fit_rmse": 0.10669682263805241,
+  "n": 58,
+  "max_abs_res": 0.283743441920276,
+  "mean_components": {
+   "t_obs_mean": 0.937796551724138,
+   "t_rc_mean": 1.4083017241379308,
+   "t_wf_mean": 0.09852413793103448
+  },
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "H": [
+    1024,
+    2048
+   ],
+   "KS": [
+    4,
+    24
+   ],
+   "pdelay_ns": 1500
+  },
+  "jobs": [
+   14300
+  ]
+ },
+ "b_lastprod": {
+  "formula": "t_fin = a_us*x0 + b_us_per_32tok_iter*x1 + extra_job_us_per_iter*x2 + extra_job_us*x3; a/b: x = [1, n_it, (m-1)*n_it, (m-1)], n_it = ceil(min(T,128)/32), m = jobs per finalizing CTA (a: ceil(NJOB/nidle), b: ceil(T/128)); c: x = [1, min(T,128)]; NJOB = (H/128)*ceil(T/128)",
+  "coeffs": {
+   "a_us": 1.285435227272727,
+   "b_us_per_32tok_iter": 0.6242113636363651,
+   "extra_job_us_per_iter": 0.8166427807486635,
+   "extra_job_us": 0.20416069518716587
+  },
+  "units": "us",
+  "fit_rmse": 0.07394528386643508,
+  "n": 56,
+  "max_abs_res": 0.15454659090909195,
+  "mean_components": {
+   "t_obs_mean": 1.5623571428571428,
+   "t_rc_mean": 1.4293839285714287,
+   "t_wf_mean": 0.07696071428571429
+  },
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "H": [
+    1024,
+    2048
+   ],
+   "KS": [
+    4,
+    24
+   ],
+   "pdelay_ns": 1500
+  },
+  "jobs": [
+   14300
+  ]
+ },
+ "c_all": {
+  "formula": "t_fin = a_us*x0 + b_us_per_token(T<=128)*x1; a/b: x = [1, n_it, (m-1)*n_it, (m-1)], n_it = ceil(min(T,128)/32), m = jobs per finalizing CTA (a: ceil(NJOB/nidle), b: ceil(T/128)); c: x = [1, min(T,128)]; NJOB = (H/128)*ceil(T/128)",
+  "coeffs": {
+   "a_us": 1.7053082899492558,
+   "b_us_per_token(T<=128)": 0.002219872600411705
+  },
+  "units": "us",
+  "fit_rmse": 0.0637306982489676,
+  "n": 56,
+  "max_abs_res": 0.17375578683756965,
+  "mean_components": {
+   "t_obs_mean": 0.9739910714285714,
+   "t_rc_mean": 0.7749874999999999,
+   "t_wf_mean": 0.1304017857142857
+  },
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "H": [
+    1024,
+    2048
+   ],
+   "KS": [
+    4,
+    24
+   ],
+   "pdelay_ns": 1500
+  },
+  "jobs": [
+   14300
+  ]
+ },
+ "t_empty_floor": {
+  "formula": "t_fin of the empty finalizer arm (poll/ticket-observe + fence), T <= 128, mean over H, KS",
+  "coeffs": {
+   "a_idle": 0.9603659999999999,
+   "b_lastprod": 1.2347666666666666,
+   "c_all": 1.3204541666666667
+  },
+  "units": "us",
+  "fit_rmse": null,
+  "range": {
+   "T": [
+    1,
+    128
+   ]
+  },
+  "jobs": [
+   14300
+  ]
+ }
+}

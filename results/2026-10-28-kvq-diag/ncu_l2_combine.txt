@@ -1,0 +1,10 @@
+== fs S=1 b8kv32768 nl 2, kernel-replay of launch 2 (ncu -s 1 -c 1)
+    lts__t_sector_hit_rate.pct                       %         0.10
+    lts__t_sectors_op_read_lookup_hit.sum       sector        82995
+    lts__t_sectors_op_read_lookup_miss.sum      sector    100674440
+    lts__t_sectors_op_write.sum                 sector        19779
+== fs S=32 b8kv32768 nl 2, kernel-replay of launch 2 (ncu -s 1 -c 1)
+    lts__t_sector_hit_rate.pct                       %         1.26
+    lts__t_sectors_op_read_lookup_hit.sum       sector      1145481
+    lts__t_sectors_op_read_lookup_miss.sum      sector    100776636
+    lts__t_sectors_op_write.sum                 sector       241141

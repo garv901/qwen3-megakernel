@@ -1,0 +1,15 @@
+GPU 0: NVIDIA B200 (UUID: GPU-c04734e2-2332-795b-16f9-31aeb0b1212b)
+PASS static nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_rot37 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_rot74 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_rot111 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_il nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS il_shift3 nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS il_shift5 nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS il_shift7 nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_perm nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_perm nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_lpt nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+ALL PASS
+lat: wrote /raid/garv901/regime-mk-core/results/2026-10-28-why/lat_11630.u16 [2][256][16384] uint16 cycles (median of 5 launches)

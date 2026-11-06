@@ -1,0 +1,155 @@
+REPO=/raid/garv901/regime-mk-core mk-core c2bc494
+GPU 0: NVIDIA B200 (UUID: GPU-c09878e8-fb6a-ff0c-3c33-05993065d679)
+== variant e0: KVQ_EOI=0
+b8kv32768    static    C=    0 -    K=  0 tk=0 A   154.10 Cc   2.05 A+C   156.16 imb   3.84 tail   4.86 spread   8.40 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4/4
+b8kv32768    queue     C=  512 pos  K= 32 tk=0 A   149.82 Cc   3.92 A+C   153.76 imb   3.58 tail   4.58 spread   6.82 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue     C= 1024 pos  K= 32 tk=0 A   149.94 Cc   3.90 A+C   153.86 imb   3.58 tail   4.56 spread   6.86 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C=  512 pos  K= 32 tk=0 A   151.04 Cc   3.90 A+C   154.93 imb   3.84 tail   5.02 spread   7.39 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C= 1024 pos  K= 32 tk=0 A   150.98 Cc   3.94 A+C   154.90 imb   3.84 tail   5.06 spread   7.38 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b1kv245760   static    C=    0 -    K=  0 tk=0 A   146.82 Cc   2.40 A+C   149.23 imb   6.14 tail   7.22 spread  13.28 B/CTA 6.62-6.99MB u/CTA 1-1 units 148 S_max 19/19
+b1kv245760   queue     C=  512 pos  K= 32 tk=0 A   143.26 Cc   3.62 A+C   146.70 imb   2.05 tail   3.04 spread  61.25 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue     C= 1024 pos  K= 32 tk=0 A   143.33 Cc   3.62 A+C   146.75 imb   2.05 tail   3.18 spread  61.31 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C=  512 pos  K= 32 tk=0 A   146.11 Cc   3.58 A+C   149.68 imb   3.58 tail   4.64 spread  66.03 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C= 1024 pos  K= 32 tk=0 A   146.05 Cc   3.55 A+C   149.52 imb   3.33 tail   4.45 spread  65.94 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+ragged64     static    C=    0 -    K=  0 tk=0 A   221.58 Cc   5.25 A+C   226.80 imb  16.38 tail  17.52 spread  23.04 B/CTA 9.85-9.85MB u/CTA 1-30 units 659 S_max 3/3
+ragged64     queue     C=  512 pos  K= 32 tk=0 A   203.62 Cc   9.60 A+C   213.20 imb   4.61 tail   5.60 spread   7.62 B/CTA 9.22-10.58MB u/CTA 27-36 units 4640 S_max 32/32
+ragged64     queue     C= 1024 pos  K= 32 tk=0 A   202.62 Cc   9.09 A+C   211.71 imb   4.86 tail   6.08 spread   9.34 B/CTA 9.25-10.46MB u/CTA 19-24 units 3032 S_max 30/30
+ragged64     queue_pf  C=  512 pos  K= 32 tk=0 A   207.33 Cc   9.57 A+C   216.88 imb   5.63 tail   6.66 spread  12.66 B/CTA 9.13-10.54MB u/CTA 28-36 units 4640 S_max 32/32
+ragged64     queue_pf  C= 1024 pos  K= 32 tk=0 A   205.31 Cc   9.12 A+C   214.50 imb   5.63 tail   6.78 spread  12.16 B/CTA 9.01-10.61MB u/CTA 19-24 units 3032 S_max 30/30
+done; check FAIL count 0
+== variant e1: KVQ_EOI=1
+b8kv32768    static    C=    0 -    K=  0 tk=0 A   154.22 Cc   2.08 A+C   156.35 imb   3.84 tail   4.86 spread   8.67 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4/4
+b8kv32768    queue     C=  512 pos  K= 32 tk=0 A   150.11 Cc   3.94 A+C   154.06 imb   3.58 tail   4.64 spread   6.85 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue     C= 1024 pos  K= 32 tk=0 A   150.08 Cc   3.90 A+C   154.02 imb   3.58 tail   4.61 spread   6.91 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C=  512 pos  K= 32 tk=0 A   151.10 Cc   3.90 A+C   155.04 imb   3.84 tail   5.07 spread   7.52 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C= 1024 pos  K= 32 tk=0 A   151.14 Cc   3.90 A+C   155.09 imb   4.10 tail   5.02 spread   7.49 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b1kv245760   static    C=    0 -    K=  0 tk=0 A   146.96 Cc   2.37 A+C   149.41 imb   6.14 tail   7.14 spread  13.31 B/CTA 6.62-6.99MB u/CTA 1-1 units 148 S_max 19/19
+b1kv245760   queue     C=  512 pos  K= 32 tk=0 A   143.62 Cc   3.58 A+C   147.07 imb   2.05 tail   3.06 spread  61.62 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue     C= 1024 pos  K= 32 tk=0 A   143.57 Cc   3.60 A+C   147.07 imb   2.05 tail   3.01 spread  61.47 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C=  512 pos  K= 32 tk=0 A   146.34 Cc   3.58 A+C   149.81 imb   3.33 tail   4.50 spread  65.98 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C= 1024 pos  K= 32 tk=0 A   146.34 Cc   3.54 A+C   149.68 imb   3.33 tail   4.35 spread  65.87 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+ragged64     static    C=    0 -    K=  0 tk=0 A   222.02 Cc   5.28 A+C   227.30 imb  16.64 tail  17.79 spread  23.26 B/CTA 9.85-9.85MB u/CTA 1-30 units 659 S_max 3/3
+ragged64     queue     C=  512 pos  K= 32 tk=0 A   203.86 Cc   9.63 A+C   213.47 imb   4.61 tail   5.66 spread   7.68 B/CTA 9.11-10.38MB u/CTA 28-36 units 4640 S_max 32/32
+ragged64     queue     C= 1024 pos  K= 32 tk=0 A   203.01 Cc   9.12 A+C   212.18 imb   5.12 tail   6.18 spread   9.47 B/CTA 9.14-10.49MB u/CTA 19-24 units 3032 S_max 30/30
+ragged64     queue_pf  C=  512 pos  K= 32 tk=0 A   207.58 Cc   9.57 A+C   217.15 imb   5.63 tail   6.62 spread  12.64 B/CTA 9.17-10.66MB u/CTA 27-36 units 4640 S_max 32/32
+ragged64     queue_pf  C= 1024 pos  K= 32 tk=0 A   205.63 Cc   9.15 A+C   214.82 imb   5.89 tail   6.99 spread  12.24 B/CTA 8.96-10.49MB u/CTA 19-24 units 3032 S_max 30/30
+done; check FAIL count 0
+== variant e2: KVQ_EOI=2
+b8kv32768    static    C=    0 -    K=  0 tk=0 A   154.46 Cc   2.05 A+C   156.46 imb   3.84 tail   4.90 spread   8.56 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4/4
+b8kv32768    queue     C=  512 pos  K= 32 tk=0 A   150.43 Cc   3.90 A+C   154.34 imb   3.58 tail   4.70 spread   7.01 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue     C= 1024 pos  K= 32 tk=0 A   150.53 Cc   3.89 A+C   154.37 imb   3.58 tail   4.67 spread   7.07 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C=  512 pos  K= 32 tk=0 A   151.58 Cc   3.90 A+C   155.49 imb   4.10 tail   5.25 spread   7.74 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C= 1024 pos  K= 32 tk=0 A   151.68 Cc   3.90 A+C   155.58 imb   4.10 tail   5.25 spread   7.74 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b1kv245760   static    C=    0 -    K=  0 tk=0 A   146.93 Cc   2.42 A+C   149.30 imb   5.89 tail   7.10 spread  13.07 B/CTA 6.62-6.99MB u/CTA 1-1 units 148 S_max 19/19
+b1kv245760   queue     C=  512 pos  K= 32 tk=0 A   143.54 Cc   3.60 A+C   146.98 imb   1.79 tail   3.02 spread  61.31 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue     C= 1024 pos  K= 32 tk=0 A   143.54 Cc   3.58 A+C   147.04 imb   2.05 tail   3.01 spread  61.39 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C=  512 pos  K= 32 tk=0 A   146.27 Cc   3.62 A+C   149.79 imb   3.33 tail   4.46 spread  66.06 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C= 1024 pos  K= 32 tk=0 A   146.40 Cc   3.58 A+C   149.90 imb   3.33 tail   4.43 spread  66.08 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+ragged64     static    C=    0 -    K=  0 tk=0 A   222.46 Cc   5.25 A+C   227.70 imb  17.15 tail  18.22 spread  23.68 B/CTA 9.85-9.85MB u/CTA 1-30 units 659 S_max 3/3
+ragged64     queue     C=  512 pos  K= 32 tk=0 A   203.86 Cc   9.57 A+C   213.44 imb   4.61 tail   5.57 spread   7.58 B/CTA 9.21-10.46MB u/CTA 28-36 units 4640 S_max 32/32
+ragged64     queue     C= 1024 pos  K= 32 tk=0 A   202.98 Cc   9.06 A+C   212.05 imb   5.12 tail   6.24 spread   9.44 B/CTA 9.30-10.49MB u/CTA 19-23 units 3032 S_max 30/30
+ragged64     queue_pf  C=  512 pos  K= 32 tk=0 A   207.94 Cc   9.54 A+C   217.52 imb   5.76 tail   6.75 spread  12.80 B/CTA 9.09-10.55MB u/CTA 27-35 units 4640 S_max 32/32
+ragged64     queue_pf  C= 1024 pos  K= 32 tk=0 A   205.70 Cc   9.09 A+C   214.85 imb   5.89 tail   6.94 spread  12.27 B/CTA 9.00-10.49MB u/CTA 19-23 units 3032 S_max 30/30
+done; check FAIL count 0
+== variant e3: KVQ_EOI=3
+b8kv32768    static    C=    0 -    K=  0 tk=0 A   154.99 Cc   2.02 A+C   157.04 imb   3.84 tail   4.99 spread   8.53 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4/4
+b8kv32768    queue     C=  512 pos  K= 32 tk=0 A   151.71 Cc   3.94 A+C   155.68 imb   3.84 tail   4.98 spread   7.74 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue     C= 1024 pos  K= 32 tk=0 A   151.78 Cc   3.97 A+C   155.82 imb   3.84 tail   5.02 spread   7.74 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C=  512 pos  K= 32 tk=0 A   152.77 Cc   3.97 A+C   156.77 imb   4.10 tail   5.31 spread   8.45 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C= 1024 pos  K= 32 tk=0 A   152.74 Cc   3.97 A+C   156.67 imb   4.10 tail   5.31 spread   8.35 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b1kv245760   static    C=    0 -    K=  0 tk=0 A   147.50 Cc   2.32 A+C   149.92 imb   5.89 tail   7.09 spread  13.25 B/CTA 6.62-6.99MB u/CTA 1-1 units 148 S_max 19/19
+b1kv245760   queue     C=  512 pos  K= 32 tk=0 A   144.82 Cc   3.54 A+C   148.29 imb   2.05 tail   3.01 spread  62.51 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue     C= 1024 pos  K= 32 tk=0 A   145.06 Cc   3.55 A+C   148.59 imb   2.05 tail   3.07 spread  62.67 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C=  512 pos  K= 32 tk=0 A   147.52 Cc   3.55 A+C   151.10 imb   3.33 tail   4.29 spread  66.69 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C= 1024 pos  K= 32 tk=0 A   147.41 Cc   3.57 A+C   151.04 imb   3.20 tail   4.29 spread  66.70 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+ragged64     static    C=    0 -    K=  0 tk=0 A   223.79 Cc   5.18 A+C   228.99 imb  17.92 tail  18.94 spread  24.37 B/CTA 9.85-9.85MB u/CTA 1-30 units 659 S_max 3/3
+ragged64     queue     C=  512 pos  K= 32 tk=0 A   205.09 Cc   9.76 A+C   214.82 imb   4.61 tail   5.57 spread   7.70 B/CTA 9.13-10.47MB u/CTA 27-36 units 4640 S_max 32/32
+ragged64     queue     C= 1024 pos  K= 32 tk=0 A   204.13 Cc   9.34 A+C   213.47 imb   5.38 tail   6.46 spread   9.60 B/CTA 9.21-10.45MB u/CTA 19-23 units 3032 S_max 30/30
+ragged64     queue_pf  C=  512 pos  K= 32 tk=0 A   209.06 Cc   9.73 A+C   218.83 imb   5.89 tail   6.88 spread  13.06 B/CTA 8.97-10.56MB u/CTA 27-35 units 4640 S_max 32/32
+ragged64     queue_pf  C= 1024 pos  K= 32 tk=0 A   206.93 Cc   9.34 A+C   216.29 imb   6.14 tail   7.30 spread  12.58 B/CTA 9.14-10.49MB u/CTA 19-23 units 3032 S_max 30/30
+done; check FAIL count 0
+== variant e4_544: KVQ_EOI=3 KVQ_PS=136
+b8kv32768    static    C=    0 -    K=  0 tk=0 A   154.80 Cc   2.02 A+C   156.88 imb   3.84 tail   4.86 spread   8.53 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4/4
+b8kv32768    queue     C=  512 pos  K= 32 tk=0 A   151.82 Cc   3.94 A+C   155.73 imb   3.84 tail   4.99 spread   7.78 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue     C= 1024 pos  K= 32 tk=0 A   151.74 Cc   3.94 A+C   155.66 imb   3.84 tail   5.02 spread   7.74 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C=  512 pos  K= 32 tk=0 A   152.93 Cc   3.92 A+C   156.88 imb   4.10 tail   5.36 spread   8.38 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C= 1024 pos  K= 32 tk=0 A   152.69 Cc   3.94 A+C   156.67 imb   4.10 tail   5.25 spread   8.35 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b1kv245760   static    C=    0 -    K=  0 tk=0 A   147.65 Cc   2.34 A+C   150.08 imb   6.14 tail   7.30 spread  13.26 B/CTA 6.62-6.99MB u/CTA 1-1 units 148 S_max 19/19
+b1kv245760   queue     C=  512 pos  K= 32 tk=0 A   144.93 Cc   3.57 A+C   148.45 imb   2.05 tail   3.14 spread  62.53 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue     C= 1024 pos  K= 32 tk=0 A   144.98 Cc   3.57 A+C   148.48 imb   1.79 tail   2.94 spread  62.50 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C=  512 pos  K= 32 tk=0 A   147.39 Cc   3.58 A+C   150.90 imb   3.07 tail   4.24 spread  66.80 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C= 1024 pos  K= 32 tk=0 A   147.49 Cc   3.55 A+C   151.04 imb   3.07 tail   4.32 spread  66.75 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+ragged64     static    C=    0 -    K=  0 tk=0 A   223.92 Cc   5.18 A+C   229.09 imb  17.92 tail  18.93 spread  24.43 B/CTA 9.85-9.85MB u/CTA 1-30 units 659 S_max 3/3
+ragged64     queue     C=  512 pos  K= 32 tk=0 A   205.06 Cc   9.79 A+C   214.82 imb   4.61 tail   5.54 spread   7.68 B/CTA 9.20-10.45MB u/CTA 27-36 units 4640 S_max 32/32
+ragged64     queue     C= 1024 pos  K= 32 tk=0 A   204.03 Cc   9.28 A+C   213.31 imb   5.38 tail   6.43 spread   9.60 B/CTA 9.21-10.48MB u/CTA 19-23 units 3032 S_max 30/30
+ragged64     queue_pf  C=  512 pos  K= 32 tk=0 A   209.15 Cc   9.79 A+C   218.90 imb   5.89 tail   6.93 spread  12.94 B/CTA 9.07-10.49MB u/CTA 27-36 units 4640 S_max 32/32
+ragged64     queue_pf  C= 1024 pos  K= 32 tk=0 A   206.85 Cc   9.28 A+C   216.10 imb   6.14 tail   7.30 spread  12.61 B/CTA 9.13-10.56MB u/CTA 19-24 units 3032 S_max 30/30
+done; check FAIL count 0
+== variant e4_576: KVQ_EOI=3 KVQ_PS=144
+b8kv32768    static    C=    0 -    K=  0 tk=0 A   154.91 Cc   2.02 A+C   156.99 imb   3.84 tail   4.83 spread   8.50 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4/4
+b8kv32768    queue     C=  512 pos  K= 32 tk=0 A   151.78 Cc   4.00 A+C   155.81 imb   3.84 tail   4.96 spread   7.74 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue     C= 1024 pos  K= 32 tk=0 A   151.78 Cc   3.97 A+C   155.81 imb   3.84 tail   4.98 spread   7.78 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C=  512 pos  K= 32 tk=0 A   152.70 Cc   3.97 A+C   156.69 imb   4.22 tail   5.34 spread   8.42 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C= 1024 pos  K= 32 tk=0 A   152.77 Cc   3.94 A+C   156.77 imb   4.10 tail   5.34 spread   8.38 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b1kv245760   static    C=    0 -    K=  0 tk=0 A   147.68 Cc   2.30 A+C   150.08 imb   6.14 tail   7.31 spread  12.94 B/CTA 6.62-6.99MB u/CTA 1-1 units 148 S_max 19/19
+b1kv245760   queue     C=  512 pos  K= 32 tk=0 A   145.22 Cc   3.52 A+C   148.56 imb   2.05 tail   3.18 spread  62.67 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue     C= 1024 pos  K= 32 tk=0 A   144.99 Cc   3.54 A+C   148.45 imb   2.05 tail   3.04 spread  62.53 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C=  512 pos  K= 32 tk=0 A   147.36 Cc   3.55 A+C   150.85 imb   3.07 tail   4.32 spread  66.56 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C= 1024 pos  K= 32 tk=0 A   147.54 Cc   3.50 A+C   151.06 imb   3.33 tail   4.38 spread  66.78 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+ragged64     static    C=    0 -    K=  0 tk=0 A   223.90 Cc   5.12 A+C   229.06 imb  17.92 tail  18.88 spread  24.24 B/CTA 9.85-9.85MB u/CTA 1-30 units 659 S_max 3/3
+ragged64     queue     C=  512 pos  K= 32 tk=0 A   204.96 Cc   9.78 A+C   214.75 imb   4.48 tail   5.54 spread   7.62 B/CTA 9.13-10.49MB u/CTA 28-36 units 4640 S_max 32/32
+ragged64     queue     C= 1024 pos  K= 32 tk=0 A   204.11 Cc   9.38 A+C   213.49 imb   5.38 tail   6.51 spread   9.57 B/CTA 9.13-10.48MB u/CTA 19-23 units 3032 S_max 30/30
+ragged64     queue_pf  C=  512 pos  K= 32 tk=0 A   208.96 Cc   9.76 A+C   218.69 imb   5.63 tail   6.78 spread  12.93 B/CTA 9.17-10.59MB u/CTA 26-35 units 4640 S_max 32/32
+ragged64     queue_pf  C= 1024 pos  K= 32 tk=0 A   206.78 Cc   9.34 A+C   216.19 imb   6.14 tail   7.30 spread  12.56 B/CTA 8.99-10.62MB u/CTA 19-23 units 3032 S_max 30/30
+done; check FAIL count 0
+== variant e4_1024: KVQ_EOI=3 KVQ_PS=256
+b8kv32768    static    C=    0 -    K=  0 tk=0 A   154.66 Cc   2.05 A+C   156.83 imb   3.84 tail   4.90 spread   8.40 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4/4
+b8kv32768    queue     C=  512 pos  K= 32 tk=0 A   151.62 Cc   3.87 A+C   155.52 imb   3.84 tail   4.99 spread   7.78 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue     C= 1024 pos  K= 32 tk=0 A   151.58 Cc   3.90 A+C   155.57 imb   3.84 tail   4.99 spread   7.74 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C=  512 pos  K= 32 tk=0 A   152.64 Cc   3.87 A+C   156.56 imb   4.10 tail   5.30 spread   8.42 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C= 1024 pos  K= 32 tk=0 A   152.72 Cc   3.87 A+C   156.62 imb   4.10 tail   5.31 spread   8.43 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b1kv245760   static    C=    0 -    K=  0 tk=0 A   147.33 Cc   2.34 A+C   149.76 imb   6.14 tail   7.20 spread  13.07 B/CTA 6.62-6.99MB u/CTA 1-1 units 148 S_max 19/19
+b1kv245760   queue     C=  512 pos  K= 32 tk=0 A   144.61 Cc   3.49 A+C   148.03 imb   2.05 tail   3.04 spread  62.18 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue     C= 1024 pos  K= 32 tk=0 A   144.69 Cc   3.52 A+C   148.14 imb   2.05 tail   3.10 spread  62.27 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C=  512 pos  K= 32 tk=0 A   146.99 Cc   3.49 A+C   150.51 imb   3.07 tail   4.27 spread  66.29 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C= 1024 pos  K= 32 tk=0 A   147.20 Cc   3.55 A+C   150.62 imb   3.33 tail   4.38 spread  66.51 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+ragged64     static    C=    0 -    K=  0 tk=0 A   223.71 Cc   5.12 A+C   228.91 imb  18.05 tail  19.06 spread  24.74 B/CTA 9.85-9.85MB u/CTA 1-30 units 659 S_max 3/3
+ragged64     queue     C=  512 pos  K= 32 tk=0 A   204.82 Cc   9.76 A+C   214.59 imb   4.61 tail   5.50 spread   7.58 B/CTA 9.14-10.49MB u/CTA 27-35 units 4640 S_max 32/32
+ragged64     queue     C= 1024 pos  K= 32 tk=0 A   203.94 Cc   9.34 A+C   213.28 imb   5.38 tail   6.38 spread   9.57 B/CTA 9.17-10.49MB u/CTA 19-24 units 3032 S_max 30/30
+ragged64     queue_pf  C=  512 pos  K= 32 tk=0 A   208.80 Cc   9.73 A+C   218.51 imb   5.89 tail   6.82 spread  12.90 B/CTA 9.08-10.59MB u/CTA 27-35 units 4640 S_max 32/32
+ragged64     queue_pf  C= 1024 pos  K= 32 tk=0 A   206.66 Cc   9.34 A+C   215.98 imb   6.14 tail   7.23 spread  12.61 B/CTA 8.96-10.49MB u/CTA 19-24 units 3032 S_max 30/30
+done; check FAIL count 0
+== variant e5: KVQ_EOI=5
+b8kv32768    static    C=    0 -    K=  0 tk=0 A   154.70 Cc   1.98 A+C   156.75 imb   3.84 tail   4.86 spread   8.54 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4/4
+b8kv32768    queue     C=  512 pos  K= 32 tk=0 A   151.74 Cc   3.97 A+C   155.63 imb   3.84 tail   4.99 spread   7.78 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue     C= 1024 pos  K= 32 tk=0 A   151.62 Cc   3.94 A+C   155.58 imb   3.84 tail   4.96 spread   7.78 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C=  512 pos  K= 32 tk=0 A   152.83 Cc   3.94 A+C   156.78 imb   4.35 tail   5.39 spread   8.51 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C= 1024 pos  K= 32 tk=0 A   152.80 Cc   3.94 A+C   156.78 imb   4.10 tail   5.31 spread   8.53 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b1kv245760   static    C=    0 -    K=  0 tk=0 A   147.14 Cc   2.30 A+C   149.50 imb   5.89 tail   7.09 spread  13.07 B/CTA 6.62-6.99MB u/CTA 1-1 units 148 S_max 19/19
+b1kv245760   queue     C=  512 pos  K= 32 tk=0 A   144.14 Cc   3.58 A+C   147.65 imb   2.05 tail   3.12 spread  61.84 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue     C= 1024 pos  K= 32 tk=0 A   144.10 Cc   3.57 A+C   147.65 imb   2.05 tail   3.09 spread  61.76 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C=  512 pos  K= 32 tk=0 A   147.01 Cc   3.60 A+C   150.53 imb   3.33 tail   4.53 spread  66.40 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C= 1024 pos  K= 32 tk=0 A   146.93 Cc   3.58 A+C   150.43 imb   3.33 tail   4.58 spread  66.34 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+ragged64     static    C=    0 -    K=  0 tk=0 A   223.78 Cc   5.06 A+C   228.86 imb  17.92 tail  19.06 spread  24.83 B/CTA 9.85-9.85MB u/CTA 1-30 units 659 S_max 3/3
+ragged64     queue     C=  512 pos  K= 32 tk=0 A   204.51 Cc   9.73 A+C   214.22 imb   4.35 tail   5.50 spread   7.58 B/CTA 9.35-10.48MB u/CTA 28-35 units 4640 S_max 32/32
+ragged64     queue     C= 1024 pos  K= 32 tk=0 A   203.79 Cc   9.28 A+C   213.09 imb   5.38 tail   6.56 spread   9.57 B/CTA 9.15-10.43MB u/CTA 19-23 units 3032 S_max 30/30
+ragged64     queue_pf  C=  512 pos  K= 32 tk=0 A   208.45 Cc   9.70 A+C   218.16 imb   5.89 tail   6.82 spread  12.96 B/CTA 9.01-10.47MB u/CTA 27-35 units 4640 S_max 32/32
+ragged64     queue_pf  C= 1024 pos  K= 32 tk=0 A   206.40 Cc   9.31 A+C   215.70 imb   6.14 tail   7.33 spread  12.54 B/CTA 9.01-10.49MB u/CTA 19-23 units 3032 S_max 30/30
+done; check FAIL count 0
+== variant e5_576: KVQ_EOI=5 KVQ_PS=144
+b8kv32768    static    C=    0 -    K=  0 tk=0 A   154.75 Cc   2.00 A+C   156.80 imb   3.84 tail   5.02 spread   8.51 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4/4
+b8kv32768    queue     C=  512 pos  K= 32 tk=0 A   151.60 Cc   3.94 A+C   155.58 imb   3.84 tail   4.96 spread   7.87 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue     C= 1024 pos  K= 32 tk=0 A   151.62 Cc   3.90 A+C   155.60 imb   3.84 tail   4.99 spread   7.87 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C=  512 pos  K= 32 tk=0 A   152.83 Cc   3.94 A+C   156.77 imb   4.35 tail   5.41 spread   8.59 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b8kv32768    queue_pf  C= 1024 pos  K= 32 tk=0 A   152.67 Cc   3.97 A+C   156.70 imb   4.10 tail   5.31 spread   8.46 B/CTA 7.08-7.67MB u/CTA 12-13 units 1856 S_max 29/29
+b1kv245760   static    C=    0 -    K=  0 tk=0 A   147.30 Cc   2.27 A+C   149.68 imb   6.14 tail   7.15 spread  13.23 B/CTA 6.62-6.99MB u/CTA 1-1 units 148 S_max 19/19
+b1kv245760   queue     C=  512 pos  K= 32 tk=0 A   144.21 Cc   3.52 A+C   147.68 imb   2.05 tail   3.10 spread  61.70 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue     C= 1024 pos  K= 32 tk=0 A   144.16 Cc   3.52 A+C   147.70 imb   2.05 tail   3.10 spread  61.71 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C=  512 pos  K= 32 tk=0 A   146.91 Cc   3.55 A+C   150.37 imb   3.33 tail   4.46 spread  66.48 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+b1kv245760   queue_pf  C= 1024 pos  K= 32 tk=0 A   146.80 Cc   3.58 A+C   150.30 imb   3.33 tail   4.46 spread  66.27 B/CTA 4.00-8.00MB u/CTA 1-2 units 256 S_max 32/32
+ragged64     static    C=    0 -    K=  0 tk=0 A   223.82 Cc   5.02 A+C   228.82 imb  17.92 tail  19.04 spread  24.53 B/CTA 9.85-9.85MB u/CTA 1-30 units 659 S_max 3/3
+ragged64     queue     C=  512 pos  K= 32 tk=0 A   204.54 Cc   9.73 A+C   214.29 imb   4.35 tail   5.50 spread   7.58 B/CTA 9.29-10.47MB u/CTA 27-36 units 4640 S_max 32/32
+ragged64     queue     C= 1024 pos  K= 32 tk=0 A   203.70 Cc   9.31 A+C   213.02 imb   5.38 tail   6.42 spread   9.54 B/CTA 9.16-10.41MB u/CTA 19-24 units 3032 S_max 30/30
+ragged64     queue_pf  C=  512 pos  K= 32 tk=0 A   208.45 Cc   9.73 A+C   218.18 imb   5.63 tail   6.72 spread  12.77 B/CTA 9.10-10.57MB u/CTA 27-36 units 4640 S_max 32/32
+ragged64     queue_pf  C= 1024 pos  K= 32 tk=0 A   206.35 Cc   9.28 A+C   215.65 imb   6.14 tail   7.33 spread  12.51 B/CTA 9.00-10.55MB u/CTA 19-23 units 3032 S_max 30/30
+done; check FAIL count 0

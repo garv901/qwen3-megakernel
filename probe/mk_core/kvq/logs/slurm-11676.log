@@ -1,0 +1,13 @@
+GPU 0: NVIDIA B200 (UUID: GPU-0ea1b726-ae19-842c-29f2-3933b438b01f)
+== kvq --swiz 0
+CHECK b8kv32768 static C=0 -: PASS (cover True, visited True, xor True, units 211)
+b8kv32768    static    C=    0 -    A   154.11 imb   3.71 tail   4.85 spread   8.29 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4
+CALIBRATION vs a1ub ld: A 154.11 (156.864, -1.8%)  imb 3.71 (4.352, -14.7%)
+== kvq --swiz 0 --define KVQ_EF=0
+CHECK b8kv32768 static C=0 -: PASS (cover True, visited True, xor True, units 211)
+b8kv32768    static    C=    0 -    A   155.01 imb   4.10 tail   5.10 spread   8.77 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4
+CALIBRATION vs a1ub ld: A 155.01 (156.864, -1.2%)  imb 4.10 (4.352, -5.9%)
+== kvq --swiz 1
+CHECK b8kv32768 static C=0 -: PASS (cover True, visited True, xor True, units 211)
+b8kv32768    static    C=    0 -    A   155.12 imb   4.10 tail   4.99 spread   8.59 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4
+CALIBRATION vs a1ub ld: A 155.12 (156.864, -1.1%)  imb 4.10 (4.352, -5.9%)

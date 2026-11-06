@@ -1,0 +1,18 @@
+static rc=0
+ncu launch done static
+ALL PASS
+static_il rc=0
+ncu launch done static_il
+ALL PASS
+queue rc=0
+ncu launch done queue
+ALL PASS
+static_perm rc=0
+ncu launch done static_perm
+ALL PASS
+static_rot74 rc=0
+ncu launch done static_rot74
+ALL PASS
+queue_perm rc=0
+ncu launch done queue_perm
+ALL PASS

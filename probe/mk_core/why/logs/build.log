@@ -1,0 +1,26 @@
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z6k_lat1PKhPtii' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_lat1PKhPtii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 16 registers, used 0 barriers
+ptxas info    : Compile time = 3.378 ms
+ptxas info    : Compiling entry function '_Z5k_latPKhPti' for 'sm_100a'
+ptxas info    : Function properties for _Z5k_latPKhPti
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 21 registers, used 0 barriers
+ptxas info    : Compile time = 4.377 ms
+ptxas info    : Compiling entry function '_Z8k_streamPK5uint4PK5uint2PKiPK4int2iiiPjP3RecSA_PySA_' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_streamPK5uint4PK5uint2PKiPK4int2iiiPjP3RecSA_PySA_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 56 registers, used 1 barriers, 68 bytes smem
+ptxas info    : Compile time = 21.575 ms
+ptxas info    : Compiling entry function '_Z7k_flushP5uint4mj' for 'sm_100a'
+ptxas info    : Function properties for _Z7k_flushP5uint4mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 14 registers, used 0 barriers
+ptxas info    : Compile time = 1.400 ms
+ptxas info    : Compiling entry function '_Z6k_fillP5uint4m' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_fillP5uint4m
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 16 registers, used 0 barriers
+ptxas info    : Compile time = 1.814 ms

@@ -1,0 +1,17 @@
+GPU 0: NVIDIA B200 (UUID: GPU-c09878e8-fb6a-ff0c-3c33-05993065d679)
+== kvq --flush read
+CHECK b8kv32768 static C=0 -: PASS (cover True, visited True, xor True, units 211)
+b8kv32768    static    C=    0 -    A   153.92 imb   3.84 tail   4.90 spread   8.56 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4
+CALIBRATION vs a1ub ld: A 153.92 (156.864, -1.9%)  imb 3.84 (4.352, -11.8%)
+== kvq --flush none
+CHECK b8kv32768 static C=0 -: PASS (cover True, visited True, xor True, units 211)
+b8kv32768    static    C=    0 -    A   155.42 imb   4.10 tail   5.25 spread   9.47 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4
+CALIBRATION vs a1ub ld: A 155.42 (156.864, -0.9%)  imb 4.10 (4.352, -5.9%)
+== kvq --flush none --define KVQ_EF=0
+CHECK b8kv32768 static C=0 -: PASS (cover True, visited True, xor True, units 211)
+b8kv32768    static    C=    0 -    A   154.18 imb   3.84 tail   5.02 spread   8.70 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4
+CALIBRATION vs a1ub ld: A 154.18 (156.864, -1.7%)  imb 3.84 (4.352, -11.8%)
+== kvq --nl 12 --launches 20
+CHECK b8kv32768 static C=0 -: PASS (cover True, visited True, xor True, units 211)
+b8kv32768    static    C=    0 -    A   161.02 imb   5.12 tail   6.11 spread  11.42 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4
+CALIBRATION vs a1ub ld: A 161.02 (156.864, +2.7%)  imb 5.12 (4.352, +17.6%)

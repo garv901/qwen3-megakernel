@@ -1,0 +1,209 @@
+{
+ "t_stream": {
+  "formula": "busy work t(S,N,R) = t0(R) + S / min(r_sm(R), BW_agg(R)/N); S in bytes, rates in GB/s (1e9 B/s); t = median over active CTAs of (barrier-p arrive - barrier-(p-1) exit), mean over phases 2..nph; spread placement; no prefetch; fit on S>=64 KB, N in {8..148}",
+  "coeffs": {
+   "R": [
+    2,
+    3,
+    4,
+    6,
+    7
+   ],
+   "t0_us": [
+    0.735,
+    0.913,
+    0.985,
+    1.001,
+    0.999
+   ],
+   "r_sm_GBps": [
+    63.1,
+    91.1,
+    102.3,
+    103.3,
+    103.3
+   ],
+   "BW_agg_GBps": [
+    6540.0,
+    7165.0,
+    7375.0,
+    7410.0,
+    7390.0
+   ]
+  },
+  "units": "us, GB/s",
+  "fit_rmse": [
+   0.475,
+   0.284,
+   0.13,
+   0.109,
+   0.12
+  ],
+  "range": {
+   "N": [
+    8,
+    148
+   ],
+   "S_KB": [
+    64,
+    1024
+   ],
+   "R": [
+    2,
+    3,
+    4,
+    6,
+    7
+   ],
+   "R_note": "R=8 does not fit in smem (227 KB)"
+  },
+  "jobs": [
+   14279,
+   14281
+  ]
+ },
+ "t_stream_last": {
+  "formula": "same model, t = slowest active CTA's work (max over CTAs), spread placement",
+  "coeffs": {
+   "R": [
+    2,
+    3,
+    4,
+    6,
+    7
+   ],
+   "t0_us": [
+    0.949,
+    1.117,
+    1.188,
+    1.19,
+    1.189
+   ],
+   "r_sm_GBps": [
+    61.3,
+    89.2,
+    101.7,
+    103.0,
+    103.0
+   ],
+   "BW_agg_GBps": [
+    6125.0,
+    6725.0,
+    7005.0,
+    6995.0,
+    6975.0
+   ]
+  },
+  "units": "us, GB/s",
+  "fit_rmse": [
+   0.581,
+   0.356,
+   0.216,
+   0.154,
+   0.157
+  ],
+  "range": {
+   "N": [
+    8,
+    148
+   ],
+   "S_KB": [
+    64,
+    1024
+   ],
+   "R": [
+    2,
+    3,
+    4,
+    6,
+    7
+   ]
+  },
+  "jobs": [
+   14279,
+   14281
+  ]
+ },
+ "t_stream_firstN": {
+  "formula": "same as t_stream (busy), first-N blockIdx placement",
+  "coeffs": {
+   "R": [
+    2,
+    3,
+    4,
+    6,
+    7
+   ],
+   "t0_us": [
+    0.689,
+    0.877,
+    0.956,
+    0.975,
+    0.974
+   ],
+   "r_sm_GBps": [
+    63.0,
+    90.9,
+    101.5,
+    102.7,
+    102.7
+   ],
+   "BW_agg_GBps": [
+    6500.0,
+    7105.0,
+    7330.0,
+    7410.0,
+    7405.0
+   ]
+  },
+  "units": "us, GB/s",
+  "fit_rmse": [
+   0.521,
+   0.33,
+   0.163,
+   0.131,
+   0.136
+  ],
+  "range": {
+   "N": [
+    8,
+    148
+   ],
+   "S_KB": [
+    64,
+    1024
+   ],
+   "R": [
+    2,
+    3,
+    4,
+    6,
+    7
+   ]
+  },
+  "jobs": [
+   14279,
+   14281
+  ]
+ },
+ "gate_aggregate": {
+  "formula": "measured aggregate GB/s = 148*S/last (slowest CTA), N=148 spread, R=4, S=7424 KB; why (11678) 5714 (static) .. 6727 (static_il_al) GB/s",
+  "coeffs": {
+   "b1_last_GBps": 7141,
+   "b1_busy_GBps": 7455,
+   "why_best_GBps": 6727,
+   "why_static_GBps": 5714
+  },
+  "units": "GB/s",
+  "fit_rmse": null,
+  "range": {
+   "S_KB": [
+    1024,
+    7424
+   ]
+  },
+  "jobs": [
+   14282
+  ]
+ }
+}

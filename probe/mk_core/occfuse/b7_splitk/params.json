@@ -1,0 +1,215 @@
+{
+ "b7_splitk": {
+  "redadd_T": {
+   "formula": "T = t0 + a*max_steps + c_red*red_tiles + c_pl*plain_tiles; max_steps = tiles_max*steps_per_tile (common/tiles.py ts); red_tiles = tiles_max*min(T,TT)/128 if KS>1 else 0; plain_tiles = same if KS==1 (128x128 fp32 tile per CTA = 64 KB); window prefetch on",
+   "coeffs": {
+    "cols": [
+     "one",
+     "ms",
+     "red_t",
+     "pl_t"
+    ],
+    "values": [
+     3.8123,
+     0.6455,
+     1.382,
+     0.9563
+    ]
+   },
+   "units": "us",
+   "fit_rmse": 0.379,
+   "range": {
+    "shapes": [
+     "QKV",
+     "O",
+     "GU",
+     "D"
+    ],
+    "T": [
+     8,
+     32,
+     128,
+     256
+    ],
+    "TT": "min(T,128) rounded to 16",
+    "KS": [
+     1,
+     2,
+     3,
+     4,
+     6,
+     8,
+     12,
+     24
+    ],
+    "n": 80
+   },
+   "jobs": [
+    14301
+   ],
+   "variants": {
+    "lin_steps": {
+     "cols": [
+      "one",
+      "ms"
+     ],
+     "coeffs": [
+      5.1704,
+      0.6092
+     ],
+     "rmse": 1.398,
+     "maxres": 7.423
+    },
+    "F1": {
+     "cols": [
+      "one",
+      "ms",
+      "red_t",
+      "pl_t"
+     ],
+     "coeffs": [
+      3.8123,
+      0.6455,
+      1.382,
+      0.9563
+     ],
+     "rmse": 0.379,
+     "maxres": 0.791
+    },
+    "F2": {
+     "cols": [
+      "one",
+      "ms",
+      "red_t",
+      "pl_t",
+      "lgks"
+     ],
+     "coeffs": [
+      4.5277,
+      0.6089,
+      1.4554,
+      0.7299,
+      -0.2778
+     ],
+     "rmse": 0.299,
+     "maxres": 0.743
+    },
+    "F3": {
+     "cols": [
+      "one",
+      "ms",
+      "mt",
+      "red_t",
+      "pl_t"
+     ],
+     "coeffs": [
+      3.907,
+      0.6446,
+      -0.1014,
+      1.448,
+      0.9789
+     ],
+     "rmse": 0.376,
+     "maxres": 0.812
+    },
+    "F4_busy": {
+     "cols": [
+      "one",
+      "ms",
+      "red_t",
+      "pl_t",
+      "busy"
+     ],
+     "coeffs": [
+      4.295,
+      0.6164,
+      1.4855,
+      1.0668,
+      -0.005
+     ],
+     "rmse": 0.337,
+     "maxres": 0.871
+    },
+    "F1_pf0": {
+     "cols": [
+      "one",
+      "ms",
+      "red_t",
+      "pl_t"
+     ],
+     "coeffs": [
+      3.5912,
+      0.6295,
+      1.4013,
+      1.222
+     ],
+     "rmse": 0.319,
+     "maxres": 0.654
+    }
+   }
+  },
+  "ws_T": {
+   "formula": "T = t0 + a*max_steps + c_pl*partial_tiles + r*read_MB, read_MB = KS*T*N*4/1e6; two barriers per phase; window prefetch at the end barrier",
+   "coeffs": {
+    "W1": {
+     "cols": [
+      "one",
+      "ms",
+      "wsw_t",
+      "rdMB"
+     ],
+     "coeffs": [
+      6.2741,
+      0.5981,
+      1.5252,
+      0.0653
+     ],
+     "rmse": 0.43,
+     "maxres": 1.452
+    },
+    "W2": {
+     "cols": [
+      "one",
+      "ms",
+      "wsw_t",
+      "rdMB",
+      "lgks"
+     ],
+     "coeffs": [
+      6.0832,
+      0.6128,
+      1.5115,
+      0.0654,
+      0.0593
+     ],
+     "rmse": 0.428,
+     "maxres": 1.343
+    },
+    "reduce_stage": {
+     "cols": [
+      "one",
+      "rdMB"
+     ],
+     "coeffs": [
+      0.6158,
+      0.1338
+     ],
+     "rmse": 0.41
+    }
+   },
+   "units": "us",
+   "fit_rmse": 0.43,
+   "range": {
+    "n": 64
+   },
+   "jobs": [
+    14301
+   ]
+  },
+  "gate": {
+   "KS8_minus_KS4_us_pf1": 1.2200500000000005,
+   "KS8_minus_KS4_us_pf0": 1.1969999999999992,
+   "target": ">= 0.8"
+  }
+ }
+}

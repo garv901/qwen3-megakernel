@@ -1,0 +1,29 @@
+{
+ "hidden": {
+  "formula": "busy(S,P,win) = busy(S,0,win) - hidden; hidden = slope * P*32KB / min(r_sm(R), BW_agg(R)/N) [us]  (+ intercept); busy(S,0) ~ B1 t_stream(S,N,R) (+0..+1.7 us at N=48, see NOTES). exposed = busy - floor, floor = 0.15 us (stream-free phase, same barriers). win = exit - arrive of the spin barrier (us) = 1.0 for spread < 0.5, ~0.85 + 0.88*spread above; the all-CTA spin W does not change win or busy (max 0.08 us)",
+  "coeffs": {
+   "classic_win_lt_1.3": {"slope": 0.408, "intercept_us": 0.359, "slope_origin": 0.825, "rmse_us": 0.156},
+   "classic_win_1.3_2.0": {"slope": 0.707, "intercept_us": 0.276, "slope_origin": 0.931, "rmse_us": 0.211},
+   "classic_win_ge_2.0": {"slope": 0.834, "intercept_us": 0.123, "slope_origin": 0.913, "rmse_us": 0.198},
+   "ts_TT16_win_lt_1.3": {"slope": 0.316, "intercept_us": 0.385, "slope_origin": 0.727, "rmse_us": 0.163},
+   "ts_TT16_win_1.3_2.0": {"slope": 0.510, "intercept_us": 0.339, "slope_origin": 0.777, "rmse_us": 0.211},
+   "ts_TT16_win_ge_2.0": {"slope": 0.644, "intercept_us": 0.154, "slope_origin": 0.728, "rmse_us": 0.210}
+  },
+  "units": "us; r_sm, BW_agg from b1_stream/params.json (per R)",
+  "fit_rmse": 0.2,
+  "range": {"N": [48, 148], "S_KB": [32, 1024], "R": [2, 5], "P": [1, 5], "win_us": [1.0, 6.6]},
+  "jobs": [14289]
+ },
+ "gate_floors_busy_us": {
+  "formula": "busy work of mk MK_NULL b8 phases reproduced with P = R, as function of window",
+  "coeffs": {
+   "target_st14155": {"cQKV": 0.69, "cGU": 1.48, "cD": 0.49, "tQKV": 0.77, "tGU": 2.64, "tD": 0.83},
+   "bench_win_1.9_to_2.6_A_and_B": {"cQKV": 0.82, "cGU": 1.44, "cD": 0.69, "tQKV": 1.08, "tGU": 3.33, "tD": 1.07},
+   "bench_win_1.9_to_2.6_A_only": {"cQKV": 0.80, "cGU": 1.40, "cD": 0.67, "tQKV": 0.82, "tGU": 2.62, "tD": 0.82}
+  },
+  "units": "us",
+  "fit_rmse": null,
+  "range": {"window_us": [1.1, 2.7]},
+  "jobs": [14287, 14289, 14294]
+ }
+}

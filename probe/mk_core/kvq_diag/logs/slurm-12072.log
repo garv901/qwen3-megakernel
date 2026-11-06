@@ -1,0 +1,26 @@
+REPO=/raid/garv901/regime-mk-core mk-core c2bc494
+GPU 0: NVIDIA B200 (UUID: GPU-0ea1b726-ae19-842c-29f2-3933b438b01f)
+== variant e3
+b8kv32768    queue_pf  C=  256 pos  K=  0 tk=0 A   168.96 Cc  14.50 A+C   183.46 imb   2.30 tail   3.33 spread   3.87 B/CTA 6.82-7.60MB u/CTA 52-58 units 8192 S_max 128/128
+b8kv32768    queue_pf  C=  512 pos  K=  0 tk=0 A   156.99 Cc   9.09 A+C   166.05 imb   4.61 tail   5.70 spread   5.95 B/CTA 6.82-7.60MB u/CTA 26-29 units 4096 S_max 64/64
+b8kv32768    queue_pf  C= 1024 pos  K=  0 tk=0 A   152.19 Cc   4.29 A+C   156.67 imb   2.82 tail   3.78 spread  10.72 B/CTA 6.82-7.34MB u/CTA 13-14 units 2048 S_max 32/32
+ragged64     queue_pf  C=  256 pos  K=  0 tk=0 A   230.14 Cc  28.51 A+C   258.72 imb   2.56 tail   3.52 spread   4.00 B/CTA 9.29-10.35MB u/CTA 71-79 units 11144 S_max 120/120
+ragged64     queue_pf  C=  512 pos  K=  0 tk=0 A   208.16 Cc  16.93 A+C   224.99 imb   2.56 tail   3.87 spread   6.72 B/CTA 9.31-10.49MB u/CTA 36-41 units 5696 S_max 60/60
+ragged64     queue_pf  C= 1024 pos  K=  0 tk=0 A   207.94 Cc   9.41 A+C   217.34 imb   7.17 tail   8.19 spread  13.57 B/CTA 9.03-10.48MB u/CTA 19-24 units 3032 S_max 30/30
+done; check FAIL count 0
+== variant e0
+b8kv32768    queue_pf  C=  256 pos  K=  0 tk=0 A   155.10 Cc  13.47 A+C   168.61 imb   2.05 tail   3.07 spread   3.46 B/CTA 6.82-7.60MB u/CTA 52-58 units 8192 S_max 128/128
+b8kv32768    queue_pf  C=  512 pos  K=  0 tk=0 A   152.29 Cc   8.42 A+C   160.70 imb   3.33 tail   4.48 spread   5.70 B/CTA 6.82-7.60MB u/CTA 26-29 units 4096 S_max 64/64
+b8kv32768    queue_pf  C= 1024 pos  K=  0 tk=0 A   151.20 Cc   4.22 A+C   155.49 imb   4.10 tail   5.02 spread  10.08 B/CTA 6.82-7.34MB u/CTA 13-14 units 2048 S_max 32/32
+ragged64     queue_pf  C=  256 pos  K=  0 tk=0 A   211.68 Cc  25.92 A+C   237.54 imb   2.30 tail   3.30 spread   3.74 B/CTA 9.20-10.49MB u/CTA 70-80 units 11144 S_max 120/120
+ragged64     queue_pf  C=  512 pos  K=  0 tk=0 A   204.32 Cc  15.52 A+C   219.87 imb   2.82 tail   3.97 spread   6.56 B/CTA 9.24-10.49MB u/CTA 36-41 units 5696 S_max 60/60
+ragged64     queue_pf  C= 1024 pos  K=  0 tk=0 A   206.46 Cc   9.18 A+C   215.65 imb   6.40 tail   7.55 spread  12.77 B/CTA 9.19-10.50MB u/CTA 19-23 units 3032 S_max 30/30
+done; check FAIL count 0
+== variant e1
+b8kv32768    queue_pf  C=  256 pos  K=  0 tk=0 A   157.34 Cc  13.34 A+C   170.75 imb   2.05 tail   3.14 spread   3.58 B/CTA 6.82-7.60MB u/CTA 52-58 units 8192 S_max 128/128
+b8kv32768    queue_pf  C=  512 pos  K=  0 tk=0 A   152.80 Cc   8.32 A+C   161.09 imb   3.84 tail   4.77 spread   5.76 B/CTA 6.82-7.60MB u/CTA 26-29 units 4096 S_max 64/64
+b8kv32768    queue_pf  C= 1024 pos  K=  0 tk=0 A   151.81 Cc   4.19 A+C   156.03 imb   4.10 tail   4.99 spread  10.21 B/CTA 6.82-7.34MB u/CTA 13-14 units 2048 S_max 32/32
+ragged64     queue_pf  C=  256 pos  K=  0 tk=0 A   213.89 Cc  25.73 A+C   239.65 imb   2.56 tail   3.71 spread   3.78 B/CTA 9.12-10.62MB u/CTA 70-81 units 11144 S_max 120/120
+ragged64     queue_pf  C=  512 pos  K=  0 tk=0 A   205.44 Cc  15.52 A+C   221.02 imb   3.07 tail   4.10 spread   6.82 B/CTA 9.17-10.43MB u/CTA 36-41 units 5696 S_max 60/60
+ragged64     queue_pf  C= 1024 pos  K=  0 tk=0 A   206.82 Cc   9.18 A+C   215.97 imb   6.40 tail   7.52 spread  13.18 B/CTA 9.10-10.47MB u/CTA 19-24 units 3032 S_max 30/30
+done; check FAIL count 0

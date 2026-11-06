@@ -1,0 +1,17 @@
+STUCK mbar blk 76 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 75 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 87 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 73 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 72 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 70 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 71 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 82 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 79 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 78 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 84 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 77 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 80 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 83 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 85 tid 0 line 325 addr 212224 par 0
+STUCK mbar blk 86 tid 0 line 325 addr 212224 par 0
+{"bench":"b8_compose","row":"time","design":"ts_split","T":256,"pf":2,"null":0,"error":"unspecified launch failure"}

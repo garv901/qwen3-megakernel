@@ -1,0 +1,1603 @@
+                     point                      design                      config                           A                           C                       A + C             vs static A + C                       S_max
+                  b8kv4096              static (11854)                      static                        23.4                        2.05                        25.4                       +0.0%                           4
+                  b8kv4096            best queue 11854           queue C1024 cap64                        23.9                        2.18                        26.0                       +2.4%                           4
+                  b8kv4096  11854 ticket (queue_pf cap32)        queue_pf C1024 cap32                        28.0                        0.19                        28.2                      +11.0%                           4
+                  b8kv4096  control: queue same job (slots)           queue C1024 cap32                        23.9                        2.05                        26.0                       +2.3%                           4
+                  b8kv4096         static + R1 red.f32                      static                        23.5                        1.36                        24.8                       -2.2%                           4
+                  b8kv4096                  R1 red.f32           queue C1024 cap32                        23.9                        1.38                        25.2                       -0.6%                           4
+                  b8kv4096                   R1 red.v4         queue C1024 capnone                        24.1                        1.36                        25.5                       +0.3%                           4
+                  b8kv4096      static + R1 TMA-reduce                      static                        23.5                        1.38                        24.8                       -2.1%                           4
+                  b8kv4096               R1 TMA-reduce           queue C1024 cap64                        24.1                        1.38                        25.5                       +0.3%                           4
+                  b8kv4096               R2 tail split                tail f20% k4                        23.8                        2.13                        25.9                       +2.1%                           7
+                  b8kv4096          R3 merge queue pos           queue C1024 cap32                        27.5                        0.19                        27.6                       +8.9%                           4
+                  b8kv4096         R3 merge queue pair      queue C1024 cap32/pair                        27.6                        0.22                        27.8                       +9.5%                           4
+                  b8kv4096                 static + R3                      static                        26.3                        0.18                        26.5                       +4.3%                           4
+                 b8kv16384              static (11854)                      static                        82.6                        2.02                        84.6                       +0.0%                           4
+                 b8kv16384            best queue 11854            queue C512 cap32                        78.1                        3.87                        82.0                       -3.1%                          26
+                 b8kv16384  11854 ticket (queue_pf cap32)        queue_pf C1024 cap32                        90.7                        0.18                        90.9                       +7.4%                          16
+                 b8kv16384  control: queue same job (slots)            queue C512 cap32                        78.3                        3.79                        82.1                       -3.0%                          26
+                 b8kv16384         static + R1 red.f32                      static                        82.4                        1.42                        83.9                       -0.8%                           4
+                 b8kv16384                  R1 red.f32            queue C256 cap32                        78.1                        1.57                        79.7                       -5.8%                          26
+                 b8kv16384                   R1 red.v4            queue C512 cap32                        78.5                        1.55                        79.9                       -5.6%                          26
+                 b8kv16384      static + R1 TMA-reduce                      static                        82.5                        1.44                        84.1                       -0.7%                           4
+                 b8kv16384               R1 TMA-reduce            queue C512 cap32                        78.6                        1.47                        80.0                       -5.5%                          26
+                 b8kv16384               R2 tail split                 tail f5% k8                        81.3                        2.27                        83.5                       -1.3%                          10
+                 b8kv16384          R3 merge queue pos           queue C1024 cap32                        86.0                        0.22                        86.3                       +1.9%                          16
+                 b8kv16384         R3 merge queue pair   queue_pf C1024 cap32/pair                        87.0                        0.19                        87.3                       +3.2%                          16
+                 b8kv16384                 static + R3                      static                        85.2                        0.13                        85.3                       +0.8%                           4
+                 b8kv32768              static (11854)                      static                       154.5                        2.05                       156.5                       +0.0%                           4
+                 b8kv32768            best queue 11854            queue C512 cap32                       151.4                        3.97                       155.3                       -0.8%                          29
+                 b8kv32768  11854 ticket (queue_pf cap32)        queue_pf C1024 cap32                       174.2                        0.13                       174.3                      +11.4%                          29
+                 b8kv32768  control: queue same job (slots)         queue C1024 capnone                       151.1                        4.26                       155.3                       -0.8%                          32
+                 b8kv32768         static + R1 red.f32                      static                       154.7                        1.47                       156.1                       -0.2%                           4
+                 b8kv32768                  R1 red.f32            queue C256 cap64                       149.5                        1.54                       151.1                       -3.5%                          52
+                 b8kv32768                   R1 red.v4            queue C512 cap64                       149.9                        1.52                       151.3                       -3.3%                          52
+                 b8kv32768      static + R1 TMA-reduce                      static                       155.0                        1.41                       156.4                       -0.1%                           4
+                 b8kv32768               R1 TMA-reduce            queue C512 cap64                       149.9                        1.58                       151.4                       -3.3%                          52
+                 b8kv32768               R2 tail split                tail f10% k8                       154.8                        2.40                       157.2                       +0.4%                          12
+                 b8kv32768          R3 merge queue pos           queue C1024 cap32                       163.0                        0.10                       163.1                       +4.2%                          29
+                 b8kv32768         R3 merge queue pair       queue C256 cap32/pair                       168.7                        0.10                       168.8                       +7.8%                          29
+                 b8kv32768                 static + R3                      static                       157.9                        0.13                       158.0                       +0.9%                           4
+                 b8kv30720              static (11854)                      static                       146.2                        1.98                       148.2                       +0.0%                           4
+                 b8kv30720            best queue 11854           queue C1024 cap32                       143.7                        4.02                       147.7                       -0.3%                          30
+                 b8kv30720  11854 ticket (queue_pf cap32)        queue_pf C1024 cap32                       166.1                        0.13                       166.3                      +12.2%                          30
+                 b8kv30720  control: queue same job (slots)           queue C1024 cap32                       143.9                        4.03                       147.9                       -0.2%                          30
+                 b8kv30720         static + R1 red.f32                      static                       145.9                        1.44                       147.4                       -0.6%                           4
+                 b8kv30720                  R1 red.f32           queue C1024 cap64                       143.3                        1.54                       144.8                       -2.3%                          30
+                 b8kv30720                   R1 red.v4         queue C1024 capnone                       143.4                        1.54                       144.9                       -2.3%                          30
+                 b8kv30720      static + R1 TMA-reduce                      static                       146.3                        1.47                       147.6                       -0.4%                           4
+                 b8kv30720               R1 TMA-reduce           queue C1024 cap32                       143.6                        1.50                       145.2                       -2.1%                          30
+                 b8kv30720               R2 tail split                 tail f5% k8                       146.2                        2.40                       148.6                       +0.2%                          12
+                 b8kv30720          R3 merge queue pos           queue C1024 cap32                       155.3                        0.13                       155.4                       +4.8%                          30
+                 b8kv30720         R3 merge queue pair    queue_pf C256 cap32/pair                       159.6                        0.10                       159.7                       +7.7%                          30
+                 b8kv30720                 static + R3                      static                       149.2                        0.10                       149.3                       +0.7%                           4
+                b1kv245760              static (11854)                      static                       147.5                        2.27                       149.8                       +0.0%                          19
+                b1kv245760            best queue 11854           queue C1024 cap32                       144.6                        3.52                       148.1                       -1.1%                          32
+                b1kv245760  11854 ticket (queue_pf cap32)         queue_pf C512 cap32                       151.5                        0.13                       151.6                       +1.2%                          32
+                b1kv245760  control: queue same job (slots)            queue C512 cap32                       144.4                        3.54                       148.0                       -1.2%                          32
+                b1kv245760         static + R1 red.f32                      static                       147.2                        1.23                       148.4                       -1.0%                          19
+                b1kv245760                  R1 red.f32         queue C1024 capnone                       143.1                        1.33                       144.4                       -3.6%                         240
+                b1kv245760                   R1 red.v4      queue_pf C1024 capnone                       142.2                        1.28                       143.5                       -4.2%                         240
+                b1kv245760      static + R1 TMA-reduce                      static                       148.0                        1.25                       149.3                       -0.4%                          19
+                b1kv245760               R1 TMA-reduce      queue_pf C1024 capnone                       142.2                        1.34                       143.6                       -4.2%                         240
+                b1kv245760               R2 tail split                 tail f5% k8                       154.4                        3.33                       157.8                       +5.3%                          27
+                b1kv245760          R3 merge queue pos            queue C256 cap32                       149.6                        0.13                       149.8                       -0.0%                          32
+                b1kv245760         R3 merge queue pair       queue C256 cap32/pair                       152.0                        0.10                       152.1                       +1.5%                          32
+                b1kv245760                 static + R3                      static                       150.4                        0.10                       150.5                       +0.5%                          19
+                 b1kv32768              static (11854)                      static                        23.7                        2.38                        26.1                       +0.0%                          19
+                 b1kv32768            best queue 11854        queue_pf C1024 cap64                        24.1                        3.68                        27.5                       +5.2%                          32
+                 b1kv32768  11854 ticket (queue_pf cap32)         queue_pf C256 cap32                        29.2                        0.16                        29.3                      +12.1%                          29
+                 b1kv32768  control: queue same job (slots)         queue C1024 capnone                        23.9                        3.60                        27.5                       +5.1%                          32
+                 b1kv32768         static + R1 red.f32                      static                        23.5                        1.12                        24.8                       -5.1%                          19
+                 b1kv32768                  R1 red.f32            queue C512 cap64                        22.6                        1.12                        23.8                       -9.1%                          52
+                 b1kv32768                   R1 red.v4            queue C512 cap64                        22.8                        1.12                        23.9                       -8.5%                          52
+                 b1kv32768      static + R1 TMA-reduce                      static                        23.7                        1.12                        24.9                       -4.6%                          19
+                 b1kv32768               R1 TMA-reduce            queue C256 cap64                        22.8                        1.14                        23.9                       -8.4%                          52
+                 b1kv32768               R2 tail split                 tail f5% k8                        24.9                        3.36                        28.2                       +7.8%                          27
+                 b1kv32768          R3 merge queue pos            queue C256 cap32                        29.5                        0.16                        29.6                      +13.3%                          29
+                 b1kv32768         R3 merge queue pair       queue C512 cap32/pair                        29.3                        0.22                        29.6                      +13.3%                          29
+                 b1kv32768                 static + R3                      static                        26.7                        0.13                        26.9                       +3.0%                          19
+                 b64kv1024              static (11854)                      static                        47.1                        0.19                        47.3                       +0.0%                           1
+                 b64kv1024            best queue 11854      queue_pf C1024 capnone                        46.8                        0.22                        47.0                       -0.5%                           1
+                 b64kv1024  11854 ticket (queue_pf cap32)        queue_pf C1024 cap32                        46.9                        0.19                        47.1                       -0.3%                           1
+                 b64kv1024  control: queue same job (slots)           queue C1024 cap32                        46.8                        0.19                        47.1                       -0.5%                           1
+                 b64kv1024         static + R1 red.f32                      static                        47.2                        0.13                        47.3                       +0.1%                           1
+                 b64kv1024                  R1 red.f32        hybrid C2048 capnone                        43.7                        3.10                        46.8                       -1.0%                           4
+                 b64kv1024                   R1 red.v4          hybrid C2048 cap64                        43.9                        3.17                        46.9                       -0.8%                           4
+                 b64kv1024      static + R1 TMA-reduce                      static                        47.6                        0.13                        47.7                       +0.9%                           1
+                 b64kv1024               R1 TMA-reduce           queue C1024 cap64                        47.1                        0.10                        47.2                       -0.2%                           1
+                 b64kv1024               R2 tail split                tail f20% k4                        44.5                        6.66                        51.1                       +8.1%                           2
+                 b64kv1024          R3 merge queue pos           queue C1024 cap32                        47.4                        0.16                        47.5                       +0.5%                           1
+                 b64kv1024         R3 merge queue pair   queue_pf C1024 cap32/pair                        47.4                        0.16                        47.6                       +0.5%                           1
+                 b64kv1024                 static + R3                      static                        47.4                        0.22                        47.6                       +0.6%                           1
+                 b128kv512              static (11854)                      static                        46.5                        0.19                        46.7                       +0.0%                           1
+                 b128kv512            best queue 11854        queue_pf C1024 cap64                        48.1                        0.16                        48.3                       +3.4%                           1
+                 b128kv512  11854 ticket (queue_pf cap32)         queue_pf C512 cap32                        48.2                        0.18                        48.4                       +3.7%                           1
+                 b128kv512  control: queue same job (slots)       queue_pf C512 capnone                        48.2                        0.16                        48.4                       +3.6%                           1
+                 b128kv512         static + R1 red.f32                      static                        46.9                        0.13                        47.0                       +0.8%                           1
+                 b128kv512                  R1 red.f32         queue_pf C512 cap64                        48.3                        0.13                        48.4                       +3.7%                           1
+                 b128kv512                   R1 red.v4        queue_pf C1024 cap32                        48.3                        0.10                        48.4                       +3.7%                           1
+                 b128kv512      static + R1 TMA-reduce                      static                        46.8                        0.13                        46.9                       +0.6%                           1
+                 b128kv512               R1 TMA-reduce        queue_pf C1024 cap64                        48.4                        0.13                        48.5                       +3.9%                           1
+                 b128kv512               R2 tail split                tail f20% k8                        50.5                       12.50                        63.0                      +34.9%                           2
+                 b128kv512          R3 merge queue pos        queue_pf C1024 cap32                        48.4                        0.16                        48.6                       +4.1%                           1
+                 b128kv512         R3 merge queue pair   queue_pf C1024 cap32/pair                        48.4                        0.19                        48.6                       +4.1%                           1
+                 b128kv512                 static + R3                      static                        47.1                        0.16                        47.2                       +1.2%                           1
+                   ragged8              static (11854)                      static                       100.4                        2.11                       102.5                       +0.0%                           9
+                   ragged8            best queue 11854           queue C1024 cap64                        91.2                        7.04                        98.2                       -4.2%                          57
+                   ragged8  11854 ticket (queue_pf cap32)        queue_pf C1024 cap32                       112.9                        0.13                       113.1                      +10.3%                          31
+                   ragged8  control: queue same job (slots)           queue C1024 cap64                        91.3                        5.98                        97.3                       -5.0%                          57
+                   ragged8         static + R1 red.f32                      static                       100.4                        1.46                       101.8                       -0.7%                           9
+                   ragged8                  R1 red.f32           queue C1024 cap64                        91.2                        1.39                        92.6                       -9.7%                          57
+                   ragged8                   R1 red.v4           queue C1024 cap64                        91.2                        1.34                        92.5                       -9.7%                          57
+                   ragged8      static + R1 TMA-reduce                      static                       101.1                        1.47                       102.4                       -0.0%                           9
+                   ragged8               R1 TMA-reduce           queue C1024 cap64                        91.4                        1.41                        92.8                       -9.4%                          57
+                   ragged8               R2 tail split                 tail f5% k8                        96.2                        2.37                        98.5                       -3.9%                          17
+                   ragged8          R3 merge queue pos           queue C1024 cap32                       103.5                        0.10                       103.6                       +1.0%                          31
+                   ragged8         R3 merge queue pair       queue C512 cap32/pair                       105.2                        0.16                       105.4                       +2.9%                          31
+                   ragged8                 static + R3                      static                       102.1                        0.10                       102.2                       -0.3%                           9
+                  ragged64              static (11854)                      static                       223.4                        5.18                       228.7                       +0.0%                           3
+                  ragged64            best queue 11854           queue C1024 cap32                       203.9                        9.38                       213.3                       -6.8%                          30
+                  ragged64  11854 ticket (queue_pf cap32)        queue_pf C1024 cap32                       231.5                        0.13                       231.7                       +1.3%                          30
+                  ragged64  control: queue same job (slots)           queue C1024 cap64                       203.8                        9.34                       213.2                       -6.8%                          30
+                  ragged64         static + R1 red.f32                      static                       223.8                        2.78                       226.6                       -0.9%                           3
+                  ragged64                  R1 red.f32         queue C1024 capnone                       204.0                        3.20                       207.2                       -9.4%                          30
+                  ragged64                   R1 red.v4         queue C1024 capnone                       204.0                        3.20                       207.3                       -9.4%                          30
+                  ragged64      static + R1 TMA-reduce                      static                       224.3                        2.78                       227.1                       -0.7%                           3
+                  ragged64               R1 TMA-reduce           queue C1024 cap64                       204.2                        3.17                       207.4                       -9.3%                          30
+                  ragged64               R2 tail split                 tail f5% k8                       214.1                        6.78                       220.9                       -3.4%                          11
+                  ragged64          R3 merge queue pos           queue C1024 cap32                       214.9                        0.10                       214.9                       -6.0%                          30
+                  ragged64         R3 merge queue pair      queue C1024 cap32/pair                       220.6                        0.10                       220.6                       -3.5%                          30
+                  ragged64                 static + R3                      static                       226.4                        0.13                       226.6                       -0.9%                           3
+
+## all configs acc1
+b8kv4096     static                       -    A    23.5 C  1.36 A+C    24.8 S 4
+b8kv4096     queue_pf C256 cap32          pos  A    24.8 C  1.54 A+C    26.3 S 16
+b8kv4096     queue_pf C512 cap32          pos  A    24.6 C  1.57 A+C    26.1 S 8
+b8kv4096     queue_pf C1024 cap32         pos  A    24.0 C  1.41 A+C    25.4 S 4
+b8kv4096     queue_pf C256 cap64          pos  A    24.8 C  1.52 A+C    26.3 S 16
+b8kv4096     queue_pf C512 cap64          pos  A    24.6 C  1.50 A+C    26.1 S 8
+b8kv4096     queue_pf C1024 cap64         pos  A    24.1 C  1.39 A+C    25.4 S 4
+b8kv4096     queue_pf C256 capnone        pos  A    24.8 C  1.54 A+C    26.3 S 16
+b8kv4096     queue_pf C512 capnone        pos  A    24.6 C  1.49 A+C    26.2 S 8
+b8kv4096     queue_pf C1024 capnone       pos  A    24.0 C  1.44 A+C    25.5 S 4
+b8kv4096     queue C256 cap32             pos  A    25.0 C  1.52 A+C    26.5 S 16
+b8kv4096     queue C512 cap32             pos  A    24.4 C  1.54 A+C    26.0 S 8
+b8kv4096     queue C1024 cap32            pos  A    23.9 C  1.38 A+C    25.2 S 4
+b8kv4096     queue C256 cap64             pos  A    25.0 C  1.55 A+C    26.6 S 16
+b8kv4096     queue C512 cap64             pos  A    24.5 C  1.50 A+C    26.0 S 8
+b8kv4096     queue C1024 cap64            pos  A    23.9 C  1.41 A+C    25.3 S 4
+b8kv4096     queue C256 capnone           pos  A    25.0 C  1.54 A+C    26.6 S 16
+b8kv4096     queue C512 capnone           pos  A    24.4 C  1.54 A+C    26.0 S 8
+b8kv4096     queue C1024 capnone          pos  A    24.0 C  1.41 A+C    25.3 S 4
+b8kv16384    static                       -    A    82.4 C  1.42 A+C    83.9 S 4
+b8kv16384    queue_pf C256 cap32          pos  A    79.0 C  1.50 A+C    80.5 S 26
+b8kv16384    queue_pf C512 cap32          pos  A    79.3 C  1.57 A+C    80.8 S 26
+b8kv16384    queue_pf C1024 cap32         pos  A    79.7 C  1.41 A+C    81.1 S 16
+b8kv16384    queue_pf C256 cap64          pos  A    82.2 C  1.55 A+C    83.8 S 43
+b8kv16384    queue_pf C512 cap64          pos  A    80.1 C  1.44 A+C    81.6 S 32
+b8kv16384    queue_pf C1024 cap64         pos  A    79.7 C  1.42 A+C    81.1 S 16
+b8kv16384    queue_pf C256 capnone        pos  A    84.9 C  1.58 A+C    86.5 S 64
+b8kv16384    queue_pf C512 capnone        pos  A    80.2 C  1.34 A+C    81.6 S 32
+b8kv16384    queue_pf C1024 capnone       pos  A    79.7 C  1.41 A+C    81.0 S 16
+b8kv16384    queue C256 cap32             pos  A    78.1 C  1.57 A+C    79.7 S 26
+b8kv16384    queue C512 cap32             pos  A    78.2 C  1.55 A+C    79.7 S 26
+b8kv16384    queue C1024 cap32            pos  A    79.4 C  1.44 A+C    80.7 S 16
+b8kv16384    queue C256 cap64             pos  A    79.4 C  1.57 A+C    80.9 S 43
+b8kv16384    queue C512 cap64             pos  A    79.6 C  1.41 A+C    81.0 S 32
+b8kv16384    queue C1024 cap64            pos  A    79.3 C  1.39 A+C    80.6 S 16
+b8kv16384    queue C256 capnone           pos  A    84.4 C  1.57 A+C    86.0 S 64
+b8kv16384    queue C512 capnone           pos  A    79.7 C  1.36 A+C    81.0 S 32
+b8kv16384    queue C1024 capnone          pos  A    79.4 C  1.41 A+C    80.8 S 16
+b8kv32768    static                       -    A   154.7 C  1.47 A+C   156.1 S 4
+b8kv32768    queue_pf C256 cap32          pos  A   152.2 C  1.55 A+C   153.7 S 29
+b8kv32768    queue_pf C512 cap32          pos  A   152.3 C  1.54 A+C   153.8 S 29
+b8kv32768    queue_pf C1024 cap32         pos  A   152.1 C  1.47 A+C   153.6 S 29
+b8kv32768    queue_pf C256 cap64          pos  A   151.2 C  1.52 A+C   152.7 S 52
+b8kv32768    queue_pf C512 cap64          pos  A   151.3 C  1.54 A+C   152.8 S 52
+b8kv32768    queue_pf C1024 cap64         pos  A   151.9 C  1.41 A+C   153.2 S 32
+b8kv32768    queue_pf C256 capnone        pos  A   161.4 C  1.36 A+C   162.8 S 128
+b8kv32768    queue_pf C512 capnone        pos  A   154.4 C  1.55 A+C   156.0 S 64
+b8kv32768    queue_pf C1024 capnone       pos  A   151.8 C  1.44 A+C   153.2 S 32
+b8kv32768    queue C256 cap32             pos  A   151.2 C  1.57 A+C   152.8 S 29
+b8kv32768    queue C512 cap32             pos  A   151.1 C  1.60 A+C   152.6 S 29
+b8kv32768    queue C1024 cap32            pos  A   151.1 C  1.50 A+C   152.6 S 29
+b8kv32768    queue C256 cap64             pos  A   149.5 C  1.54 A+C   151.1 S 52
+b8kv32768    queue C512 cap64             pos  A   149.7 C  1.55 A+C   151.2 S 52
+b8kv32768    queue C1024 cap64            pos  A   151.4 C  1.42 A+C   152.8 S 32
+b8kv32768    queue C256 capnone           pos  A   162.3 C  1.42 A+C   163.6 S 128
+b8kv32768    queue C512 capnone           pos  A   152.9 C  1.54 A+C   154.5 S 64
+b8kv32768    queue C1024 capnone          pos  A   151.4 C  1.41 A+C   152.8 S 32
+b8kv30720    static                       -    A   145.9 C  1.44 A+C   147.4 S 4
+b8kv30720    queue_pf C256 cap32          pos  A   144.5 C  1.55 A+C   145.9 S 30
+b8kv30720    queue_pf C512 cap32          pos  A   144.2 C  1.50 A+C   145.8 S 30
+b8kv30720    queue_pf C1024 cap32         pos  A   144.2 C  1.52 A+C   145.7 S 30
+b8kv30720    queue_pf C256 cap64          pos  A   144.5 C  1.38 A+C   146.0 S 60
+b8kv30720    queue_pf C512 cap64          pos  A   144.9 C  1.38 A+C   146.2 S 60
+b8kv30720    queue_pf C1024 cap64         pos  A   144.4 C  1.54 A+C   145.9 S 30
+b8kv30720    queue_pf C256 capnone        pos  A   152.1 C  1.39 A+C   153.5 S 120
+b8kv30720    queue_pf C512 capnone        pos  A   144.6 C  1.34 A+C   146.0 S 60
+b8kv30720    queue_pf C1024 capnone       pos  A   144.1 C  1.55 A+C   145.6 S 30
+b8kv30720    queue C256 cap32             pos  A   143.6 C  1.57 A+C   145.3 S 30
+b8kv30720    queue C512 cap32             pos  A   143.6 C  1.52 A+C   145.0 S 30
+b8kv30720    queue C1024 cap32            pos  A   143.4 C  1.57 A+C   145.0 S 30
+b8kv30720    queue C256 cap64             pos  A   143.6 C  1.38 A+C   144.9 S 60
+b8kv30720    queue C512 cap64             pos  A   143.6 C  1.38 A+C   145.0 S 60
+b8kv30720    queue C1024 cap64            pos  A   143.3 C  1.54 A+C   144.8 S 30
+b8kv30720    queue C256 capnone           pos  A   152.8 C  1.47 A+C   154.3 S 120
+b8kv30720    queue C512 capnone           pos  A   143.7 C  1.41 A+C   145.1 S 60
+b8kv30720    queue C1024 capnone          pos  A   143.3 C  1.54 A+C   144.9 S 30
+b1kv245760   static                       -    A   147.2 C  1.23 A+C   148.4 S 19
+b1kv245760   queue_pf C256 cap32          pos  A   146.3 C  1.31 A+C   147.6 S 32
+b1kv245760   queue_pf C512 cap32          pos  A   146.0 C  1.31 A+C   147.3 S 32
+b1kv245760   queue_pf C1024 cap32         pos  A   146.0 C  1.31 A+C   147.4 S 32
+b1kv245760   queue_pf C256 cap64          pos  A   153.4 C  1.14 A+C   154.6 S 62
+b1kv245760   queue_pf C512 cap64          pos  A   153.3 C  1.12 A+C   154.4 S 62
+b1kv245760   queue_pf C1024 cap64         pos  A   153.5 C  1.12 A+C   154.6 S 62
+b1kv245760   queue_pf C256 capnone        pos  A   152.2 C  1.15 A+C   153.3 S 960
+b1kv245760   queue_pf C512 capnone        pos  A   144.4 C  1.12 A+C   145.5 S 480
+b1kv245760   queue_pf C1024 capnone       pos  A   143.2 C  1.33 A+C   144.4 S 240
+b1kv245760   queue C256 cap32             pos  A   144.1 C  1.28 A+C   145.4 S 32
+b1kv245760   queue C512 cap32             pos  A   144.5 C  1.31 A+C   145.8 S 32
+b1kv245760   queue C1024 cap32            pos  A   144.3 C  1.28 A+C   145.6 S 32
+b1kv245760   queue C256 cap64             pos  A   151.9 C  1.12 A+C   153.1 S 62
+b1kv245760   queue C512 cap64             pos  A   151.8 C  1.10 A+C   153.1 S 62
+b1kv245760   queue C1024 cap64            pos  A   151.9 C  1.12 A+C   153.1 S 62
+b1kv245760   queue C256 capnone           pos  A   152.5 C  1.20 A+C   153.7 S 960
+b1kv245760   queue C512 capnone           pos  A   143.6 C  1.14 A+C   144.8 S 480
+b1kv245760   queue C1024 capnone          pos  A   143.1 C  1.33 A+C   144.4 S 240
+b1kv32768    static                       -    A    23.5 C  1.12 A+C    24.8 S 19
+b1kv32768    queue_pf C256 cap32          pos  A    24.7 C  1.14 A+C    25.9 S 29
+b1kv32768    queue_pf C512 cap32          pos  A    24.7 C  1.12 A+C    25.8 S 29
+b1kv32768    queue_pf C1024 cap32         pos  A    24.7 C  1.15 A+C    25.9 S 29
+b1kv32768    queue_pf C256 cap64          pos  A    22.9 C  1.12 A+C    24.0 S 52
+b1kv32768    queue_pf C512 cap64          pos  A    22.8 C  1.12 A+C    23.9 S 52
+b1kv32768    queue_pf C1024 cap64         pos  A    24.0 C  1.15 A+C    25.2 S 32
+b1kv32768    queue_pf C256 capnone        pos  A    24.8 C  1.34 A+C    26.1 S 128
+b1kv32768    queue_pf C512 capnone        pos  A    24.6 C  1.31 A+C    25.9 S 64
+b1kv32768    queue_pf C1024 capnone       pos  A    24.1 C  1.15 A+C    25.3 S 32
+b1kv32768    queue C256 cap32             pos  A    24.3 C  1.12 A+C    25.5 S 29
+b1kv32768    queue C512 cap32             pos  A    24.3 C  1.15 A+C    25.5 S 29
+b1kv32768    queue C1024 cap32            pos  A    24.4 C  1.12 A+C    25.5 S 29
+b1kv32768    queue C256 cap64             pos  A    22.6 C  1.12 A+C    23.8 S 52
+b1kv32768    queue C512 cap64             pos  A    22.6 C  1.12 A+C    23.8 S 52
+b1kv32768    queue C1024 cap64            pos  A    23.9 C  1.15 A+C    25.1 S 32
+b1kv32768    queue C256 capnone           pos  A    25.0 C  1.34 A+C    26.3 S 128
+b1kv32768    queue C512 capnone           pos  A    24.7 C  1.39 A+C    26.1 S 64
+b1kv32768    queue C1024 capnone          pos  A    24.1 C  1.15 A+C    25.2 S 32
+b64kv1024    static                       -    A    47.2 C  0.13 A+C    47.3 S 1
+b64kv1024    queue_pf C256 cap32          pos  A    47.5 C  3.17 A+C    50.7 S 4
+b64kv1024    queue_pf C512 cap32          pos  A    45.4 C  3.14 A+C    48.6 S 2
+b64kv1024    queue_pf C1024 cap32         pos  A    47.0 C  0.13 A+C    47.2 S 1
+b64kv1024    queue_pf C256 cap64          pos  A    47.4 C  3.12 A+C    50.4 S 4
+b64kv1024    queue_pf C512 cap64          pos  A    45.2 C  3.07 A+C    48.4 S 2
+b64kv1024    queue_pf C1024 cap64         pos  A    47.0 C  0.10 A+C    47.1 S 1
+b64kv1024    queue_pf C256 capnone        pos  A    47.7 C  3.18 A+C    50.9 S 4
+b64kv1024    queue_pf C512 capnone        pos  A    45.3 C  3.07 A+C    48.4 S 2
+b64kv1024    queue_pf C1024 capnone       pos  A    47.0 C  0.10 A+C    47.1 S 1
+b64kv1024    queue C256 cap32             pos  A    47.2 C  3.10 A+C    50.4 S 4
+b64kv1024    queue C512 cap32             pos  A    45.2 C  3.09 A+C    48.4 S 2
+b64kv1024    queue C1024 cap32            pos  A    46.9 C  0.10 A+C    47.1 S 1
+b64kv1024    queue C256 cap64             pos  A    47.2 C  3.15 A+C    50.3 S 4
+b64kv1024    queue C512 cap64             pos  A    45.2 C  3.17 A+C    48.4 S 2
+b64kv1024    queue C1024 cap64            pos  A    46.9 C  0.13 A+C    47.1 S 1
+b64kv1024    queue C256 capnone           pos  A    47.1 C  3.12 A+C    50.2 S 4
+b64kv1024    queue C512 capnone           pos  A    45.2 C  3.14 A+C    48.4 S 2
+b64kv1024    queue C1024 capnone          pos  A    46.9 C  0.10 A+C    47.0 S 1
+b128kv512    static                       -    A    46.9 C  0.13 A+C    47.0 S 1
+b128kv512    queue_pf C256 cap32          pos  A    50.0 C  5.44 A+C    55.4 S 2
+b128kv512    queue_pf C512 cap32          pos  A    48.5 C  0.16 A+C    48.6 S 1
+b128kv512    queue_pf C1024 cap32         pos  A    48.3 C  0.13 A+C    48.5 S 1
+b128kv512    queue_pf C256 cap64          pos  A    50.0 C  5.42 A+C    55.3 S 2
+b128kv512    queue_pf C512 cap64          pos  A    48.3 C  0.13 A+C    48.4 S 1
+b128kv512    queue_pf C1024 cap64         pos  A    48.4 C  0.10 A+C    48.5 S 1
+b128kv512    queue_pf C256 capnone        pos  A    50.0 C  5.44 A+C    55.5 S 2
+b128kv512    queue_pf C512 capnone        pos  A    48.3 C  0.13 A+C    48.4 S 1
+b128kv512    queue_pf C1024 capnone       pos  A    48.3 C  0.10 A+C    48.5 S 1
+b128kv512    queue C256 cap32             pos  A    49.7 C  5.42 A+C    55.1 S 2
+b128kv512    queue C512 cap32             pos  A    48.6 C  0.10 A+C    48.7 S 1
+b128kv512    queue C1024 cap32            pos  A    48.5 C  0.13 A+C    48.6 S 1
+b128kv512    queue C256 cap64             pos  A    49.7 C  5.46 A+C    55.2 S 2
+b128kv512    queue C512 cap64             pos  A    48.6 C  0.16 A+C    48.7 S 1
+b128kv512    queue C1024 cap64            pos  A    48.6 C  0.13 A+C    48.7 S 1
+b128kv512    queue C256 capnone           pos  A    49.7 C  5.44 A+C    55.2 S 2
+b128kv512    queue C512 capnone           pos  A    48.5 C  0.16 A+C    48.7 S 1
+b128kv512    queue C1024 capnone          pos  A    48.4 C  0.14 A+C    48.6 S 1
+ragged8      static                       -    A   100.4 C  1.46 A+C   101.8 S 9
+ragged8      queue_pf C256 cap32          pos  A   104.5 C  1.44 A+C   106.0 S 31
+ragged8      queue_pf C512 cap32          pos  A   104.0 C  1.44 A+C   105.5 S 31
+ragged8      queue_pf C1024 cap32         pos  A   103.0 C  1.52 A+C   104.5 S 31
+ragged8      queue_pf C256 cap64          pos  A    96.7 C  1.46 A+C    98.1 S 57
+ragged8      queue_pf C512 cap64          pos  A    96.4 C  1.52 A+C    97.9 S 57
+ragged8      queue_pf C1024 cap64         pos  A    91.8 C  1.47 A+C    93.2 S 57
+ragged8      queue_pf C256 capnone        pos  A    98.0 C  1.55 A+C    99.5 S 256
+ragged8      queue_pf C512 capnone        pos  A    93.3 C  1.42 A+C    94.7 S 128
+ragged8      queue_pf C1024 capnone       pos  A    96.2 C  1.42 A+C    97.6 S 64
+ragged8      queue C256 cap32             pos  A    96.3 C  1.41 A+C    97.6 S 31
+ragged8      queue C512 cap32             pos  A    96.0 C  1.39 A+C    97.4 S 31
+ragged8      queue C1024 cap32            pos  A    96.9 C  1.54 A+C    98.3 S 31
+ragged8      queue C256 cap64             pos  A    92.4 C  1.47 A+C    93.8 S 57
+ragged8      queue C512 cap64             pos  A    92.7 C  1.57 A+C    94.2 S 57
+ragged8      queue C1024 cap64            pos  A    91.2 C  1.39 A+C    92.6 S 57
+ragged8      queue C256 capnone           pos  A    98.5 C  1.57 A+C   100.1 S 256
+ragged8      queue C512 capnone           pos  A    92.8 C  1.38 A+C    94.3 S 128
+ragged8      queue C1024 capnone          pos  A    95.8 C  1.41 A+C    97.1 S 64
+ragged64     static                       -    A   223.8 C  2.78 A+C   226.6 S 3
+ragged64     queue_pf C256 cap32          pos  A   212.6 C  3.12 A+C   215.7 S 32
+ragged64     queue_pf C512 cap32          pos  A   209.0 C  3.15 A+C   212.2 S 32
+ragged64     queue_pf C1024 cap32         pos  A   206.8 C  3.17 A+C   210.1 S 30
+ragged64     queue_pf C256 cap64          pos  A   211.3 C  3.36 A+C   214.7 S 63
+ragged64     queue_pf C512 cap64          pos  A   205.9 C  3.23 A+C   209.2 S 60
+ragged64     queue_pf C1024 cap64         pos  A   206.7 C  3.23 A+C   210.0 S 30
+ragged64     queue_pf C256 capnone        pos  A   218.5 C  3.31 A+C   221.7 S 120
+ragged64     queue_pf C512 capnone        pos  A   205.7 C  3.23 A+C   208.9 S 60
+ragged64     queue_pf C1024 capnone       pos  A   206.9 C  3.20 A+C   210.1 S 30
+ragged64     queue C256 cap32             pos  A   208.7 C  3.14 A+C   211.9 S 32
+ragged64     queue C512 cap32             pos  A   204.8 C  3.10 A+C   207.9 S 32
+ragged64     queue C1024 cap32            pos  A   204.2 C  3.23 A+C   207.5 S 30
+ragged64     queue C256 cap64             pos  A   210.2 C  3.31 A+C   213.5 S 63
+ragged64     queue C512 cap64             pos  A   204.8 C  3.23 A+C   208.1 S 60
+ragged64     queue C1024 cap64            pos  A   204.0 C  3.23 A+C   207.4 S 30
+ragged64     queue C256 capnone           pos  A   220.6 C  3.26 A+C   223.9 S 120
+ragged64     queue C512 capnone           pos  A   204.9 C  3.20 A+C   208.1 S 60
+ragged64     queue C1024 capnone          pos  A   204.0 C  3.20 A+C   207.2 S 30
+b8kv4096     hybrid C256 cap32            pos  A    32.1 C  1.47 A+C    33.6 S 32
+b8kv4096     hybrid C512 cap32            pos  A    27.5 C  1.60 A+C    29.0 S 19
+b8kv4096     hybrid C1024 cap32           pos  A    25.0 C  1.55 A+C    26.6 S 12
+b8kv4096     hybrid C2048 cap32           pos  A    24.6 C  1.39 A+C    25.9 S 11
+b8kv4096     hybrid C256 cap64            pos  A    32.2 C  1.54 A+C    33.7 S 32
+b8kv4096     hybrid C512 cap64            pos  A    27.3 C  1.57 A+C    28.7 S 19
+b8kv4096     hybrid C1024 cap64           pos  A    25.0 C  1.54 A+C    26.5 S 12
+b8kv4096     hybrid C2048 cap64           pos  A    24.6 C  1.41 A+C    26.0 S 11
+b8kv4096     hybrid C256 capnone          pos  A    32.1 C  1.55 A+C    33.7 S 32
+b8kv4096     hybrid C512 capnone          pos  A    27.3 C  1.60 A+C    28.9 S 19
+b8kv4096     hybrid C1024 capnone         pos  A    24.9 C  1.58 A+C    26.5 S 12
+b8kv4096     hybrid C2048 capnone         pos  A    24.7 C  1.42 A+C    26.0 S 11
+b8kv16384    hybrid C256 cap32            pos  A    83.7 C  1.41 A+C    85.1 S 50
+b8kv16384    hybrid C512 cap32            pos  A    83.8 C  1.54 A+C    85.4 S 50
+b8kv16384    hybrid C1024 cap32           pos  A    83.0 C  1.41 A+C    84.4 S 34
+b8kv16384    hybrid C2048 cap32           pos  A    82.0 C  1.38 A+C    83.4 S 21
+b8kv16384    hybrid C256 cap64            pos  A    91.3 C  1.41 A+C    92.7 S 82
+b8kv16384    hybrid C512 cap64            pos  A    86.1 C  1.54 A+C    87.6 S 66
+b8kv16384    hybrid C1024 cap64           pos  A    81.3 C  1.46 A+C    82.7 S 36
+b8kv16384    hybrid C2048 cap64           pos  A    80.3 C  1.46 A+C    81.7 S 23
+b8kv16384    hybrid C256 capnone          pos  A   107.0 C  1.52 A+C   108.6 S 119
+b8kv16384    hybrid C512 capnone          pos  A    85.4 C  1.52 A+C    86.9 S 66
+b8kv16384    hybrid C1024 capnone         pos  A    82.1 C  1.50 A+C    83.6 S 38
+b8kv16384    hybrid C2048 capnone         pos  A    80.8 C  1.44 A+C    82.2 S 25
+b8kv32768    hybrid C256 cap32            pos  A   158.3 C  1.38 A+C   159.6 S 59
+b8kv32768    hybrid C512 cap32            pos  A   158.4 C  1.44 A+C   159.7 S 59
+b8kv32768    hybrid C1024 cap32           pos  A   158.3 C  1.47 A+C   159.8 S 59
+b8kv32768    hybrid C2048 cap32           pos  A   157.5 C  1.41 A+C   158.8 S 34
+b8kv32768    hybrid C256 cap64            pos  A   160.2 C  1.38 A+C   161.5 S 98
+b8kv32768    hybrid C512 cap64            pos  A   160.3 C  1.39 A+C   161.6 S 98
+b8kv32768    hybrid C1024 cap64           pos  A   156.5 C  1.54 A+C   158.0 S 66
+b8kv32768    hybrid C2048 cap64           pos  A   155.5 C  1.42 A+C   156.9 S 38
+b8kv32768    hybrid C256 capnone          pos  A   207.9 C  1.57 A+C   209.4 S 238
+b8kv32768    hybrid C512 capnone          pos  A   166.1 C  1.55 A+C   167.7 S 128
+b8kv32768    hybrid C1024 capnone         pos  A   156.3 C  1.44 A+C   157.8 S 74
+b8kv32768    hybrid C2048 capnone         pos  A   155.3 C  1.42 A+C   156.6 S 46
+b8kv30720    hybrid C256 cap32            pos  A   149.0 C  1.34 A+C   150.2 S 59
+b8kv30720    hybrid C512 cap32            pos  A   149.0 C  1.41 A+C   150.4 S 59
+b8kv30720    hybrid C1024 cap32           pos  A   149.1 C  1.41 A+C   150.5 S 59
+b8kv30720    hybrid C2048 cap32           pos  A   147.9 C  1.55 A+C   149.3 S 32
+b8kv30720    hybrid C256 cap64            pos  A   156.4 C  1.57 A+C   157.9 S 115
+b8kv30720    hybrid C512 cap64            pos  A   156.2 C  1.58 A+C   157.8 S 115
+b8kv30720    hybrid C1024 cap64           pos  A   146.5 C  1.41 A+C   147.9 S 62
+b8kv30720    hybrid C2048 cap64           pos  A   145.5 C  1.38 A+C   146.9 S 36
+b8kv30720    hybrid C256 capnone          pos  A   196.3 C  1.42 A+C   197.7 S 223
+b8kv30720    hybrid C512 capnone          pos  A   155.7 C  1.41 A+C   157.1 S 121
+b8kv30720    hybrid C1024 capnone         pos  A   146.6 C  1.55 A+C   148.1 S 68
+b8kv30720    hybrid C2048 capnone         pos  A   145.8 C  1.57 A+C   147.3 S 44
+b1kv245760   hybrid C256 cap32            pos  A   186.6 C  1.12 A+C   187.8 S 70
+b1kv245760   hybrid C512 cap32            pos  A   186.3 C  1.12 A+C   187.5 S 70
+b1kv245760   hybrid C1024 cap32           pos  A   186.6 C  1.12 A+C   187.8 S 70
+b1kv245760   hybrid C2048 cap32           pos  A   186.4 C  1.12 A+C   187.6 S 70
+b1kv245760   hybrid C256 cap64            pos  A   158.8 C  1.14 A+C   160.0 S 137
+b1kv245760   hybrid C512 cap64            pos  A   158.9 C  1.12 A+C   160.0 S 137
+b1kv245760   hybrid C1024 cap64           pos  A   158.7 C  1.12 A+C   159.9 S 137
+b1kv245760   hybrid C2048 cap64           pos  A   159.0 C  1.12 A+C   160.2 S 137
+b1kv245760   hybrid C256 capnone          pos  A   196.2 C  1.15 A+C   197.4 S 1776
+b1kv245760   hybrid C512 capnone          pos  A   155.1 C  1.28 A+C   156.3 S 960
+b1kv245760   hybrid C1024 capnone         pos  A   146.5 C  1.31 A+C   147.8 S 528
+b1kv245760   hybrid C2048 capnone         pos  A   144.2 C  1.12 A+C   145.3 S 312
+b1kv32768    hybrid C256 cap32            pos  A    29.9 C  1.26 A+C    31.1 S 67
+b1kv32768    hybrid C512 cap32            pos  A    29.8 C  1.25 A+C    31.1 S 67
+b1kv32768    hybrid C1024 cap32           pos  A    29.8 C  1.33 A+C    31.1 S 67
+b1kv32768    hybrid C2048 cap32           pos  A    29.2 C  1.15 A+C    30.4 S 37
+b1kv32768    hybrid C256 cap64            pos  A    27.0 C  1.15 A+C    28.2 S 107
+b1kv32768    hybrid C512 cap64            pos  A    27.0 C  1.15 A+C    28.3 S 107
+b1kv32768    hybrid C1024 cap64           pos  A    26.4 C  1.28 A+C    27.8 S 72
+b1kv32768    hybrid C2048 cap64           pos  A    26.5 C  1.15 A+C    27.7 S 40
+b1kv32768    hybrid C256 capnone          pos  A    32.0 C  1.34 A+C    33.4 S 252
+b1kv32768    hybrid C512 capnone          pos  A    26.7 C  1.31 A+C    28.0 S 144
+b1kv32768    hybrid C1024 capnone         pos  A    24.6 C  1.31 A+C    25.9 S 78
+b1kv32768    hybrid C2048 capnone         pos  A    24.6 C  1.15 A+C    25.9 S 48
+b64kv1024    hybrid C256 cap32            pos  A    58.9 C  3.07 A+C    61.9 S 9
+b64kv1024    hybrid C512 cap32            pos  A    47.8 C  3.17 A+C    50.9 S 5
+b64kv1024    hybrid C1024 cap32           pos  A    44.5 C  3.17 A+C    47.7 S 4
+b64kv1024    hybrid C2048 cap32           pos  A    43.8 C  3.10 A+C    46.9 S 4
+b64kv1024    hybrid C256 cap64            pos  A    58.8 C  3.09 A+C    61.9 S 9
+b64kv1024    hybrid C512 cap64            pos  A    47.8 C  3.09 A+C    50.9 S 5
+b64kv1024    hybrid C1024 cap64           pos  A    44.4 C  3.15 A+C    47.6 S 4
+b64kv1024    hybrid C2048 cap64           pos  A    43.8 C  3.10 A+C    47.0 S 4
+b64kv1024    hybrid C256 capnone          pos  A    58.8 C  3.20 A+C    62.1 S 9
+b64kv1024    hybrid C512 capnone          pos  A    47.6 C  3.15 A+C    50.7 S 5
+b64kv1024    hybrid C1024 capnone         pos  A    44.5 C  3.14 A+C    47.7 S 4
+b64kv1024    hybrid C2048 capnone         pos  A    43.7 C  3.10 A+C    46.8 S 4
+b128kv512    hybrid C256 cap32            pos  A    60.2 C  5.44 A+C    65.6 S 5
+b128kv512    hybrid C512 cap32            pos  A    48.8 C  5.44 A+C    54.2 S 3
+b128kv512    hybrid C1024 cap32           pos  A    47.1 C  5.18 A+C    52.3 S 2
+b128kv512    hybrid C2048 cap32           pos  A    46.3 C  4.70 A+C    51.1 S 2
+b128kv512    hybrid C256 cap64            pos  A    60.2 C  5.44 A+C    65.6 S 5
+b128kv512    hybrid C512 cap64            pos  A    48.8 C  5.41 A+C    54.2 S 3
+b128kv512    hybrid C1024 cap64           pos  A    47.3 C  5.18 A+C    52.5 S 2
+b128kv512    hybrid C2048 cap64           pos  A    46.5 C  4.74 A+C    51.2 S 2
+b128kv512    hybrid C256 capnone          pos  A    60.2 C  5.44 A+C    65.6 S 5
+b128kv512    hybrid C512 capnone          pos  A    48.8 C  5.44 A+C    54.2 S 3
+b128kv512    hybrid C1024 capnone         pos  A    47.3 C  5.18 A+C    52.5 S 2
+b128kv512    hybrid C2048 capnone         pos  A    46.5 C  4.74 A+C    51.3 S 2
+ragged8      hybrid C256 cap32            pos  A   102.2 C  1.44 A+C   103.6 S 62
+ragged8      hybrid C512 cap32            pos  A   101.8 C  1.54 A+C   103.4 S 62
+ragged8      hybrid C1024 cap32           pos  A   102.0 C  1.57 A+C   103.6 S 62
+ragged8      hybrid C2048 cap32           pos  A   101.6 C  1.44 A+C   103.1 S 63
+ragged8      hybrid C256 cap64            pos  A   101.5 C  1.57 A+C   103.0 S 107
+ragged8      hybrid C512 cap64            pos  A   101.6 C  1.41 A+C   103.0 S 109
+ragged8      hybrid C1024 cap64           pos  A    97.7 C  1.46 A+C    99.2 S 107
+ragged8      hybrid C2048 cap64           pos  A    95.9 C  1.42 A+C    97.3 S 67
+ragged8      hybrid C256 capnone          pos  A   129.7 C  1.44 A+C   131.2 S 462
+ragged8      hybrid C512 capnone          pos  A   100.9 C  1.54 A+C   102.5 S 260
+ragged8      hybrid C1024 capnone         pos  A    95.4 C  1.58 A+C    96.9 S 164
+ragged8      hybrid C2048 capnone         pos  A    94.2 C  1.54 A+C    95.8 S 115
+ragged64     hybrid C256 cap32            pos  A   217.7 C  3.20 A+C   221.0 S 55
+ragged64     hybrid C512 cap32            pos  A   218.0 C  3.23 A+C   221.2 S 54
+ragged64     hybrid C1024 cap32           pos  A   215.0 C  3.23 A+C   218.3 S 53
+ragged64     hybrid C2048 cap32           pos  A   212.6 C  3.14 A+C   215.8 S 33
+ragged64     hybrid C256 cap64            pos  A   234.0 C  3.33 A+C   237.3 S 107
+ragged64     hybrid C512 cap64            pos  A   225.6 C  3.20 A+C   228.8 S 98
+ragged64     hybrid C1024 cap64           pos  A   211.7 C  3.26 A+C   215.1 S 60
+ragged64     hybrid C2048 cap64           pos  A   210.0 C  3.25 A+C   213.2 S 43
+ragged64     hybrid C256 capnone          pos  A   288.8 C  3.33 A+C   292.1 S 195
+ragged64     hybrid C512 capnone          pos  A   225.8 C  3.36 A+C   229.1 S 119
+ragged64     hybrid C1024 capnone         pos  A   212.1 C  3.10 A+C   215.3 S 82
+ragged64     hybrid C2048 capnone         pos  A   210.3 C  3.10 A+C   213.4 S 67
+
+## all configs acc3
+b8kv4096     static                       -    A    23.4 C  1.30 A+C    24.8 S 4
+b8kv4096     queue_pf C256 cap32          pos  A    25.2 C  1.49 A+C    26.7 S 16
+b8kv4096     queue_pf C512 cap32          pos  A    24.8 C  1.49 A+C    26.3 S 8
+b8kv4096     queue_pf C1024 cap32         pos  A    24.2 C  1.42 A+C    25.6 S 4
+b8kv4096     queue_pf C256 cap64          pos  A    25.2 C  1.54 A+C    26.7 S 16
+b8kv4096     queue_pf C512 cap64          pos  A    24.7 C  1.47 A+C    26.3 S 8
+b8kv4096     queue_pf C1024 cap64         pos  A    24.3 C  1.38 A+C    25.7 S 4
+b8kv4096     queue_pf C256 capnone        pos  A    25.2 C  1.49 A+C    26.6 S 16
+b8kv4096     queue_pf C512 capnone        pos  A    24.8 C  1.50 A+C    26.2 S 8
+b8kv4096     queue_pf C1024 capnone       pos  A    24.3 C  1.38 A+C    25.5 S 4
+b8kv4096     queue C256 cap32             pos  A    25.5 C  1.54 A+C    27.0 S 16
+b8kv4096     queue C512 cap32             pos  A    24.6 C  1.50 A+C    26.1 S 8
+b8kv4096     queue C1024 cap32            pos  A    24.1 C  1.38 A+C    25.5 S 4
+b8kv4096     queue C256 cap64             pos  A    25.5 C  1.55 A+C    26.9 S 16
+b8kv4096     queue C512 cap64             pos  A    24.7 C  1.50 A+C    26.1 S 8
+b8kv4096     queue C1024 cap64            pos  A    24.1 C  1.38 A+C    25.5 S 4
+b8kv4096     queue C256 capnone           pos  A    25.5 C  1.57 A+C    27.0 S 16
+b8kv4096     queue C512 capnone           pos  A    24.7 C  1.54 A+C    26.2 S 8
+b8kv4096     queue C1024 capnone          pos  A    24.1 C  1.36 A+C    25.5 S 4
+b8kv16384    static                       -    A    82.5 C  1.39 A+C    84.0 S 4
+b8kv16384    queue_pf C256 cap32          pos  A    79.2 C  1.55 A+C    80.7 S 26
+b8kv16384    queue_pf C512 cap32          pos  A    79.0 C  1.54 A+C    80.5 S 26
+b8kv16384    queue_pf C1024 cap32         pos  A    79.6 C  1.39 A+C    81.0 S 16
+b8kv16384    queue_pf C256 cap64          pos  A    81.4 C  1.46 A+C    82.9 S 43
+b8kv16384    queue_pf C512 cap64          pos  A    79.9 C  1.33 A+C    81.2 S 32
+b8kv16384    queue_pf C1024 cap64         pos  A    79.4 C  1.39 A+C    80.8 S 16
+b8kv16384    queue_pf C256 capnone        pos  A    85.1 C  1.46 A+C    86.6 S 64
+b8kv16384    queue_pf C512 capnone        pos  A    79.7 C  1.33 A+C    81.1 S 32
+b8kv16384    queue_pf C1024 capnone       pos  A    79.5 C  1.41 A+C    80.7 S 16
+b8kv16384    queue C256 cap32             pos  A    78.5 C  1.55 A+C    80.0 S 26
+b8kv16384    queue C512 cap32             pos  A    78.5 C  1.55 A+C    79.9 S 26
+b8kv16384    queue C1024 cap32            pos  A    79.2 C  1.38 A+C    80.5 S 16
+b8kv16384    queue C256 cap64             pos  A    79.9 C  1.54 A+C    81.5 S 43
+b8kv16384    queue C512 cap64             pos  A    80.2 C  1.33 A+C    81.5 S 32
+b8kv16384    queue C1024 cap64            pos  A    79.2 C  1.38 A+C    80.6 S 16
+b8kv16384    queue C256 capnone           pos  A    85.5 C  1.49 A+C    87.0 S 64
+b8kv16384    queue C512 capnone           pos  A    80.0 C  1.33 A+C    81.4 S 32
+b8kv16384    queue C1024 capnone          pos  A    79.2 C  1.41 A+C    80.7 S 16
+b8kv32768    static                       -    A   154.7 C  1.34 A+C   156.0 S 4
+b8kv32768    queue_pf C256 cap32          pos  A   152.5 C  1.54 A+C   153.9 S 29
+b8kv32768    queue_pf C512 cap32          pos  A   152.3 C  1.54 A+C   153.8 S 29
+b8kv32768    queue_pf C1024 cap32         pos  A   152.3 C  1.50 A+C   153.8 S 29
+b8kv32768    queue_pf C256 cap64          pos  A   150.9 C  1.55 A+C   152.4 S 52
+b8kv32768    queue_pf C512 cap64          pos  A   150.8 C  1.54 A+C   152.3 S 52
+b8kv32768    queue_pf C1024 cap64         pos  A   151.5 C  1.38 A+C   152.8 S 32
+b8kv32768    queue_pf C256 capnone        pos  A   162.6 C  1.36 A+C   163.9 S 128
+b8kv32768    queue_pf C512 capnone        pos  A   154.4 C  1.49 A+C   155.9 S 64
+b8kv32768    queue_pf C1024 capnone       pos  A   151.5 C  1.33 A+C   152.8 S 32
+b8kv32768    queue C256 cap32             pos  A   151.4 C  1.47 A+C   152.8 S 29
+b8kv32768    queue C512 cap32             pos  A   151.6 C  1.54 A+C   153.1 S 29
+b8kv32768    queue C1024 cap32            pos  A   151.4 C  1.49 A+C   152.8 S 29
+b8kv32768    queue C256 cap64             pos  A   149.9 C  1.57 A+C   151.5 S 52
+b8kv32768    queue C512 cap64             pos  A   149.9 C  1.52 A+C   151.3 S 52
+b8kv32768    queue C1024 cap64            pos  A   151.2 C  1.34 A+C   152.4 S 32
+b8kv32768    queue C256 capnone           pos  A   164.2 C  1.38 A+C   165.5 S 128
+b8kv32768    queue C512 capnone           pos  A   153.6 C  1.47 A+C   155.2 S 64
+b8kv32768    queue C1024 capnone          pos  A   151.5 C  1.33 A+C   152.8 S 32
+b8kv30720    static                       -    A   146.2 C  1.38 A+C   147.5 S 4
+b8kv30720    queue_pf C256 cap32          pos  A   143.9 C  1.47 A+C   145.2 S 30
+b8kv30720    queue_pf C512 cap32          pos  A   144.0 C  1.44 A+C   145.4 S 30
+b8kv30720    queue_pf C1024 cap32         pos  A   144.0 C  1.44 A+C   145.4 S 30
+b8kv30720    queue_pf C256 cap64          pos  A   144.6 C  1.41 A+C   146.0 S 60
+b8kv30720    queue_pf C512 cap64          pos  A   144.5 C  1.39 A+C   145.9 S 60
+b8kv30720    queue_pf C1024 cap64         pos  A   144.0 C  1.50 A+C   145.4 S 30
+b8kv30720    queue_pf C256 capnone        pos  A   153.3 C  1.38 A+C   154.6 S 120
+b8kv30720    queue_pf C512 capnone        pos  A   144.3 C  1.38 A+C   145.6 S 60
+b8kv30720    queue_pf C1024 capnone       pos  A   144.1 C  1.50 A+C   145.5 S 30
+b8kv30720    queue C256 cap32             pos  A   143.6 C  1.44 A+C   145.1 S 30
+b8kv30720    queue C512 cap32             pos  A   143.7 C  1.50 A+C   145.1 S 30
+b8kv30720    queue C1024 cap32            pos  A   143.6 C  1.54 A+C   144.9 S 30
+b8kv30720    queue C256 cap64             pos  A   144.1 C  1.42 A+C   145.5 S 60
+b8kv30720    queue C512 cap64             pos  A   144.1 C  1.34 A+C   145.4 S 60
+b8kv30720    queue C1024 cap64            pos  A   143.6 C  1.44 A+C   145.1 S 30
+b8kv30720    queue C256 capnone           pos  A   154.7 C  1.38 A+C   156.1 S 120
+b8kv30720    queue C512 capnone           pos  A   144.2 C  1.41 A+C   145.6 S 60
+b8kv30720    queue C1024 capnone          pos  A   143.4 C  1.54 A+C   144.9 S 30
+b1kv245760   static                       -    A   147.6 C  1.25 A+C   148.8 S 19
+b1kv245760   queue_pf C256 cap32          pos  A   146.0 C  1.28 A+C   147.4 S 32
+b1kv245760   queue_pf C512 cap32          pos  A   146.3 C  1.25 A+C   147.6 S 32
+b1kv245760   queue_pf C1024 cap32         pos  A   146.3 C  1.28 A+C   147.5 S 32
+b1kv245760   queue_pf C256 cap64          pos  A   153.3 C  1.12 A+C   154.5 S 62
+b1kv245760   queue_pf C512 cap64          pos  A   153.4 C  1.12 A+C   154.5 S 62
+b1kv245760   queue_pf C1024 cap64         pos  A   153.5 C  1.12 A+C   154.7 S 62
+b1kv245760   queue_pf C256 capnone        pos  A   153.2 C  1.20 A+C   154.4 S 960
+b1kv245760   queue_pf C512 capnone        pos  A   144.4 C  1.12 A+C   145.5 S 480
+b1kv245760   queue_pf C1024 capnone       pos  A   142.2 C  1.28 A+C   143.5 S 240
+b1kv245760   queue C256 cap32             pos  A   144.6 C  1.28 A+C   145.9 S 32
+b1kv245760   queue C512 cap32             pos  A   144.3 C  1.28 A+C   145.6 S 32
+b1kv245760   queue C1024 cap32            pos  A   144.6 C  1.26 A+C   145.9 S 32
+b1kv245760   queue C256 cap64             pos  A   152.0 C  1.12 A+C   153.2 S 62
+b1kv245760   queue C512 cap64             pos  A   152.0 C  1.12 A+C   153.1 S 62
+b1kv245760   queue C1024 cap64            pos  A   152.0 C  1.17 A+C   153.2 S 62
+b1kv245760   queue C256 capnone           pos  A   154.3 C  1.12 A+C   155.5 S 960
+b1kv245760   queue C512 capnone           pos  A   144.3 C  1.12 A+C   145.6 S 480
+b1kv245760   queue C1024 capnone          pos  A   142.6 C  1.28 A+C   143.9 S 240
+b1kv32768    static                       -    A    23.8 C  1.12 A+C    24.9 S 19
+b1kv32768    queue_pf C256 cap32          pos  A    24.6 C  1.09 A+C    25.8 S 29
+b1kv32768    queue_pf C512 cap32          pos  A    24.6 C  1.09 A+C    25.8 S 29
+b1kv32768    queue_pf C1024 cap32         pos  A    24.7 C  1.09 A+C    25.8 S 29
+b1kv32768    queue_pf C256 cap64          pos  A    22.8 C  1.12 A+C    24.0 S 52
+b1kv32768    queue_pf C512 cap64          pos  A    22.9 C  1.12 A+C    24.0 S 52
+b1kv32768    queue_pf C1024 cap64         pos  A    23.9 C  1.17 A+C    25.2 S 32
+b1kv32768    queue_pf C256 capnone        pos  A    25.1 C  1.38 A+C    26.6 S 128
+b1kv32768    queue_pf C512 capnone        pos  A    24.6 C  1.30 A+C    25.9 S 64
+b1kv32768    queue_pf C1024 capnone       pos  A    24.2 C  1.12 A+C    25.3 S 32
+b1kv32768    queue C256 cap32             pos  A    24.5 C  1.06 A+C    25.6 S 29
+b1kv32768    queue C512 cap32             pos  A    24.6 C  1.09 A+C    25.7 S 29
+b1kv32768    queue C1024 cap32            pos  A    24.5 C  1.09 A+C    25.7 S 29
+b1kv32768    queue C256 cap64             pos  A    22.8 C  1.12 A+C    23.9 S 52
+b1kv32768    queue C512 cap64             pos  A    22.8 C  1.12 A+C    23.9 S 52
+b1kv32768    queue C1024 cap64            pos  A    24.2 C  1.12 A+C    25.3 S 32
+b1kv32768    queue C256 capnone           pos  A    25.4 C  1.38 A+C    26.8 S 128
+b1kv32768    queue C512 capnone           pos  A    24.8 C  1.36 A+C    26.1 S 64
+b1kv32768    queue C1024 capnone          pos  A    24.2 C  1.09 A+C    25.3 S 32
+b64kv1024    static                       -    A    47.1 C  0.13 A+C    47.3 S 1
+b64kv1024    queue_pf C256 cap32          pos  A    47.7 C  3.12 A+C    50.9 S 4
+b64kv1024    queue_pf C512 cap32          pos  A    44.9 C  3.07 A+C    48.0 S 2
+b64kv1024    queue_pf C1024 cap32         pos  A    46.9 C  0.13 A+C    47.0 S 1
+b64kv1024    queue_pf C256 cap64          pos  A    47.9 C  3.09 A+C    51.0 S 4
+b64kv1024    queue_pf C512 cap64          pos  A    44.9 C  3.12 A+C    48.1 S 2
+b64kv1024    queue_pf C1024 cap64         pos  A    46.9 C  0.13 A+C    47.1 S 1
+b64kv1024    queue_pf C256 capnone        pos  A    47.9 C  3.07 A+C    51.0 S 4
+b64kv1024    queue_pf C512 capnone        pos  A    45.1 C  3.10 A+C    48.2 S 2
+b64kv1024    queue_pf C1024 capnone       pos  A    47.0 C  0.13 A+C    47.2 S 1
+b64kv1024    queue C256 cap32             pos  A    47.8 C  3.14 A+C    50.8 S 4
+b64kv1024    queue C512 cap32             pos  A    45.2 C  3.07 A+C    48.3 S 2
+b64kv1024    queue C1024 cap32            pos  A    46.8 C  0.13 A+C    46.9 S 1
+b64kv1024    queue C256 cap64             pos  A    47.7 C  3.10 A+C    50.9 S 4
+b64kv1024    queue C512 cap64             pos  A    45.5 C  3.15 A+C    48.6 S 2
+b64kv1024    queue C1024 cap64            pos  A    46.8 C  0.13 A+C    46.9 S 1
+b64kv1024    queue C256 capnone           pos  A    47.8 C  3.09 A+C    50.9 S 4
+b64kv1024    queue C512 capnone           pos  A    45.5 C  3.10 A+C    48.6 S 2
+b64kv1024    queue C1024 capnone          pos  A    46.8 C  0.10 A+C    47.0 S 1
+b128kv512    static                       -    A    46.7 C  0.10 A+C    46.8 S 1
+b128kv512    queue_pf C256 cap32          pos  A    50.4 C  5.41 A+C    55.8 S 2
+b128kv512    queue_pf C512 cap32          pos  A    48.4 C  0.11 A+C    48.5 S 1
+b128kv512    queue_pf C1024 cap32         pos  A    48.3 C  0.10 A+C    48.4 S 1
+b128kv512    queue_pf C256 cap64          pos  A    50.3 C  5.47 A+C    55.8 S 2
+b128kv512    queue_pf C512 cap64          pos  A    48.3 C  0.10 A+C    48.4 S 1
+b128kv512    queue_pf C1024 cap64         pos  A    48.3 C  0.10 A+C    48.4 S 1
+b128kv512    queue_pf C256 capnone        pos  A    50.5 C  5.41 A+C    55.9 S 2
+b128kv512    queue_pf C512 capnone        pos  A    48.3 C  0.16 A+C    48.4 S 1
+b128kv512    queue_pf C1024 capnone       pos  A    48.4 C  0.13 A+C    48.5 S 1
+b128kv512    queue C256 cap32             pos  A    50.4 C  5.42 A+C    55.7 S 2
+b128kv512    queue C512 cap32             pos  A    48.5 C  0.11 A+C    48.7 S 1
+b128kv512    queue C1024 cap32            pos  A    48.5 C  0.13 A+C    48.6 S 1
+b128kv512    queue C256 cap64             pos  A    50.5 C  5.44 A+C    55.9 S 2
+b128kv512    queue C512 cap64             pos  A    48.5 C  0.11 A+C    48.6 S 1
+b128kv512    queue C1024 cap64            pos  A    48.6 C  0.14 A+C    48.8 S 1
+b128kv512    queue C256 capnone           pos  A    50.5 C  5.44 A+C    55.9 S 2
+b128kv512    queue C512 capnone           pos  A    48.5 C  0.11 A+C    48.7 S 1
+b128kv512    queue C1024 capnone          pos  A    48.6 C  0.13 A+C    48.7 S 1
+ragged8      static                       -    A   100.7 C  1.38 A+C   102.1 S 9
+ragged8      queue_pf C256 cap32          pos  A   104.8 C  1.41 A+C   106.1 S 31
+ragged8      queue_pf C512 cap32          pos  A   104.0 C  1.38 A+C   105.3 S 31
+ragged8      queue_pf C1024 cap32         pos  A   102.8 C  1.50 A+C   104.2 S 31
+ragged8      queue_pf C256 cap64          pos  A    96.4 C  1.41 A+C    97.8 S 57
+ragged8      queue_pf C512 cap64          pos  A    96.4 C  1.54 A+C    97.9 S 57
+ragged8      queue_pf C1024 cap64         pos  A    91.8 C  1.39 A+C    93.2 S 57
+ragged8      queue_pf C256 capnone        pos  A    98.5 C  1.52 A+C    99.9 S 256
+ragged8      queue_pf C512 capnone        pos  A    93.5 C  1.41 A+C    95.0 S 128
+ragged8      queue_pf C1024 capnone       pos  A    96.4 C  1.39 A+C    97.8 S 64
+ragged8      queue C256 cap32             pos  A    96.3 C  1.41 A+C    97.6 S 31
+ragged8      queue C512 cap32             pos  A    95.9 C  1.34 A+C    97.3 S 31
+ragged8      queue C1024 cap32            pos  A    96.7 C  1.49 A+C    98.2 S 31
+ragged8      queue C256 cap64             pos  A    92.5 C  1.39 A+C    93.9 S 57
+ragged8      queue C512 cap64             pos  A    92.7 C  1.50 A+C    94.2 S 57
+ragged8      queue C1024 cap64            pos  A    91.2 C  1.34 A+C    92.5 S 57
+ragged8      queue C256 capnone           pos  A    99.6 C  1.55 A+C   101.0 S 256
+ragged8      queue C512 capnone           pos  A    92.9 C  1.41 A+C    94.3 S 128
+ragged8      queue C1024 capnone          pos  A    96.2 C  1.36 A+C    97.6 S 64
+ragged64     static                       -    A   223.4 C  2.75 A+C   226.2 S 3
+ragged64     queue_pf C256 cap32          pos  A   212.2 C  3.10 A+C   215.4 S 32
+ragged64     queue_pf C512 cap32          pos  A   208.3 C  3.10 A+C   211.5 S 32
+ragged64     queue_pf C1024 cap32         pos  A   206.6 C  3.22 A+C   209.7 S 30
+ragged64     queue_pf C256 cap64          pos  A   211.8 C  3.30 A+C   215.1 S 63
+ragged64     queue_pf C512 cap64          pos  A   205.4 C  3.26 A+C   208.7 S 60
+ragged64     queue_pf C1024 cap64         pos  A   206.5 C  3.17 A+C   209.6 S 30
+ragged64     queue_pf C256 capnone        pos  A   220.3 C  3.22 A+C   223.5 S 120
+ragged64     queue_pf C512 capnone        pos  A   205.4 C  3.26 A+C   208.5 S 60
+ragged64     queue_pf C1024 capnone       pos  A   206.8 C  3.20 A+C   210.1 S 30
+ragged64     queue C256 cap32             pos  A   209.4 C  3.17 A+C   212.6 S 32
+ragged64     queue C512 cap32             pos  A   205.0 C  3.10 A+C   208.0 S 32
+ragged64     queue C1024 cap32            pos  A   204.1 C  3.25 A+C   207.5 S 30
+ragged64     queue C256 cap64             pos  A   212.0 C  3.30 A+C   215.3 S 63
+ragged64     queue C512 cap64             pos  A   205.1 C  3.25 A+C   208.3 S 60
+ragged64     queue C1024 cap64            pos  A   204.4 C  3.23 A+C   207.5 S 30
+ragged64     queue C256 capnone           pos  A   223.0 C  3.20 A+C   226.2 S 120
+ragged64     queue C512 capnone           pos  A   205.1 C  3.25 A+C   208.4 S 60
+ragged64     queue C1024 capnone          pos  A   204.0 C  3.20 A+C   207.3 S 30
+b8kv4096     hybrid C256 cap32            pos  A    33.0 C  1.41 A+C    34.4 S 32
+b8kv4096     hybrid C512 cap32            pos  A    27.6 C  1.49 A+C    29.1 S 19
+b8kv4096     hybrid C1024 cap32           pos  A    25.1 C  1.49 A+C    26.7 S 12
+b8kv4096     hybrid C2048 cap32           pos  A    24.8 C  1.41 A+C    26.1 S 11
+b8kv4096     hybrid C256 cap64            pos  A    33.0 C  1.54 A+C    34.5 S 32
+b8kv4096     hybrid C512 cap64            pos  A    27.7 C  1.50 A+C    29.1 S 19
+b8kv4096     hybrid C1024 cap64           pos  A    25.2 C  1.50 A+C    26.8 S 12
+b8kv4096     hybrid C2048 cap64           pos  A    24.9 C  1.41 A+C    26.3 S 11
+b8kv4096     hybrid C256 capnone          pos  A    33.0 C  1.50 A+C    34.5 S 32
+b8kv4096     hybrid C512 capnone          pos  A    27.8 C  1.50 A+C    29.2 S 19
+b8kv4096     hybrid C1024 capnone         pos  A    25.2 C  1.52 A+C    26.7 S 12
+b8kv4096     hybrid C2048 capnone         pos  A    24.8 C  1.42 A+C    26.2 S 11
+b8kv16384    hybrid C256 cap32            pos  A    84.4 C  1.44 A+C    85.9 S 50
+b8kv16384    hybrid C512 cap32            pos  A    84.4 C  1.55 A+C    86.0 S 50
+b8kv16384    hybrid C1024 cap32           pos  A    83.2 C  1.36 A+C    84.5 S 34
+b8kv16384    hybrid C2048 cap32           pos  A    82.1 C  1.41 A+C    83.4 S 21
+b8kv16384    hybrid C256 cap64            pos  A    93.5 C  1.41 A+C    94.9 S 82
+b8kv16384    hybrid C512 cap64            pos  A    87.6 C  1.44 A+C    89.1 S 66
+b8kv16384    hybrid C1024 cap64           pos  A    81.2 C  1.36 A+C    82.6 S 36
+b8kv16384    hybrid C2048 cap64           pos  A    80.5 C  1.39 A+C    81.9 S 23
+b8kv16384    hybrid C256 capnone          pos  A   110.1 C  1.52 A+C   111.7 S 119
+b8kv16384    hybrid C512 capnone          pos  A    86.7 C  1.49 A+C    88.2 S 66
+b8kv16384    hybrid C1024 capnone         pos  A    82.3 C  1.38 A+C    83.6 S 38
+b8kv16384    hybrid C2048 capnone         pos  A    81.0 C  1.41 A+C    82.4 S 25
+b8kv32768    hybrid C256 cap32            pos  A   158.7 C  1.26 A+C   160.0 S 59
+b8kv32768    hybrid C512 cap32            pos  A   158.6 C  1.36 A+C   159.9 S 59
+b8kv32768    hybrid C1024 cap32           pos  A   158.7 C  1.38 A+C   160.1 S 59
+b8kv32768    hybrid C2048 cap32           pos  A   157.4 C  1.38 A+C   158.7 S 34
+b8kv32768    hybrid C256 cap64            pos  A   161.5 C  1.38 A+C   162.9 S 98
+b8kv32768    hybrid C512 cap64            pos  A   161.5 C  1.38 A+C   162.8 S 98
+b8kv32768    hybrid C1024 cap64           pos  A   156.5 C  1.49 A+C   158.0 S 66
+b8kv32768    hybrid C2048 cap64           pos  A   155.5 C  1.38 A+C   156.8 S 38
+b8kv32768    hybrid C256 capnone          pos  A   214.0 C  1.50 A+C   215.5 S 238
+b8kv32768    hybrid C512 capnone          pos  A   168.1 C  1.50 A+C   169.6 S 128
+b8kv32768    hybrid C1024 capnone         pos  A   156.8 C  1.42 A+C   158.2 S 74
+b8kv32768    hybrid C2048 capnone         pos  A   155.7 C  1.39 A+C   157.1 S 46
+b8kv30720    hybrid C256 cap32            pos  A   149.0 C  1.31 A+C   150.3 S 59
+b8kv30720    hybrid C512 cap32            pos  A   149.1 C  1.36 A+C   150.4 S 59
+b8kv30720    hybrid C1024 cap32           pos  A   149.0 C  1.39 A+C   150.4 S 59
+b8kv30720    hybrid C2048 cap32           pos  A   147.9 C  1.47 A+C   149.4 S 32
+b8kv30720    hybrid C256 cap64            pos  A   157.2 C  1.54 A+C   158.8 S 115
+b8kv30720    hybrid C512 cap64            pos  A   157.5 C  1.50 A+C   158.9 S 115
+b8kv30720    hybrid C1024 cap64           pos  A   146.9 C  1.42 A+C   148.3 S 62
+b8kv30720    hybrid C2048 cap64           pos  A   145.6 C  1.41 A+C   146.9 S 36
+b8kv30720    hybrid C256 capnone          pos  A   201.9 C  1.34 A+C   203.2 S 223
+b8kv30720    hybrid C512 capnone          pos  A   157.6 C  1.38 A+C   159.0 S 121
+b8kv30720    hybrid C1024 capnone         pos  A   147.0 C  1.47 A+C   148.4 S 68
+b8kv30720    hybrid C2048 capnone         pos  A   145.9 C  1.54 A+C   147.3 S 44
+b1kv245760   hybrid C256 cap32            pos  A   186.3 C  1.12 A+C   187.5 S 70
+b1kv245760   hybrid C512 cap32            pos  A   186.5 C  1.12 A+C   187.8 S 70
+b1kv245760   hybrid C1024 cap32           pos  A   186.5 C  1.12 A+C   187.7 S 70
+b1kv245760   hybrid C2048 cap32           pos  A   186.6 C  1.12 A+C   187.8 S 70
+b1kv245760   hybrid C256 cap64            pos  A   158.7 C  1.12 A+C   159.9 S 137
+b1kv245760   hybrid C512 cap64            pos  A   158.8 C  1.12 A+C   160.0 S 137
+b1kv245760   hybrid C1024 cap64           pos  A   158.9 C  1.12 A+C   160.0 S 137
+b1kv245760   hybrid C2048 cap64           pos  A   158.8 C  1.12 A+C   160.0 S 137
+b1kv245760   hybrid C256 capnone          pos  A   201.7 C  1.14 A+C   202.9 S 1776
+b1kv245760   hybrid C512 capnone          pos  A   156.9 C  1.28 A+C   158.3 S 960
+b1kv245760   hybrid C1024 capnone         pos  A   147.0 C  1.28 A+C   148.3 S 528
+b1kv245760   hybrid C2048 capnone         pos  A   144.3 C  1.12 A+C   145.5 S 312
+b1kv32768    hybrid C256 cap32            pos  A    30.0 C  1.26 A+C    31.3 S 67
+b1kv32768    hybrid C512 cap32            pos  A    29.9 C  1.25 A+C    31.2 S 67
+b1kv32768    hybrid C1024 cap32           pos  A    30.0 C  1.28 A+C    31.4 S 67
+b1kv32768    hybrid C2048 cap32           pos  A    29.4 C  1.09 A+C    30.6 S 37
+b1kv32768    hybrid C256 cap64            pos  A    27.3 C  1.15 A+C    28.5 S 107
+b1kv32768    hybrid C512 cap64            pos  A    27.2 C  1.15 A+C    28.4 S 107
+b1kv32768    hybrid C1024 cap64           pos  A    26.8 C  1.31 A+C    28.1 S 72
+b1kv32768    hybrid C2048 cap64           pos  A    26.8 C  1.12 A+C    28.0 S 40
+b1kv32768    hybrid C256 capnone          pos  A    33.0 C  1.28 A+C    34.3 S 252
+b1kv32768    hybrid C512 capnone          pos  A    27.1 C  1.25 A+C    28.3 S 144
+b1kv32768    hybrid C1024 capnone         pos  A    24.7 C  1.28 A+C    26.1 S 78
+b1kv32768    hybrid C2048 capnone         pos  A    24.8 C  1.15 A+C    25.9 S 48
+b64kv1024    hybrid C256 cap32            pos  A    60.5 C  3.06 A+C    63.6 S 9
+b64kv1024    hybrid C512 cap32            pos  A    48.7 C  3.15 A+C    51.9 S 5
+b64kv1024    hybrid C1024 cap32           pos  A    44.6 C  3.22 A+C    47.9 S 4
+b64kv1024    hybrid C2048 cap32           pos  A    44.1 C  3.12 A+C    47.1 S 4
+b64kv1024    hybrid C256 cap64            pos  A    60.5 C  3.10 A+C    63.7 S 9
+b64kv1024    hybrid C512 cap64            pos  A    48.6 C  3.12 A+C    51.7 S 5
+b64kv1024    hybrid C1024 cap64           pos  A    44.7 C  3.26 A+C    48.0 S 4
+b64kv1024    hybrid C2048 cap64           pos  A    43.9 C  3.17 A+C    46.9 S 4
+b64kv1024    hybrid C256 capnone          pos  A    60.5 C  3.14 A+C    63.7 S 9
+b64kv1024    hybrid C512 capnone          pos  A    48.7 C  3.20 A+C    51.9 S 5
+b64kv1024    hybrid C1024 capnone         pos  A    44.7 C  3.15 A+C    48.0 S 4
+b64kv1024    hybrid C2048 capnone         pos  A    44.0 C  3.12 A+C    47.1 S 4
+b128kv512    hybrid C256 cap32            pos  A    61.9 C  5.49 A+C    67.4 S 5
+b128kv512    hybrid C512 cap32            pos  A    49.7 C  5.44 A+C    55.2 S 3
+b128kv512    hybrid C1024 cap32           pos  A    47.6 C  5.22 A+C    52.9 S 2
+b128kv512    hybrid C2048 cap32           pos  A    46.8 C  4.70 A+C    51.5 S 2
+b128kv512    hybrid C256 cap64            pos  A    61.9 C  5.47 A+C    67.4 S 5
+b128kv512    hybrid C512 cap64            pos  A    50.0 C  5.41 A+C    55.4 S 3
+b128kv512    hybrid C1024 cap64           pos  A    47.7 C  5.25 A+C    53.0 S 2
+b128kv512    hybrid C2048 cap64           pos  A    46.7 C  4.70 A+C    51.4 S 2
+b128kv512    hybrid C256 capnone          pos  A    62.0 C  5.47 A+C    67.5 S 5
+b128kv512    hybrid C512 capnone          pos  A    49.8 C  5.44 A+C    55.2 S 3
+b128kv512    hybrid C1024 capnone         pos  A    47.6 C  5.25 A+C    52.8 S 2
+b128kv512    hybrid C2048 capnone         pos  A    46.8 C  4.70 A+C    51.4 S 2
+ragged8      hybrid C256 cap32            pos  A   102.9 C  1.38 A+C   104.4 S 62
+ragged8      hybrid C512 cap32            pos  A   102.0 C  1.52 A+C   103.7 S 62
+ragged8      hybrid C1024 cap32           pos  A   102.2 C  1.50 A+C   103.6 S 62
+ragged8      hybrid C2048 cap32           pos  A   101.7 C  1.34 A+C   103.2 S 63
+ragged8      hybrid C256 cap64            pos  A   101.7 C  1.50 A+C   103.2 S 107
+ragged8      hybrid C512 cap64            pos  A   101.9 C  1.38 A+C   103.2 S 109
+ragged8      hybrid C1024 cap64           pos  A    97.6 C  1.41 A+C    99.0 S 107
+ragged8      hybrid C2048 cap64           pos  A    95.8 C  1.47 A+C    97.2 S 67
+ragged8      hybrid C256 capnone          pos  A   133.5 C  1.44 A+C   134.9 S 462
+ragged8      hybrid C512 capnone          pos  A   102.7 C  1.55 A+C   104.1 S 260
+ragged8      hybrid C1024 capnone         pos  A    95.6 C  1.50 A+C    97.1 S 164
+ragged8      hybrid C2048 capnone         pos  A    94.5 C  1.55 A+C    96.0 S 115
+ragged64     hybrid C256 cap32            pos  A   218.8 C  3.25 A+C   222.1 S 55
+ragged64     hybrid C512 cap32            pos  A   218.3 C  3.23 A+C   221.4 S 54
+ragged64     hybrid C1024 cap32           pos  A   215.5 C  3.22 A+C   218.7 S 53
+ragged64     hybrid C2048 cap32           pos  A   212.8 C  3.14 A+C   215.8 S 33
+ragged64     hybrid C256 cap64            pos  A   238.7 C  3.33 A+C   242.0 S 107
+ragged64     hybrid C512 cap64            pos  A   228.4 C  3.20 A+C   231.6 S 98
+ragged64     hybrid C1024 cap64           pos  A   211.9 C  3.26 A+C   215.2 S 60
+ragged64     hybrid C2048 cap64           pos  A   209.8 C  3.23 A+C   213.0 S 43
+ragged64     hybrid C256 capnone          pos  A   297.2 C  3.36 A+C   300.5 S 195
+ragged64     hybrid C512 capnone          pos  A   229.1 C  3.33 A+C   232.4 S 119
+ragged64     hybrid C1024 capnone         pos  A   212.7 C  3.14 A+C   215.8 S 82
+ragged64     hybrid C2048 capnone         pos  A   210.3 C  3.09 A+C   213.4 S 67
+
+## all configs acc4
+b8kv4096     static                       -    A    23.5 C  1.38 A+C    24.8 S 4
+b8kv4096     queue_pf C256 cap32          pos  A    25.2 C  1.47 A+C    26.6 S 16
+b8kv4096     queue_pf C512 cap32          pos  A    24.8 C  1.52 A+C    26.3 S 8
+b8kv4096     queue_pf C1024 cap32         pos  A    24.2 C  1.39 A+C    25.5 S 4
+b8kv4096     queue_pf C256 cap64          pos  A    25.2 C  1.50 A+C    26.6 S 16
+b8kv4096     queue_pf C512 cap64          pos  A    24.8 C  1.50 A+C    26.4 S 8
+b8kv4096     queue_pf C1024 cap64         pos  A    24.3 C  1.38 A+C    25.6 S 4
+b8kv4096     queue_pf C256 capnone        pos  A    25.1 C  1.50 A+C    26.6 S 16
+b8kv4096     queue_pf C512 capnone        pos  A    24.8 C  1.49 A+C    26.3 S 8
+b8kv4096     queue_pf C1024 capnone       pos  A    24.3 C  1.38 A+C    25.6 S 4
+b8kv4096     queue C256 cap32             pos  A    25.4 C  1.50 A+C    26.9 S 16
+b8kv4096     queue C512 cap32             pos  A    24.7 C  1.50 A+C    26.1 S 8
+b8kv4096     queue C1024 cap32            pos  A    24.2 C  1.36 A+C    25.5 S 4
+b8kv4096     queue C256 cap64             pos  A    25.4 C  1.55 A+C    26.8 S 16
+b8kv4096     queue C512 cap64             pos  A    24.6 C  1.57 A+C    26.2 S 8
+b8kv4096     queue C1024 cap64            pos  A    24.1 C  1.38 A+C    25.5 S 4
+b8kv4096     queue C256 capnone           pos  A    25.4 C  1.50 A+C    26.9 S 16
+b8kv4096     queue C512 capnone           pos  A    24.6 C  1.55 A+C    26.2 S 8
+b8kv4096     queue C1024 capnone          pos  A    24.1 C  1.38 A+C    25.5 S 4
+b8kv16384    static                       -    A    82.5 C  1.44 A+C    84.1 S 4
+b8kv16384    queue_pf C256 cap32          pos  A    79.2 C  1.54 A+C    80.6 S 26
+b8kv16384    queue_pf C512 cap32          pos  A    79.2 C  1.50 A+C    80.7 S 26
+b8kv16384    queue_pf C1024 cap32         pos  A    79.5 C  1.41 A+C    80.9 S 16
+b8kv16384    queue_pf C256 cap64          pos  A    81.6 C  1.54 A+C    83.1 S 43
+b8kv16384    queue_pf C512 cap64          pos  A    79.7 C  1.39 A+C    81.0 S 32
+b8kv16384    queue_pf C1024 cap64         pos  A    79.5 C  1.42 A+C    80.8 S 16
+b8kv16384    queue_pf C256 capnone        pos  A    84.8 C  1.57 A+C    86.3 S 64
+b8kv16384    queue_pf C512 capnone        pos  A    79.9 C  1.38 A+C    81.2 S 32
+b8kv16384    queue_pf C1024 capnone       pos  A    79.6 C  1.41 A+C    81.0 S 16
+b8kv16384    queue C256 cap32             pos  A    78.5 C  1.54 A+C    80.0 S 26
+b8kv16384    queue C512 cap32             pos  A    78.6 C  1.47 A+C    80.0 S 26
+b8kv16384    queue C1024 cap32            pos  A    79.4 C  1.42 A+C    80.8 S 16
+b8kv16384    queue C256 cap64             pos  A    79.9 C  1.60 A+C    81.5 S 43
+b8kv16384    queue C512 cap64             pos  A    80.1 C  1.38 A+C    81.4 S 32
+b8kv16384    queue C1024 cap64            pos  A    79.5 C  1.39 A+C    80.8 S 16
+b8kv16384    queue C256 capnone           pos  A    85.4 C  1.60 A+C    87.0 S 64
+b8kv16384    queue C512 capnone           pos  A    80.0 C  1.42 A+C    81.3 S 32
+b8kv16384    queue C1024 capnone          pos  A    79.5 C  1.33 A+C    80.8 S 16
+b8kv32768    static                       -    A   155.0 C  1.41 A+C   156.4 S 4
+b8kv32768    queue_pf C256 cap32          pos  A   152.5 C  1.54 A+C   153.9 S 29
+b8kv32768    queue_pf C512 cap32          pos  A   152.3 C  1.46 A+C   153.8 S 29
+b8kv32768    queue_pf C1024 cap32         pos  A   152.5 C  1.54 A+C   153.9 S 29
+b8kv32768    queue_pf C256 cap64          pos  A   151.0 C  1.54 A+C   152.4 S 52
+b8kv32768    queue_pf C512 cap64          pos  A   151.0 C  1.49 A+C   152.5 S 52
+b8kv32768    queue_pf C1024 cap64         pos  A   151.4 C  1.38 A+C   152.7 S 32
+b8kv32768    queue_pf C256 capnone        pos  A   162.2 C  1.36 A+C   163.5 S 128
+b8kv32768    queue_pf C512 capnone        pos  A   154.4 C  1.57 A+C   155.8 S 64
+b8kv32768    queue_pf C1024 capnone       pos  A   151.6 C  1.41 A+C   152.9 S 32
+b8kv32768    queue C256 cap32             pos  A   151.5 C  1.47 A+C   153.1 S 29
+b8kv32768    queue C512 cap32             pos  A   151.3 C  1.50 A+C   152.9 S 29
+b8kv32768    queue C1024 cap32            pos  A   151.7 C  1.47 A+C   153.2 S 29
+b8kv32768    queue C256 cap64             pos  A   149.9 C  1.47 A+C   151.6 S 52
+b8kv32768    queue C512 cap64             pos  A   149.9 C  1.58 A+C   151.4 S 52
+b8kv32768    queue C1024 cap64            pos  A   151.6 C  1.36 A+C   152.9 S 32
+b8kv32768    queue C256 capnone           pos  A   163.9 C  1.42 A+C   165.2 S 128
+b8kv32768    queue C512 capnone           pos  A   153.6 C  1.57 A+C   155.2 S 64
+b8kv32768    queue C1024 capnone          pos  A   151.6 C  1.41 A+C   152.9 S 32
+b8kv30720    static                       -    A   146.3 C  1.47 A+C   147.6 S 4
+b8kv30720    queue_pf C256 cap32          pos  A   144.2 C  1.52 A+C   145.6 S 30
+b8kv30720    queue_pf C512 cap32          pos  A   144.2 C  1.54 A+C   145.7 S 30
+b8kv30720    queue_pf C1024 cap32         pos  A   144.1 C  1.54 A+C   145.6 S 30
+b8kv30720    queue_pf C256 cap64          pos  A   144.5 C  1.34 A+C   145.9 S 60
+b8kv30720    queue_pf C512 cap64          pos  A   144.3 C  1.38 A+C   145.7 S 60
+b8kv30720    queue_pf C1024 cap64         pos  A   144.2 C  1.50 A+C   145.7 S 30
+b8kv30720    queue_pf C256 capnone        pos  A   152.7 C  1.38 A+C   154.1 S 120
+b8kv30720    queue_pf C512 capnone        pos  A   144.4 C  1.38 A+C   145.8 S 60
+b8kv30720    queue_pf C1024 capnone       pos  A   144.2 C  1.52 A+C   145.7 S 30
+b8kv30720    queue C256 cap32             pos  A   143.8 C  1.50 A+C   145.3 S 30
+b8kv30720    queue C512 cap32             pos  A   143.8 C  1.49 A+C   145.2 S 30
+b8kv30720    queue C1024 cap32            pos  A   143.6 C  1.50 A+C   145.2 S 30
+b8kv30720    queue C256 cap64             pos  A   144.1 C  1.38 A+C   145.4 S 60
+b8kv30720    queue C512 cap64             pos  A   144.1 C  1.41 A+C   145.5 S 60
+b8kv30720    queue C1024 cap64            pos  A   143.8 C  1.49 A+C   145.2 S 30
+b8kv30720    queue C256 capnone           pos  A   154.9 C  1.39 A+C   156.2 S 120
+b8kv30720    queue C512 capnone           pos  A   144.1 C  1.33 A+C   145.4 S 60
+b8kv30720    queue C1024 capnone          pos  A   143.7 C  1.55 A+C   145.3 S 30
+b1kv245760   static                       -    A   148.0 C  1.25 A+C   149.3 S 19
+b1kv245760   queue_pf C256 cap32          pos  A   146.4 C  1.31 A+C   147.7 S 32
+b1kv245760   queue_pf C512 cap32          pos  A   146.6 C  1.30 A+C   147.9 S 32
+b1kv245760   queue_pf C1024 cap32         pos  A   146.6 C  1.28 A+C   147.8 S 32
+b1kv245760   queue_pf C256 cap64          pos  A   153.6 C  1.12 A+C   154.8 S 62
+b1kv245760   queue_pf C512 cap64          pos  A   153.7 C  1.12 A+C   154.9 S 62
+b1kv245760   queue_pf C1024 cap64         pos  A   153.4 C  1.12 A+C   154.4 S 62
+b1kv245760   queue_pf C256 capnone        pos  A   152.8 C  1.12 A+C   154.0 S 960
+b1kv245760   queue_pf C512 capnone        pos  A   144.4 C  1.12 A+C   145.5 S 480
+b1kv245760   queue_pf C1024 capnone       pos  A   142.2 C  1.34 A+C   143.6 S 240
+b1kv245760   queue C256 cap32             pos  A   144.8 C  1.28 A+C   146.0 S 32
+b1kv245760   queue C512 cap32             pos  A   144.8 C  1.31 A+C   146.2 S 32
+b1kv245760   queue C1024 cap32            pos  A   144.7 C  1.28 A+C   146.1 S 32
+b1kv245760   queue C256 cap64             pos  A   152.3 C  1.15 A+C   153.6 S 62
+b1kv245760   queue C512 cap64             pos  A   152.3 C  1.10 A+C   153.4 S 62
+b1kv245760   queue C1024 cap64            pos  A   152.3 C  1.09 A+C   153.4 S 62
+b1kv245760   queue C256 capnone           pos  A   154.4 C  1.20 A+C   155.6 S 960
+b1kv245760   queue C512 capnone           pos  A   144.3 C  1.10 A+C   145.5 S 480
+b1kv245760   queue C1024 capnone          pos  A   143.0 C  1.28 A+C   144.2 S 240
+b1kv32768    static                       -    A    23.7 C  1.12 A+C    24.9 S 19
+b1kv32768    queue_pf C256 cap32          pos  A    24.6 C  1.12 A+C    25.9 S 29
+b1kv32768    queue_pf C512 cap32          pos  A    24.6 C  1.12 A+C    25.8 S 29
+b1kv32768    queue_pf C1024 cap32         pos  A    24.6 C  1.12 A+C    25.8 S 29
+b1kv32768    queue_pf C256 cap64          pos  A    22.9 C  1.12 A+C    24.1 S 52
+b1kv32768    queue_pf C512 cap64          pos  A    22.8 C  1.09 A+C    24.0 S 52
+b1kv32768    queue_pf C1024 cap64         pos  A    24.1 C  1.15 A+C    25.3 S 32
+b1kv32768    queue_pf C256 capnone        pos  A    25.1 C  1.34 A+C    26.4 S 128
+b1kv32768    queue_pf C512 capnone        pos  A    24.6 C  1.33 A+C    26.0 S 64
+b1kv32768    queue_pf C1024 capnone       pos  A    24.1 C  1.15 A+C    25.3 S 32
+b1kv32768    queue C256 cap32             pos  A    24.6 C  1.12 A+C    25.7 S 29
+b1kv32768    queue C512 cap32             pos  A    24.6 C  1.15 A+C    25.9 S 29
+b1kv32768    queue C1024 cap32            pos  A    24.6 C  1.15 A+C    25.8 S 29
+b1kv32768    queue C256 cap64             pos  A    22.8 C  1.14 A+C    23.9 S 52
+b1kv32768    queue C512 cap64             pos  A    22.8 C  1.12 A+C    23.9 S 52
+b1kv32768    queue C1024 cap64            pos  A    24.1 C  1.22 A+C    25.3 S 32
+b1kv32768    queue C256 capnone           pos  A    25.3 C  1.38 A+C    26.6 S 128
+b1kv32768    queue C512 capnone           pos  A    24.9 C  1.33 A+C    26.1 S 64
+b1kv32768    queue C1024 capnone          pos  A    24.1 C  1.15 A+C    25.3 S 32
+b64kv1024    static                       -    A    47.6 C  0.13 A+C    47.7 S 1
+b64kv1024    queue_pf C256 cap32          pos  A    47.7 C  3.09 A+C    50.9 S 4
+b64kv1024    queue_pf C512 cap32          pos  A    45.0 C  3.12 A+C    48.2 S 2
+b64kv1024    queue_pf C1024 cap32         pos  A    47.2 C  0.11 A+C    47.4 S 1
+b64kv1024    queue_pf C256 cap64          pos  A    47.7 C  3.15 A+C    50.8 S 4
+b64kv1024    queue_pf C512 cap64          pos  A    44.9 C  3.10 A+C    48.1 S 2
+b64kv1024    queue_pf C1024 cap64         pos  A    47.2 C  0.13 A+C    47.2 S 1
+b64kv1024    queue_pf C256 capnone        pos  A    47.6 C  3.18 A+C    50.8 S 4
+b64kv1024    queue_pf C512 capnone        pos  A    45.0 C  3.15 A+C    48.2 S 2
+b64kv1024    queue_pf C1024 capnone       pos  A    47.1 C  0.13 A+C    47.3 S 1
+b64kv1024    queue C256 cap32             pos  A    47.8 C  3.18 A+C    51.1 S 4
+b64kv1024    queue C512 cap32             pos  A    45.6 C  3.14 A+C    48.7 S 2
+b64kv1024    queue C1024 cap32            pos  A    47.1 C  0.10 A+C    47.3 S 1
+b64kv1024    queue C256 cap64             pos  A    47.8 C  3.22 A+C    51.0 S 4
+b64kv1024    queue C512 cap64             pos  A    45.6 C  3.09 A+C    48.7 S 2
+b64kv1024    queue C1024 cap64            pos  A    47.1 C  0.10 A+C    47.2 S 1
+b64kv1024    queue C256 capnone           pos  A    47.8 C  3.14 A+C    50.9 S 4
+b64kv1024    queue C512 capnone           pos  A    45.4 C  3.14 A+C    48.6 S 2
+b64kv1024    queue C1024 capnone          pos  A    47.1 C  0.10 A+C    47.2 S 1
+b128kv512    static                       -    A    46.8 C  0.13 A+C    46.9 S 1
+b128kv512    queue_pf C256 cap32          pos  A    50.4 C  5.44 A+C    55.8 S 2
+b128kv512    queue_pf C512 cap32          pos  A    48.4 C  0.13 A+C    48.5 S 1
+b128kv512    queue_pf C1024 cap32         pos  A    48.4 C  0.13 A+C    48.5 S 1
+b128kv512    queue_pf C256 cap64          pos  A    50.2 C  5.47 A+C    55.6 S 2
+b128kv512    queue_pf C512 cap64          pos  A    48.4 C  0.13 A+C    48.5 S 1
+b128kv512    queue_pf C1024 cap64         pos  A    48.4 C  0.13 A+C    48.5 S 1
+b128kv512    queue_pf C256 capnone        pos  A    50.2 C  5.44 A+C    55.6 S 2
+b128kv512    queue_pf C512 capnone        pos  A    48.3 C  0.16 A+C    48.5 S 1
+b128kv512    queue_pf C1024 capnone       pos  A    48.4 C  0.13 A+C    48.6 S 1
+b128kv512    queue C256 cap32             pos  A    50.4 C  5.44 A+C    55.9 S 2
+b128kv512    queue C512 cap32             pos  A    48.7 C  0.16 A+C    48.8 S 1
+b128kv512    queue C1024 cap32            pos  A    48.6 C  0.13 A+C    48.8 S 1
+b128kv512    queue C256 cap64             pos  A    50.4 C  5.47 A+C    55.8 S 2
+b128kv512    queue C512 cap64             pos  A    48.7 C  0.13 A+C    48.8 S 1
+b128kv512    queue C1024 cap64            pos  A    48.8 C  0.16 A+C    48.9 S 1
+b128kv512    queue C256 capnone           pos  A    50.4 C  5.47 A+C    55.8 S 2
+b128kv512    queue C512 capnone           pos  A    48.7 C  0.13 A+C    48.8 S 1
+b128kv512    queue C1024 capnone          pos  A    48.7 C  0.13 A+C    48.8 S 1
+ragged8      static                       -    A   101.1 C  1.47 A+C   102.4 S 9
+ragged8      queue_pf C256 cap32          pos  A   104.8 C  1.39 A+C   106.1 S 31
+ragged8      queue_pf C512 cap32          pos  A   104.3 C  1.44 A+C   105.7 S 31
+ragged8      queue_pf C1024 cap32         pos  A   103.1 C  1.50 A+C   104.6 S 31
+ragged8      queue_pf C256 cap64          pos  A    96.6 C  1.41 A+C    98.0 S 57
+ragged8      queue_pf C512 cap64          pos  A    96.6 C  1.54 A+C    98.1 S 57
+ragged8      queue_pf C1024 cap64         pos  A    91.9 C  1.47 A+C    93.3 S 57
+ragged8      queue_pf C256 capnone        pos  A    98.1 C  1.55 A+C    99.7 S 256
+ragged8      queue_pf C512 capnone        pos  A    93.5 C  1.41 A+C    94.8 S 128
+ragged8      queue_pf C1024 capnone       pos  A    96.4 C  1.38 A+C    97.8 S 64
+ragged8      queue C256 cap32             pos  A    96.4 C  1.38 A+C    97.8 S 31
+ragged8      queue C512 cap32             pos  A    96.2 C  1.38 A+C    97.5 S 31
+ragged8      queue C1024 cap32            pos  A    97.0 C  1.54 A+C    98.5 S 31
+ragged8      queue C256 cap64             pos  A    92.6 C  1.44 A+C    94.0 S 57
+ragged8      queue C512 cap64             pos  A    92.9 C  1.52 A+C    94.3 S 57
+ragged8      queue C1024 cap64            pos  A    91.4 C  1.41 A+C    92.8 S 57
+ragged8      queue C256 capnone           pos  A    99.6 C  1.58 A+C   101.2 S 256
+ragged8      queue C512 capnone           pos  A    93.2 C  1.36 A+C    94.5 S 128
+ragged8      queue C1024 capnone          pos  A    96.1 C  1.41 A+C    97.5 S 64
+ragged64     static                       -    A   224.3 C  2.78 A+C   227.1 S 3
+ragged64     queue_pf C256 cap32          pos  A   212.0 C  3.14 A+C   215.1 S 32
+ragged64     queue_pf C512 cap32          pos  A   208.4 C  3.09 A+C   211.5 S 32
+ragged64     queue_pf C1024 cap32         pos  A   206.8 C  3.17 A+C   210.0 S 30
+ragged64     queue_pf C256 cap64          pos  A   211.6 C  3.38 A+C   214.9 S 63
+ragged64     queue_pf C512 cap64          pos  A   205.3 C  3.20 A+C   208.5 S 60
+ragged64     queue_pf C1024 cap64         pos  A   206.8 C  3.17 A+C   210.0 S 30
+ragged64     queue_pf C256 capnone        pos  A   219.9 C  3.26 A+C   223.2 S 120
+ragged64     queue_pf C512 capnone        pos  A   205.4 C  3.23 A+C   208.7 S 60
+ragged64     queue_pf C1024 capnone       pos  A   206.7 C  3.22 A+C   209.9 S 30
+ragged64     queue C256 cap32             pos  A   209.4 C  3.10 A+C   212.5 S 32
+ragged64     queue C512 cap32             pos  A   205.1 C  2.99 A+C   208.2 S 32
+ragged64     queue C1024 cap32            pos  A   204.2 C  3.17 A+C   207.4 S 30
+ragged64     queue C256 cap64             pos  A   211.8 C  3.30 A+C   215.1 S 63
+ragged64     queue C512 cap64             pos  A   205.4 C  3.31 A+C   208.7 S 60
+ragged64     queue C1024 cap64            pos  A   204.2 C  3.17 A+C   207.4 S 30
+ragged64     queue C256 capnone           pos  A   223.2 C  3.26 A+C   226.4 S 120
+ragged64     queue C512 capnone           pos  A   205.2 C  3.23 A+C   208.5 S 60
+ragged64     queue C1024 capnone          pos  A   204.2 C  3.18 A+C   207.4 S 30
+b8kv4096     hybrid C256 cap32            pos  A    33.0 C  1.44 A+C    34.4 S 32
+b8kv4096     hybrid C512 cap32            pos  A    27.8 C  1.57 A+C    29.2 S 19
+b8kv4096     hybrid C1024 cap32           pos  A    25.1 C  1.54 A+C    26.5 S 12
+b8kv4096     hybrid C2048 cap32           pos  A    24.9 C  1.38 A+C    26.3 S 11
+b8kv4096     hybrid C256 cap64            pos  A    33.0 C  1.55 A+C    34.6 S 32
+b8kv4096     hybrid C512 cap64            pos  A    27.7 C  1.57 A+C    29.3 S 19
+b8kv4096     hybrid C1024 cap64           pos  A    25.2 C  1.55 A+C    26.7 S 12
+b8kv4096     hybrid C2048 cap64           pos  A    24.9 C  1.38 A+C    26.2 S 11
+b8kv4096     hybrid C256 capnone          pos  A    33.0 C  1.62 A+C    34.5 S 32
+b8kv4096     hybrid C512 capnone          pos  A    27.9 C  1.49 A+C    29.3 S 19
+b8kv4096     hybrid C1024 capnone         pos  A    25.0 C  1.54 A+C    26.6 S 12
+b8kv4096     hybrid C2048 capnone         pos  A    24.7 C  1.38 A+C    26.1 S 11
+b8kv16384    hybrid C256 cap32            pos  A    84.3 C  1.38 A+C    85.7 S 50
+b8kv16384    hybrid C512 cap32            pos  A    84.3 C  1.49 A+C    85.9 S 50
+b8kv16384    hybrid C1024 cap32           pos  A    83.3 C  1.41 A+C    84.5 S 34
+b8kv16384    hybrid C2048 cap32           pos  A    82.2 C  1.34 A+C    83.5 S 21
+b8kv16384    hybrid C256 cap64            pos  A    93.3 C  1.42 A+C    94.7 S 82
+b8kv16384    hybrid C512 cap64            pos  A    87.6 C  1.55 A+C    89.1 S 66
+b8kv16384    hybrid C1024 cap64           pos  A    81.3 C  1.42 A+C    82.7 S 36
+b8kv16384    hybrid C2048 cap64           pos  A    80.5 C  1.41 A+C    81.9 S 23
+b8kv16384    hybrid C256 capnone          pos  A   110.0 C  1.55 A+C   111.5 S 119
+b8kv16384    hybrid C512 capnone          pos  A    86.5 C  1.50 A+C    88.1 S 66
+b8kv16384    hybrid C1024 capnone         pos  A    82.1 C  1.47 A+C    83.4 S 38
+b8kv16384    hybrid C2048 capnone         pos  A    80.9 C  1.39 A+C    82.3 S 25
+b8kv32768    hybrid C256 cap32            pos  A   158.9 C  1.38 A+C   160.1 S 59
+b8kv32768    hybrid C512 cap32            pos  A   159.0 C  1.44 A+C   160.3 S 59
+b8kv32768    hybrid C1024 cap32           pos  A   158.9 C  1.44 A+C   160.3 S 59
+b8kv32768    hybrid C2048 cap32           pos  A   157.8 C  1.39 A+C   159.1 S 34
+b8kv32768    hybrid C256 cap64            pos  A   161.5 C  1.38 A+C   162.8 S 98
+b8kv32768    hybrid C512 cap64            pos  A   161.5 C  1.41 A+C   162.8 S 98
+b8kv32768    hybrid C1024 cap64           pos  A   156.8 C  1.60 A+C   158.3 S 66
+b8kv32768    hybrid C2048 cap64           pos  A   155.9 C  1.41 A+C   157.1 S 38
+b8kv32768    hybrid C256 capnone          pos  A   213.6 C  1.55 A+C   215.1 S 238
+b8kv32768    hybrid C512 capnone          pos  A   168.1 C  1.55 A+C   169.6 S 128
+b8kv32768    hybrid C1024 capnone         pos  A   156.8 C  1.41 A+C   158.3 S 74
+b8kv32768    hybrid C2048 capnone         pos  A   155.6 C  1.44 A+C   156.9 S 46
+b8kv30720    hybrid C256 cap32            pos  A   149.3 C  1.31 A+C   150.7 S 59
+b8kv30720    hybrid C512 cap32            pos  A   149.2 C  1.41 A+C   150.7 S 59
+b8kv30720    hybrid C1024 cap32           pos  A   149.3 C  1.39 A+C   150.6 S 59
+b8kv30720    hybrid C2048 cap32           pos  A   147.9 C  1.47 A+C   149.4 S 32
+b8kv30720    hybrid C256 cap64            pos  A   157.8 C  1.54 A+C   159.4 S 115
+b8kv30720    hybrid C512 cap64            pos  A   158.0 C  1.54 A+C   159.5 S 115
+b8kv30720    hybrid C1024 cap64           pos  A   147.1 C  1.38 A+C   148.4 S 62
+b8kv30720    hybrid C2048 cap64           pos  A   145.7 C  1.39 A+C   147.0 S 36
+b8kv30720    hybrid C256 capnone          pos  A   201.5 C  1.38 A+C   202.8 S 223
+b8kv30720    hybrid C512 capnone          pos  A   157.6 C  1.39 A+C   159.1 S 121
+b8kv30720    hybrid C1024 capnone         pos  A   147.1 C  1.50 A+C   148.6 S 68
+b8kv30720    hybrid C2048 capnone         pos  A   146.0 C  1.55 A+C   147.6 S 44
+b1kv245760   hybrid C256 cap32            pos  A   187.1 C  1.09 A+C   188.3 S 70
+b1kv245760   hybrid C512 cap32            pos  A   187.0 C  1.09 A+C   188.0 S 70
+b1kv245760   hybrid C1024 cap32           pos  A   186.8 C  1.09 A+C   188.0 S 70
+b1kv245760   hybrid C2048 cap32           pos  A   187.1 C  1.12 A+C   188.2 S 70
+b1kv245760   hybrid C256 cap64            pos  A   159.2 C  1.12 A+C   160.4 S 137
+b1kv245760   hybrid C512 cap64            pos  A   159.1 C  1.14 A+C   160.3 S 137
+b1kv245760   hybrid C1024 cap64           pos  A   159.3 C  1.12 A+C   160.5 S 137
+b1kv245760   hybrid C2048 cap64           pos  A   159.0 C  1.12 A+C   160.2 S 137
+b1kv245760   hybrid C256 capnone          pos  A   201.4 C  1.14 A+C   202.6 S 1776
+b1kv245760   hybrid C512 capnone          pos  A   157.1 C  1.34 A+C   158.4 S 960
+b1kv245760   hybrid C1024 capnone         pos  A   147.0 C  1.31 A+C   148.3 S 528
+b1kv245760   hybrid C2048 capnone         pos  A   144.4 C  1.14 A+C   145.6 S 312
+b1kv32768    hybrid C256 cap32            pos  A    30.1 C  1.28 A+C    31.3 S 67
+b1kv32768    hybrid C512 cap32            pos  A    30.0 C  1.22 A+C    31.3 S 67
+b1kv32768    hybrid C1024 cap32           pos  A    30.1 C  1.30 A+C    31.4 S 67
+b1kv32768    hybrid C2048 cap32           pos  A    29.5 C  1.12 A+C    30.8 S 37
+b1kv32768    hybrid C256 cap64            pos  A    27.3 C  1.12 A+C    28.4 S 107
+b1kv32768    hybrid C512 cap64            pos  A    27.3 C  1.15 A+C    28.5 S 107
+b1kv32768    hybrid C1024 cap64           pos  A    26.7 C  1.28 A+C    27.9 S 72
+b1kv32768    hybrid C2048 cap64           pos  A    26.8 C  1.12 A+C    28.0 S 40
+b1kv32768    hybrid C256 capnone          pos  A    32.8 C  1.30 A+C    34.2 S 252
+b1kv32768    hybrid C512 capnone          pos  A    27.3 C  1.28 A+C    28.6 S 144
+b1kv32768    hybrid C1024 capnone         pos  A    24.8 C  1.31 A+C    26.1 S 78
+b1kv32768    hybrid C2048 capnone         pos  A    25.0 C  1.12 A+C    26.1 S 48
+b64kv1024    hybrid C256 cap32            pos  A    60.3 C  3.09 A+C    63.4 S 9
+b64kv1024    hybrid C512 cap32            pos  A    48.4 C  3.15 A+C    51.6 S 5
+b64kv1024    hybrid C1024 cap32           pos  A    44.9 C  3.14 A+C    48.0 S 4
+b64kv1024    hybrid C2048 cap32           pos  A    44.2 C  3.12 A+C    47.3 S 4
+b64kv1024    hybrid C256 cap64            pos  A    60.4 C  3.15 A+C    63.6 S 9
+b64kv1024    hybrid C512 cap64            pos  A    48.5 C  3.17 A+C    51.7 S 5
+b64kv1024    hybrid C1024 cap64           pos  A    44.8 C  3.15 A+C    47.9 S 4
+b64kv1024    hybrid C2048 cap64           pos  A    44.0 C  3.18 A+C    47.2 S 4
+b64kv1024    hybrid C256 capnone          pos  A    60.4 C  3.10 A+C    63.6 S 9
+b64kv1024    hybrid C512 capnone          pos  A    48.6 C  3.20 A+C    51.7 S 5
+b64kv1024    hybrid C1024 capnone         pos  A    44.7 C  3.18 A+C    47.9 S 4
+b64kv1024    hybrid C2048 capnone         pos  A    44.2 C  3.17 A+C    47.3 S 4
+b128kv512    hybrid C256 cap32            pos  A    61.7 C  5.47 A+C    67.1 S 5
+b128kv512    hybrid C512 cap32            pos  A    49.8 C  5.41 A+C    55.2 S 3
+b128kv512    hybrid C1024 cap32           pos  A    47.8 C  5.22 A+C    53.0 S 2
+b128kv512    hybrid C2048 cap32           pos  A    47.0 C  4.74 A+C    51.7 S 2
+b128kv512    hybrid C256 cap64            pos  A    61.8 C  5.44 A+C    67.2 S 5
+b128kv512    hybrid C512 cap64            pos  A    49.6 C  5.42 A+C    55.0 S 3
+b128kv512    hybrid C1024 cap64           pos  A    47.8 C  5.22 A+C    52.9 S 2
+b128kv512    hybrid C2048 cap64           pos  A    46.9 C  4.77 A+C    51.7 S 2
+b128kv512    hybrid C256 capnone          pos  A    61.7 C  5.44 A+C    67.2 S 5
+b128kv512    hybrid C512 capnone          pos  A    49.7 C  5.44 A+C    55.1 S 3
+b128kv512    hybrid C1024 capnone         pos  A    47.8 C  5.25 A+C    53.0 S 2
+b128kv512    hybrid C2048 capnone         pos  A    46.8 C  4.74 A+C    51.6 S 2
+ragged8      hybrid C256 cap32            pos  A   102.5 C  1.41 A+C   103.9 S 62
+ragged8      hybrid C512 cap32            pos  A   102.2 C  1.54 A+C   103.6 S 62
+ragged8      hybrid C1024 cap32           pos  A   102.0 C  1.55 A+C   103.6 S 62
+ragged8      hybrid C2048 cap32           pos  A   102.0 C  1.41 A+C   103.4 S 63
+ragged8      hybrid C256 cap64            pos  A   102.0 C  1.57 A+C   103.5 S 107
+ragged8      hybrid C512 cap64            pos  A   102.2 C  1.46 A+C   103.6 S 109
+ragged8      hybrid C1024 cap64           pos  A    98.0 C  1.41 A+C    99.4 S 107
+ragged8      hybrid C2048 cap64           pos  A    95.7 C  1.41 A+C    97.2 S 67
+ragged8      hybrid C256 capnone          pos  A   133.2 C  1.41 A+C   134.6 S 462
+ragged8      hybrid C512 capnone          pos  A   102.6 C  1.57 A+C   104.3 S 260
+ragged8      hybrid C1024 capnone         pos  A    95.5 C  1.50 A+C    97.1 S 164
+ragged8      hybrid C2048 capnone         pos  A    94.2 C  1.54 A+C    95.8 S 115
+ragged64     hybrid C256 cap32            pos  A   219.1 C  3.26 A+C   222.4 S 55
+ragged64     hybrid C512 cap32            pos  A   218.3 C  3.20 A+C   221.5 S 54
+ragged64     hybrid C1024 cap32           pos  A   215.4 C  3.20 A+C   218.6 S 53
+ragged64     hybrid C2048 cap32           pos  A   212.9 C  3.12 A+C   215.9 S 33
+ragged64     hybrid C256 cap64            pos  A   238.7 C  3.33 A+C   242.0 S 107
+ragged64     hybrid C512 cap64            pos  A   228.7 C  3.18 A+C   231.9 S 98
+ragged64     hybrid C1024 cap64           pos  A   212.1 C  3.26 A+C   215.4 S 60
+ragged64     hybrid C2048 cap64           pos  A   210.0 C  3.22 A+C   213.2 S 43
+ragged64     hybrid C256 capnone          pos  A   296.8 C  3.26 A+C   300.0 S 195
+ragged64     hybrid C512 capnone          pos  A   229.2 C  3.31 A+C   232.5 S 119
+ragged64     hybrid C1024 capnone         pos  A   212.7 C  3.14 A+C   215.8 S 82
+ragged64     hybrid C2048 capnone         pos  A   210.6 C  3.09 A+C   213.7 S 67
+
+## all configs base
+b8kv4096     static                       -    A    23.3 C  1.95 A+C    25.4 S 4
+b8kv4096     queue_pf C256 cap32          pos  A    24.9 C  2.66 A+C    27.6 S 16
+b8kv4096     queue_pf C512 cap32          pos  A    24.7 C  2.18 A+C    26.8 S 8
+b8kv4096     queue_pf C1024 cap32         pos  A    24.1 C  2.06 A+C    26.2 S 4
+b8kv4096     queue_pf C256 cap64          pos  A    25.0 C  2.66 A+C    27.6 S 16
+b8kv4096     queue_pf C512 cap64          pos  A    24.7 C  2.18 A+C    26.9 S 8
+b8kv4096     queue_pf C1024 cap64         pos  A    24.2 C  2.02 A+C    26.2 S 4
+b8kv4096     queue_pf C256 capnone        pos  A    24.9 C  2.62 A+C    27.6 S 16
+b8kv4096     queue_pf C512 capnone        pos  A    24.8 C  2.14 A+C    26.9 S 8
+b8kv4096     queue_pf C1024 capnone       pos  A    24.2 C  2.03 A+C    26.2 S 4
+b8kv4096     queue C256 cap32             pos  A    25.1 C  2.66 A+C    27.7 S 16
+b8kv4096     queue C512 cap32             pos  A    24.6 C  2.18 A+C    26.8 S 8
+b8kv4096     queue C1024 cap32            pos  A    23.9 C  2.05 A+C    26.0 S 4
+b8kv4096     queue C256 cap64             pos  A    25.1 C  2.66 A+C    27.7 S 16
+b8kv4096     queue C512 cap64             pos  A    24.6 C  2.18 A+C    26.7 S 8
+b8kv4096     queue C1024 cap64            pos  A    24.0 C  2.08 A+C    26.0 S 4
+b8kv4096     queue C256 capnone           pos  A    25.1 C  2.66 A+C    27.7 S 16
+b8kv4096     queue C512 capnone           pos  A    24.5 C  2.18 A+C    26.7 S 8
+b8kv4096     queue C1024 capnone          pos  A    23.9 C  2.03 A+C    26.0 S 4
+b8kv16384    static                       -    A    82.3 C  1.92 A+C    84.3 S 4
+b8kv16384    queue_pf C256 cap32          pos  A    79.3 C  3.81 A+C    83.2 S 26
+b8kv16384    queue_pf C512 cap32          pos  A    79.2 C  3.81 A+C    83.0 S 26
+b8kv16384    queue_pf C1024 cap32         pos  A    79.7 C  2.75 A+C    82.5 S 16
+b8kv16384    queue_pf C256 cap64          pos  A    81.9 C  6.11 A+C    88.1 S 43
+b8kv16384    queue_pf C512 cap64          pos  A    80.4 C  4.19 A+C    84.5 S 32
+b8kv16384    queue_pf C1024 cap64         pos  A    79.7 C  2.72 A+C    82.4 S 16
+b8kv16384    queue_pf C256 capnone        pos  A    84.8 C  7.55 A+C    92.4 S 64
+b8kv16384    queue_pf C512 capnone        pos  A    80.2 C  4.21 A+C    84.4 S 32
+b8kv16384    queue_pf C1024 capnone       pos  A    79.7 C  2.70 A+C    82.4 S 16
+b8kv16384    queue C256 cap32             pos  A    78.4 C  3.79 A+C    82.2 S 26
+b8kv16384    queue C512 cap32             pos  A    78.3 C  3.79 A+C    82.1 S 26
+b8kv16384    queue C1024 cap32            pos  A    79.4 C  2.74 A+C    82.2 S 16
+b8kv16384    queue C256 cap64             pos  A    79.6 C  6.11 A+C    85.8 S 43
+b8kv16384    queue C512 cap64             pos  A    79.9 C  4.21 A+C    84.0 S 32
+b8kv16384    queue C1024 cap64            pos  A    79.4 C  2.72 A+C    82.1 S 16
+b8kv16384    queue C256 capnone           pos  A    85.0 C  7.58 A+C    92.5 S 64
+b8kv16384    queue C512 capnone           pos  A    79.9 C  4.19 A+C    84.1 S 32
+b8kv16384    queue C1024 capnone          pos  A    79.5 C  2.75 A+C    82.2 S 16
+b8kv32768    static                       -    A   154.8 C  1.92 A+C   156.7 S 4
+b8kv32768    queue_pf C256 cap32          pos  A   152.6 C  3.94 A+C   156.5 S 29
+b8kv32768    queue_pf C512 cap32          pos  A   152.6 C  3.89 A+C   156.6 S 29
+b8kv32768    queue_pf C1024 cap32         pos  A   152.6 C  3.89 A+C   156.5 S 29
+b8kv32768    queue_pf C256 cap64          pos  A   151.5 C  6.27 A+C   157.8 S 52
+b8kv32768    queue_pf C512 cap64          pos  A   151.6 C  6.30 A+C   157.9 S 52
+b8kv32768    queue_pf C1024 cap64         pos  A   151.9 C  4.21 A+C   156.0 S 32
+b8kv32768    queue_pf C256 capnone        pos  A   163.2 C 12.16 A+C   175.3 S 128
+b8kv32768    queue_pf C512 capnone        pos  A   154.0 C  7.68 A+C   161.6 S 64
+b8kv32768    queue_pf C1024 capnone       pos  A   151.9 C  4.21 A+C   156.1 S 32
+b8kv32768    queue C256 cap32             pos  A   151.6 C  3.94 A+C   155.5 S 29
+b8kv32768    queue C512 cap32             pos  A   151.4 C  3.94 A+C   155.4 S 29
+b8kv32768    queue C1024 cap32            pos  A   151.5 C  3.90 A+C   155.5 S 29
+b8kv32768    queue C256 cap64             pos  A   149.9 C  6.29 A+C   156.1 S 52
+b8kv32768    queue C512 cap64             pos  A   149.8 C  6.29 A+C   156.2 S 52
+b8kv32768    queue C1024 cap64            pos  A   151.2 C  4.26 A+C   155.4 S 32
+b8kv32768    queue C256 capnone           pos  A   163.3 C 12.19 A+C   175.4 S 128
+b8kv32768    queue C512 capnone           pos  A   152.9 C  7.68 A+C   160.5 S 64
+b8kv32768    queue C1024 capnone          pos  A   151.1 C  4.26 A+C   155.3 S 32
+b8kv30720    static                       -    A   146.2 C  1.92 A+C   148.2 S 4
+b8kv30720    queue_pf C256 cap32          pos  A   144.9 C  4.05 A+C   148.9 S 30
+b8kv30720    queue_pf C512 cap32          pos  A   144.8 C  4.02 A+C   148.9 S 30
+b8kv30720    queue_pf C1024 cap32         pos  A   144.8 C  4.05 A+C   148.9 S 30
+b8kv30720    queue_pf C256 cap64          pos  A   145.1 C  6.75 A+C   151.9 S 60
+b8kv30720    queue_pf C512 cap64          pos  A   144.9 C  6.72 A+C   151.6 S 60
+b8kv30720    queue_pf C1024 cap64         pos  A   144.8 C  4.00 A+C   148.8 S 30
+b8kv30720    queue_pf C256 capnone        pos  A   152.9 C 11.66 A+C   164.6 S 120
+b8kv30720    queue_pf C512 capnone        pos  A   145.2 C  6.69 A+C   151.9 S 60
+b8kv30720    queue_pf C1024 capnone       pos  A   144.9 C  4.08 A+C   148.9 S 30
+b8kv30720    queue C256 cap32             pos  A   144.1 C  4.06 A+C   148.2 S 30
+b8kv30720    queue C512 cap32             pos  A   144.0 C  3.97 A+C   148.0 S 30
+b8kv30720    queue C1024 cap32            pos  A   143.9 C  4.03 A+C   147.9 S 30
+b8kv30720    queue C256 cap64             pos  A   143.9 C  6.72 A+C   150.6 S 60
+b8kv30720    queue C512 cap64             pos  A   143.8 C  6.75 A+C   150.5 S 60
+b8kv30720    queue C1024 cap64            pos  A   143.8 C  4.03 A+C   147.9 S 30
+b8kv30720    queue C256 capnone           pos  A   153.9 C 11.68 A+C   165.6 S 120
+b8kv30720    queue C512 capnone           pos  A   143.9 C  6.77 A+C   150.6 S 60
+b8kv30720    queue C1024 capnone          pos  A   143.8 C  4.06 A+C   147.9 S 30
+b1kv245760   static                       -    A   147.4 C  2.24 A+C   149.7 S 19
+b1kv245760   queue_pf C256 cap32          pos  A   147.1 C  3.58 A+C   150.7 S 32
+b1kv245760   queue_pf C512 cap32          pos  A   147.3 C  3.57 A+C   150.8 S 32
+b1kv245760   queue_pf C1024 cap32         pos  A   147.2 C  3.54 A+C   150.7 S 32
+b1kv245760   queue_pf C256 cap64          pos  A   153.9 C  6.72 A+C   160.6 S 62
+b1kv245760   queue_pf C512 cap64          pos  A   154.0 C  6.75 A+C   160.7 S 62
+b1kv245760   queue_pf C1024 cap64         pos  A   154.0 C  6.72 A+C   160.8 S 62
+b1kv245760   queue_pf C256 capnone        pos  A   153.5 C 71.55 A+C   224.9 S 960
+b1kv245760   queue_pf C512 capnone        pos  A   144.3 C 36.29 A+C   180.6 S 480
+b1kv245760   queue_pf C1024 capnone       pos  A   142.9 C 19.30 A+C   162.1 S 240
+b1kv245760   queue C256 cap32             pos  A   144.7 C  3.54 A+C   148.2 S 32
+b1kv245760   queue C512 cap32             pos  A   144.4 C  3.54 A+C   148.0 S 32
+b1kv245760   queue C1024 cap32            pos  A   144.7 C  3.55 A+C   148.1 S 32
+b1kv245760   queue C256 cap64             pos  A   152.3 C  6.69 A+C   159.0 S 62
+b1kv245760   queue C512 cap64             pos  A   152.5 C  6.69 A+C   159.3 S 62
+b1kv245760   queue C1024 cap64            pos  A   152.4 C  6.70 A+C   159.0 S 62
+b1kv245760   queue C256 capnone           pos  A   153.5 C 71.55 A+C   225.0 S 960
+b1kv245760   queue C512 capnone           pos  A   144.0 C 36.29 A+C   180.3 S 480
+b1kv245760   queue C1024 capnone          pos  A   143.0 C 19.20 A+C   162.2 S 240
+b1kv32768    static                       -    A    23.4 C  2.34 A+C    25.8 S 19
+b1kv32768    queue_pf C256 cap32          pos  A    24.7 C  3.42 A+C    28.1 S 29
+b1kv32768    queue_pf C512 cap32          pos  A    24.7 C  3.46 A+C    28.1 S 29
+b1kv32768    queue_pf C1024 cap32         pos  A    24.7 C  3.42 A+C    28.1 S 29
+b1kv32768    queue_pf C256 cap64          pos  A    22.8 C  5.82 A+C    28.6 S 52
+b1kv32768    queue_pf C512 cap64          pos  A    22.8 C  5.86 A+C    28.7 S 52
+b1kv32768    queue_pf C1024 cap64         pos  A    24.0 C  3.55 A+C    27.5 S 32
+b1kv32768    queue_pf C256 capnone        pos  A    25.1 C 10.82 A+C    35.8 S 128
+b1kv32768    queue_pf C512 capnone        pos  A    24.5 C  6.86 A+C    31.4 S 64
+b1kv32768    queue_pf C1024 capnone       pos  A    24.0 C  3.57 A+C    27.5 S 32
+b1kv32768    queue C256 cap32             pos  A    24.6 C  3.47 A+C    27.9 S 29
+b1kv32768    queue C512 cap32             pos  A    24.5 C  3.47 A+C    27.9 S 29
+b1kv32768    queue C1024 cap32            pos  A    24.5 C  3.49 A+C    28.0 S 29
+b1kv32768    queue C256 cap64             pos  A    22.6 C  5.82 A+C    28.4 S 52
+b1kv32768    queue C512 cap64             pos  A    22.6 C  5.79 A+C    28.5 S 52
+b1kv32768    queue C1024 cap64            pos  A    24.0 C  3.58 A+C    27.5 S 32
+b1kv32768    queue C256 capnone           pos  A    25.1 C 10.83 A+C    35.8 S 128
+b1kv32768    queue C512 capnone           pos  A    24.5 C  6.82 A+C    31.3 S 64
+b1kv32768    queue C1024 capnone          pos  A    23.9 C  3.60 A+C    27.5 S 32
+b64kv1024    static                       -    A    47.1 C  0.19 A+C    47.3 S 1
+b64kv1024    queue_pf C256 cap32          pos  A    47.6 C  7.36 A+C    54.9 S 4
+b64kv1024    queue_pf C512 cap32          pos  A    45.2 C  6.69 A+C    51.9 S 2
+b64kv1024    queue_pf C1024 cap32         pos  A    47.1 C  0.18 A+C    47.3 S 1
+b64kv1024    queue_pf C256 cap64          pos  A    47.7 C  7.33 A+C    55.0 S 4
+b64kv1024    queue_pf C512 cap64          pos  A    45.3 C  6.75 A+C    52.1 S 2
+b64kv1024    queue_pf C1024 cap64         pos  A    46.9 C  0.16 A+C    47.1 S 1
+b64kv1024    queue_pf C256 capnone        pos  A    47.6 C  7.36 A+C    55.0 S 4
+b64kv1024    queue_pf C512 capnone        pos  A    45.4 C  6.72 A+C    52.2 S 2
+b64kv1024    queue_pf C1024 capnone       pos  A    47.0 C  0.19 A+C    47.2 S 1
+b64kv1024    queue C256 cap32             pos  A    47.2 C  7.33 A+C    54.5 S 4
+b64kv1024    queue C512 cap32             pos  A    45.2 C  6.74 A+C    52.0 S 2
+b64kv1024    queue C1024 cap32            pos  A    46.8 C  0.19 A+C    47.1 S 1
+b64kv1024    queue C256 cap64             pos  A    47.1 C  7.36 A+C    54.5 S 4
+b64kv1024    queue C512 cap64             pos  A    45.2 C  6.72 A+C    52.0 S 2
+b64kv1024    queue C1024 cap64            pos  A    46.8 C  0.22 A+C    47.1 S 1
+b64kv1024    queue C256 capnone           pos  A    47.1 C  7.36 A+C    54.5 S 4
+b64kv1024    queue C512 capnone           pos  A    45.2 C  6.72 A+C    51.9 S 2
+b64kv1024    queue C1024 capnone          pos  A    46.9 C  0.21 A+C    47.1 S 1
+b128kv512    static                       -    A    46.5 C  0.22 A+C    46.8 S 1
+b128kv512    queue_pf C256 cap32          pos  A    49.9 C 12.51 A+C    62.4 S 2
+b128kv512    queue_pf C512 cap32          pos  A    48.3 C  0.19 A+C    48.5 S 1
+b128kv512    queue_pf C1024 cap32         pos  A    48.3 C  0.19 A+C    48.5 S 1
+b128kv512    queue_pf C256 cap64          pos  A    50.0 C 12.50 A+C    62.5 S 2
+b128kv512    queue_pf C512 cap64          pos  A    48.3 C  0.19 A+C    48.5 S 1
+b128kv512    queue_pf C1024 cap64         pos  A    48.3 C  0.19 A+C    48.5 S 1
+b128kv512    queue_pf C256 capnone        pos  A    49.9 C 12.54 A+C    62.5 S 2
+b128kv512    queue_pf C512 capnone        pos  A    48.2 C  0.16 A+C    48.4 S 1
+b128kv512    queue_pf C1024 capnone       pos  A    48.2 C  0.19 A+C    48.4 S 1
+b128kv512    queue C256 cap32             pos  A    49.6 C 12.56 A+C    62.1 S 2
+b128kv512    queue C512 cap32             pos  A    48.5 C  0.21 A+C    48.7 S 1
+b128kv512    queue C1024 cap32            pos  A    48.4 C  0.19 A+C    48.6 S 1
+b128kv512    queue C256 cap64             pos  A    49.6 C 12.58 A+C    62.2 S 2
+b128kv512    queue C512 cap64             pos  A    48.4 C  0.24 A+C    48.7 S 1
+b128kv512    queue C1024 cap64            pos  A    48.4 C  0.22 A+C    48.6 S 1
+b128kv512    queue C256 capnone           pos  A    49.6 C 12.58 A+C    62.2 S 2
+b128kv512    queue C512 capnone           pos  A    48.5 C  0.19 A+C    48.7 S 1
+b128kv512    queue C1024 capnone          pos  A    48.4 C  0.21 A+C    48.5 S 1
+ragged8      static                       -    A   100.0 C  2.05 A+C   102.0 S 9
+ragged8      queue_pf C256 cap32          pos  A   104.9 C  3.81 A+C   108.8 S 31
+ragged8      queue_pf C512 cap32          pos  A   104.8 C  3.71 A+C   108.5 S 31
+ragged8      queue_pf C1024 cap32         pos  A   103.4 C  3.62 A+C   107.0 S 31
+ragged8      queue_pf C256 cap64          pos  A    96.6 C  6.05 A+C   102.6 S 57
+ragged8      queue_pf C512 cap64          pos  A    96.3 C  5.86 A+C   102.2 S 57
+ragged8      queue_pf C1024 cap64         pos  A    92.0 C  5.98 A+C    97.9 S 57
+ragged8      queue_pf C256 capnone        pos  A    98.8 C 20.02 A+C   118.9 S 256
+ragged8      queue_pf C512 capnone        pos  A    93.2 C 10.85 A+C   104.1 S 128
+ragged8      queue_pf C1024 capnone       pos  A    96.1 C  6.88 A+C   103.0 S 64
+ragged8      queue C256 cap32             pos  A    96.5 C  3.79 A+C   100.3 S 31
+ragged8      queue C512 cap32             pos  A    96.2 C  3.68 A+C    99.9 S 31
+ragged8      queue C1024 cap32            pos  A    97.0 C  3.55 A+C   100.5 S 31
+ragged8      queue C256 cap64             pos  A    92.3 C  6.02 A+C    98.4 S 57
+ragged8      queue C512 cap64             pos  A    92.6 C  5.86 A+C    98.5 S 57
+ragged8      queue C1024 cap64            pos  A    91.3 C  5.98 A+C    97.3 S 57
+ragged8      queue C256 capnone           pos  A    98.9 C 20.00 A+C   118.9 S 256
+ragged8      queue C512 capnone           pos  A    92.9 C 10.88 A+C   103.8 S 128
+ragged8      queue C1024 capnone          pos  A    95.7 C  6.88 A+C   102.6 S 64
+ragged64     static                       -    A   223.9 C  5.12 A+C   229.0 S 3
+ragged64     queue_pf C256 cap32          pos  A   212.3 C 10.27 A+C   222.6 S 32
+ragged64     queue_pf C512 cap32          pos  A   208.5 C  9.76 A+C   218.3 S 32
+ragged64     queue_pf C1024 cap32         pos  A   206.6 C  9.34 A+C   216.0 S 30
+ragged64     queue_pf C256 cap64          pos  A   211.2 C 15.42 A+C   226.6 S 63
+ragged64     queue_pf C512 cap64          pos  A   205.7 C 14.88 A+C   220.6 S 60
+ragged64     queue_pf C1024 cap64         pos  A   206.5 C  9.38 A+C   215.9 S 30
+ragged64     queue_pf C256 capnone        pos  A   218.8 C 24.45 A+C   243.2 S 120
+ragged64     queue_pf C512 capnone        pos  A   205.5 C 14.85 A+C   220.3 S 60
+ragged64     queue_pf C1024 capnone       pos  A   206.7 C  9.38 A+C   216.0 S 30
+ragged64     queue C256 cap32             pos  A   208.9 C 10.30 A+C   219.2 S 32
+ragged64     queue C512 cap32             pos  A   204.8 C  9.76 A+C   214.5 S 32
+ragged64     queue C1024 cap32            pos  A   203.8 C  9.36 A+C   213.2 S 30
+ragged64     queue C256 cap64             pos  A   210.3 C 15.33 A+C   225.7 S 63
+ragged64     queue C512 cap64             pos  A   205.0 C 14.90 A+C   219.9 S 60
+ragged64     queue C1024 cap64            pos  A   203.8 C  9.34 A+C   213.2 S 30
+ragged64     queue C256 capnone           pos  A   221.6 C 24.42 A+C   245.9 S 120
+ragged64     queue C512 capnone           pos  A   204.9 C 14.85 A+C   219.7 S 60
+ragged64     queue C1024 capnone          pos  A   203.8 C  9.38 A+C   213.2 S 30
+b8kv4096     hybrid C256 cap32            pos  A    31.8 C  4.06 A+C    35.9 S 32
+b8kv4096     hybrid C512 cap32            pos  A    27.1 C  2.78 A+C    29.8 S 19
+b8kv4096     hybrid C1024 cap32           pos  A    25.0 C  2.30 A+C    27.3 S 12
+b8kv4096     hybrid C2048 cap32           pos  A    24.5 C  2.14 A+C    26.6 S 11
+b8kv4096     hybrid C256 cap64            pos  A    31.7 C  4.06 A+C    35.8 S 32
+b8kv4096     hybrid C512 cap64            pos  A    27.0 C  2.78 A+C    29.8 S 19
+b8kv4096     hybrid C1024 cap64           pos  A    25.0 C  2.30 A+C    27.3 S 12
+b8kv4096     hybrid C2048 cap64           pos  A    24.5 C  2.16 A+C    26.7 S 11
+b8kv4096     hybrid C256 capnone          pos  A    31.8 C  4.08 A+C    35.9 S 32
+b8kv4096     hybrid C512 capnone          pos  A    27.0 C  2.78 A+C    29.8 S 19
+b8kv4096     hybrid C1024 capnone         pos  A    24.9 C  2.30 A+C    27.2 S 12
+b8kv4096     hybrid C2048 capnone         pos  A    24.6 C  2.14 A+C    26.8 S 11
+b8kv16384    hybrid C256 cap32            pos  A    83.8 C  6.24 A+C    90.1 S 50
+b8kv16384    hybrid C512 cap32            pos  A    83.9 C  6.27 A+C    90.2 S 50
+b8kv16384    hybrid C1024 cap32           pos  A    82.9 C  4.77 A+C    87.6 S 34
+b8kv16384    hybrid C2048 cap32           pos  A    82.1 C  3.55 A+C    85.6 S 21
+b8kv16384    hybrid C256 cap64            pos  A    90.8 C  9.06 A+C    99.8 S 82
+b8kv16384    hybrid C512 cap64            pos  A    86.2 C  7.58 A+C    93.7 S 66
+b8kv16384    hybrid C1024 cap64           pos  A    81.1 C  4.94 A+C    86.1 S 36
+b8kv16384    hybrid C2048 cap64           pos  A    80.4 C  3.76 A+C    84.1 S 23
+b8kv16384    hybrid C256 capnone          pos  A   105.3 C 11.65 A+C   116.9 S 119
+b8kv16384    hybrid C512 capnone          pos  A    85.2 C  7.58 A+C    92.8 S 66
+b8kv16384    hybrid C1024 capnone         pos  A    81.9 C  5.01 A+C    86.8 S 38
+b8kv16384    hybrid C2048 capnone         pos  A    80.8 C  3.73 A+C    84.6 S 25
+b8kv32768    hybrid C256 cap32            pos  A   158.2 C  6.53 A+C   164.8 S 59
+b8kv32768    hybrid C512 cap32            pos  A   158.2 C  6.56 A+C   164.8 S 59
+b8kv32768    hybrid C1024 cap32           pos  A   158.1 C  6.51 A+C   164.7 S 59
+b8kv32768    hybrid C2048 cap32           pos  A   157.6 C  4.80 A+C   162.3 S 34
+b8kv32768    hybrid C256 cap64            pos  A   160.3 C 10.00 A+C   170.4 S 98
+b8kv32768    hybrid C512 cap64            pos  A   160.4 C 10.02 A+C   170.4 S 98
+b8kv32768    hybrid C1024 cap64           pos  A   156.5 C  7.58 A+C   164.1 S 66
+b8kv32768    hybrid C2048 cap64           pos  A   155.5 C  4.93 A+C   160.4 S 38
+b8kv32768    hybrid C256 capnone          pos  A   204.3 C 20.96 A+C   225.3 S 238
+b8kv32768    hybrid C512 capnone          pos  A   165.7 C 12.45 A+C   178.2 S 128
+b8kv32768    hybrid C1024 capnone         pos  A   156.5 C  7.92 A+C   164.3 S 74
+b8kv32768    hybrid C2048 capnone         pos  A   155.2 C  6.08 A+C   161.3 S 46
+b8kv30720    hybrid C256 cap32            pos  A   149.1 C  6.53 A+C   155.7 S 59
+b8kv30720    hybrid C512 cap32            pos  A   149.2 C  6.59 A+C   155.8 S 59
+b8kv30720    hybrid C1024 cap32           pos  A   148.9 C  6.59 A+C   155.4 S 59
+b8kv30720    hybrid C2048 cap32           pos  A   147.8 C  4.06 A+C   151.8 S 32
+b8kv30720    hybrid C256 cap64            pos  A   156.2 C 11.34 A+C   167.5 S 115
+b8kv30720    hybrid C512 cap64            pos  A   156.2 C 11.41 A+C   167.6 S 115
+b8kv30720    hybrid C1024 cap64           pos  A   146.7 C  7.46 A+C   154.0 S 62
+b8kv30720    hybrid C2048 cap64           pos  A   145.6 C  4.74 A+C   150.3 S 36
+b8kv30720    hybrid C256 capnone          pos  A   192.8 C 19.90 A+C   212.6 S 223
+b8kv30720    hybrid C512 capnone          pos  A   155.3 C 12.14 A+C   167.4 S 121
+b8kv30720    hybrid C1024 capnone         pos  A   146.5 C  7.65 A+C   154.1 S 68
+b8kv30720    hybrid C2048 capnone         pos  A   145.7 C  5.79 A+C   151.5 S 44
+b1kv245760   hybrid C256 cap32            pos  A   187.4 C  7.12 A+C   194.5 S 70
+b1kv245760   hybrid C512 cap32            pos  A   187.4 C  7.01 A+C   194.4 S 70
+b1kv245760   hybrid C1024 cap32           pos  A   187.5 C  7.01 A+C   194.5 S 70
+b1kv245760   hybrid C2048 cap32           pos  A   187.4 C  6.99 A+C   194.4 S 70
+b1kv245760   hybrid C256 cap64            pos  A   159.4 C 11.36 A+C   170.8 S 137
+b1kv245760   hybrid C512 cap64            pos  A   159.5 C 11.31 A+C   170.9 S 137
+b1kv245760   hybrid C1024 cap64           pos  A   159.4 C 11.33 A+C   170.7 S 137
+b1kv245760   hybrid C2048 cap64           pos  A   159.3 C 11.30 A+C   170.6 S 137
+b1kv245760   hybrid C256 capnone          pos  A   193.2 C 131.58 A+C   324.8 S 1776
+b1kv245760   hybrid C512 capnone          pos  A   154.4 C 71.26 A+C   225.7 S 960
+b1kv245760   hybrid C1024 capnone         pos  A   146.8 C 40.16 A+C   187.0 S 528
+b1kv245760   hybrid C2048 capnone         pos  A   144.3 C 24.59 A+C   168.9 S 312
+b1kv32768    hybrid C256 cap32            pos  A    30.0 C  6.90 A+C    36.8 S 67
+b1kv32768    hybrid C512 cap32            pos  A    29.9 C  6.85 A+C    36.7 S 67
+b1kv32768    hybrid C1024 cap32           pos  A    30.0 C  6.82 A+C    36.9 S 67
+b1kv32768    hybrid C2048 cap32           pos  A    29.5 C  4.58 A+C    34.2 S 37
+b1kv32768    hybrid C256 cap64            pos  A    27.1 C 10.05 A+C    37.2 S 107
+b1kv32768    hybrid C512 cap64            pos  A    27.1 C 10.05 A+C    37.2 S 107
+b1kv32768    hybrid C1024 cap64           pos  A    26.5 C  7.09 A+C    33.6 S 72
+b1kv32768    hybrid C2048 cap64           pos  A    26.8 C  4.69 A+C    31.4 S 40
+b1kv32768    hybrid C256 capnone          pos  A    31.8 C 20.06 A+C    51.9 S 252
+b1kv32768    hybrid C512 capnone          pos  A    26.0 C 12.26 A+C    38.3 S 144
+b1kv32768    hybrid C1024 capnone         pos  A    24.7 C  7.23 A+C    31.9 S 78
+b1kv32768    hybrid C2048 capnone         pos  A    24.5 C  5.65 A+C    30.2 S 48
+b64kv1024    hybrid C256 cap32            pos  A    57.8 C  7.81 A+C    65.7 S 9
+b64kv1024    hybrid C512 cap32            pos  A    47.6 C  7.47 A+C    55.0 S 5
+b64kv1024    hybrid C1024 cap32           pos  A    44.5 C  6.72 A+C    51.2 S 4
+b64kv1024    hybrid C2048 cap32           pos  A    43.6 C  6.16 A+C    49.8 S 4
+b64kv1024    hybrid C256 cap64            pos  A    57.9 C  7.81 A+C    65.7 S 9
+b64kv1024    hybrid C512 cap64            pos  A    47.5 C  7.46 A+C    55.0 S 5
+b64kv1024    hybrid C1024 cap64           pos  A    44.4 C  6.70 A+C    51.1 S 4
+b64kv1024    hybrid C2048 cap64           pos  A    43.7 C  6.18 A+C    49.9 S 4
+b64kv1024    hybrid C256 capnone          pos  A    57.9 C  7.82 A+C    65.7 S 9
+b64kv1024    hybrid C512 capnone          pos  A    47.6 C  7.36 A+C    55.0 S 5
+b64kv1024    hybrid C1024 capnone         pos  A    44.5 C  6.72 A+C    51.2 S 4
+b64kv1024    hybrid C2048 capnone         pos  A    43.8 C  6.16 A+C    49.9 S 4
+b128kv512    hybrid C256 cap32            pos  A    59.2 C 13.95 A+C    73.2 S 5
+b128kv512    hybrid C512 cap32            pos  A    48.6 C 12.51 A+C    61.1 S 3
+b128kv512    hybrid C1024 cap32           pos  A    46.8 C 10.75 A+C    57.6 S 2
+b128kv512    hybrid C2048 cap32           pos  A    46.4 C  8.26 A+C    54.7 S 2
+b128kv512    hybrid C256 cap64            pos  A    59.3 C 13.95 A+C    73.2 S 5
+b128kv512    hybrid C512 cap64            pos  A    48.7 C 12.54 A+C    61.2 S 3
+b128kv512    hybrid C1024 cap64           pos  A    46.9 C 10.78 A+C    57.6 S 2
+b128kv512    hybrid C2048 cap64           pos  A    46.3 C  8.26 A+C    54.6 S 2
+b128kv512    hybrid C256 capnone          pos  A    59.2 C 13.89 A+C    73.1 S 5
+b128kv512    hybrid C512 capnone          pos  A    48.5 C 12.51 A+C    61.1 S 3
+b128kv512    hybrid C1024 capnone         pos  A    47.0 C 10.78 A+C    57.8 S 2
+b128kv512    hybrid C2048 capnone         pos  A    46.3 C  8.26 A+C    54.6 S 2
+ragged8      hybrid C256 cap32            pos  A   102.5 C  6.62 A+C   109.0 S 62
+ragged8      hybrid C512 cap32            pos  A   102.1 C  6.66 A+C   108.8 S 62
+ragged8      hybrid C1024 cap32           pos  A   102.0 C  6.59 A+C   108.6 S 62
+ragged8      hybrid C2048 cap32           pos  A   102.1 C  6.66 A+C   108.7 S 63
+ragged8      hybrid C256 cap64            pos  A   101.6 C 10.19 A+C   111.8 S 107
+ragged8      hybrid C512 cap64            pos  A   101.6 C 10.21 A+C   111.9 S 109
+ragged8      hybrid C1024 cap64           pos  A    97.9 C  9.98 A+C   108.0 S 107
+ragged8      hybrid C2048 cap64           pos  A    95.5 C  6.91 A+C   102.4 S 67
+ragged8      hybrid C256 capnone          pos  A   127.6 C 35.23 A+C   162.8 S 462
+ragged8      hybrid C512 capnone          pos  A   100.7 C 20.10 A+C   120.9 S 260
+ragged8      hybrid C1024 capnone         pos  A    95.2 C 14.14 A+C   109.3 S 164
+ragged8      hybrid C2048 capnone         pos  A    94.0 C 10.27 A+C   104.3 S 115
+ragged64     hybrid C256 cap32            pos  A   217.6 C 15.30 A+C   232.9 S 55
+ragged64     hybrid C512 cap32            pos  A   217.7 C 14.75 A+C   232.4 S 54
+ragged64     hybrid C1024 cap32           pos  A   214.8 C 14.27 A+C   229.0 S 53
+ragged64     hybrid C2048 cap32           pos  A   212.2 C 10.19 A+C   222.5 S 33
+ragged64     hybrid C256 cap64            pos  A   232.8 C 24.59 A+C   257.4 S 107
+ragged64     hybrid C512 cap64            pos  A   224.7 C 21.50 A+C   246.2 S 98
+ragged64     hybrid C1024 cap64           pos  A   211.1 C 14.91 A+C   226.0 S 60
+ragged64     hybrid C2048 cap64           pos  A   209.6 C 13.07 A+C   222.7 S 43
+ragged64     hybrid C256 capnone          pos  A   283.7 C 37.39 A+C   321.2 S 195
+ragged64     hybrid C512 capnone          pos  A   225.1 C 24.32 A+C   249.5 S 119
+ragged64     hybrid C1024 capnone         pos  A   211.8 C 18.51 A+C   230.2 S 82
+ragged64     hybrid C2048 capnone         pos  A   210.4 C 15.38 A+C   225.7 S 67
+
+## all configs tail
+b8kv4096     tail f5% k2                  pos  A    24.7 C  2.03 A+C    26.8 S 5
+b8kv4096     tail f5% k4                  pos  A    24.7 C  2.02 A+C    26.8 S 5
+b8kv4096     tail f5% k8                  pos  A    24.6 C  2.02 A+C    26.7 S 5
+b8kv4096     tail f10% k2                 pos  A    24.2 C  2.08 A+C    26.3 S 6
+b8kv4096     tail f10% k4                 pos  A    24.1 C  2.08 A+C    26.2 S 7
+b8kv4096     tail f10% k8                 pos  A    24.2 C  2.11 A+C    26.3 S 7
+b8kv4096     tail f20% k2                 pos  A    25.4 C  2.08 A+C    27.5 S 5
+b8kv4096     tail f20% k4                 pos  A    23.8 C  2.13 A+C    25.9 S 7
+b8kv4096     tail f20% k8                 pos  A    24.7 C  2.21 A+C    26.9 S 9
+b8kv16384    tail f5% k2                  pos  A    83.2 C  1.98 A+C    85.2 S 6
+b8kv16384    tail f5% k4                  pos  A    81.7 C  2.18 A+C    84.0 S 8
+b8kv16384    tail f5% k8                  pos  A    81.3 C  2.27 A+C    83.5 S 10
+b8kv16384    tail f10% k2                 pos  A    84.8 C  2.02 A+C    86.8 S 6
+b8kv16384    tail f10% k4                 pos  A    83.3 C  2.18 A+C    85.6 S 8
+b8kv16384    tail f10% k8                 pos  A    81.2 C  2.37 A+C    83.6 S 12
+b8kv16384    tail f20% k2                 pos  A    87.1 C  1.98 A+C    89.0 S 5
+b8kv16384    tail f20% k4                 pos  A    84.8 C  2.11 A+C    86.8 S 7
+b8kv16384    tail f20% k8                 pos  A    81.3 C  2.43 A+C    83.8 S 11
+b8kv32768    tail f5% k2                  pos  A   158.6 C  1.98 A+C   160.6 S 6
+b8kv32768    tail f5% k4                  pos  A   157.0 C  2.21 A+C   159.3 S 8
+b8kv32768    tail f5% k8                  pos  A   154.9 C  2.40 A+C   157.3 S 12
+b8kv32768    tail f10% k2                 pos  A   160.2 C  2.02 A+C   162.2 S 6
+b8kv32768    tail f10% k4                 pos  A   158.0 C  2.18 A+C   160.3 S 8
+b8kv32768    tail f10% k8                 pos  A   154.8 C  2.40 A+C   157.2 S 12
+b8kv32768    tail f20% k2                 pos  A   166.2 C  1.98 A+C   168.1 S 5
+b8kv32768    tail f20% k4                 pos  A   161.9 C  2.11 A+C   164.0 S 7
+b8kv32768    tail f20% k8                 pos  A   157.5 C  2.38 A+C   159.9 S 11
+b8kv30720    tail f5% k2                  pos  A   149.1 C  1.98 A+C   151.1 S 6
+b8kv30720    tail f5% k4                  pos  A   147.7 C  2.21 A+C   149.9 S 8
+b8kv30720    tail f5% k8                  pos  A   146.2 C  2.40 A+C   148.6 S 12
+b8kv30720    tail f10% k2                 pos  A   151.0 C  1.98 A+C   153.0 S 6
+b8kv30720    tail f10% k4                 pos  A   149.3 C  2.18 A+C   151.4 S 8
+b8kv30720    tail f10% k8                 pos  A   147.2 C  2.37 A+C   149.6 S 12
+b8kv30720    tail f20% k2                 pos  A   157.0 C  1.98 A+C   159.0 S 5
+b8kv30720    tail f20% k4                 pos  A   152.6 C  2.11 A+C   154.7 S 7
+b8kv30720    tail f20% k8                 pos  A   148.8 C  2.40 A+C   151.2 S 11
+b1kv245760   tail f5% k2                  pos  A   186.4 C  2.91 A+C   189.4 S 21
+b1kv245760   tail f5% k4                  pos  A   164.6 C  3.06 A+C   167.9 S 23
+b1kv245760   tail f5% k8                  pos  A   154.4 C  3.33 A+C   157.8 S 27
+b1kv245760   tail f10% k2                 pos  A   229.1 C  2.37 A+C   231.5 S 20
+b1kv245760   tail f10% k4                 pos  A   183.5 C  3.09 A+C   186.5 S 22
+b1kv245760   tail f10% k8                 pos  A   161.1 C  3.23 A+C   164.3 S 26
+b1kv245760   tail f20% k2                 pos  A   307.8 C  2.34 A+C   310.1 S 18
+b1kv245760   tail f20% k4                 pos  A   227.1 C  2.40 A+C   229.3 S 20
+b1kv245760   tail f20% k8                 pos  A   179.2 C  3.15 A+C   182.5 S 24
+b1kv32768    tail f5% k2                  pos  A    28.8 C  2.94 A+C    31.8 S 21
+b1kv32768    tail f5% k4                  pos  A    26.4 C  3.14 A+C    29.5 S 23
+b1kv32768    tail f5% k8                  pos  A    24.9 C  3.36 A+C    28.2 S 27
+b1kv32768    tail f10% k2                 pos  A    34.2 C  2.45 A+C    36.7 S 20
+b1kv32768    tail f10% k4                 pos  A    28.5 C  3.12 A+C    31.7 S 22
+b1kv32768    tail f10% k8                 pos  A    26.0 C  3.36 A+C    29.4 S 26
+b1kv32768    tail f20% k2                 pos  A    45.0 C  2.38 A+C    47.3 S 18
+b1kv32768    tail f20% k4                 pos  A    33.6 C  2.40 A+C    36.0 S 20
+b1kv32768    tail f20% k8                 pos  A    28.0 C  3.26 A+C    31.2 S 24
+b64kv1024    tail f5% k2                  pos  A    45.4 C  6.67 A+C    52.1 S 2
+b64kv1024    tail f5% k4                  pos  A    45.3 C  6.69 A+C    52.0 S 2
+b64kv1024    tail f5% k8                  pos  A    45.4 C  6.67 A+C    52.0 S 2
+b64kv1024    tail f10% k2                 pos  A    45.3 C  6.66 A+C    52.0 S 2
+b64kv1024    tail f10% k4                 pos  A    45.3 C  6.69 A+C    52.0 S 2
+b64kv1024    tail f10% k8                 pos  A    45.4 C  6.67 A+C    52.0 S 2
+b64kv1024    tail f20% k2                 pos  A    44.6 C  6.66 A+C    51.2 S 2
+b64kv1024    tail f20% k4                 pos  A    44.5 C  6.66 A+C    51.1 S 2
+b64kv1024    tail f20% k8                 pos  A    44.5 C  6.69 A+C    51.2 S 2
+b128kv512    tail f5% k2                  pos  A    50.6 C 12.51 A+C    63.1 S 2
+b128kv512    tail f5% k4                  pos  A    50.6 C 12.50 A+C    63.2 S 2
+b128kv512    tail f5% k8                  pos  A    50.5 C 12.51 A+C    63.1 S 2
+b128kv512    tail f10% k2                 pos  A    50.5 C 12.51 A+C    63.0 S 2
+b128kv512    tail f10% k4                 pos  A    50.5 C 12.46 A+C    63.1 S 2
+b128kv512    tail f10% k8                 pos  A    50.6 C 12.48 A+C    63.1 S 2
+b128kv512    tail f20% k2                 pos  A    50.5 C 12.51 A+C    63.0 S 2
+b128kv512    tail f20% k4                 pos  A    50.6 C 12.51 A+C    63.1 S 2
+b128kv512    tail f20% k8                 pos  A    50.5 C 12.50 A+C    63.0 S 2
+ragged8      tail f5% k2                  pos  A   103.0 C  2.08 A+C   105.1 S 11
+ragged8      tail f5% k4                  pos  A    98.8 C  2.14 A+C   101.0 S 13
+ragged8      tail f5% k8                  pos  A    96.2 C  2.37 A+C    98.5 S 17
+ragged8      tail f10% k2                 pos  A   112.4 C  2.08 A+C   114.5 S 11
+ragged8      tail f10% k4                 pos  A   103.4 C  2.14 A+C   105.5 S 13
+ragged8      tail f10% k8                 pos  A    98.3 C  2.40 A+C   100.8 S 17
+ragged8      tail f20% k2                 pos  A   132.6 C  2.05 A+C   134.7 S 10
+ragged8      tail f20% k4                 pos  A   113.0 C  2.16 A+C   115.2 S 12
+ragged8      tail f20% k8                 pos  A   103.1 C  2.40 A+C   105.5 S 16
+ragged64     tail f5% k2                  pos  A   216.6 C  6.56 A+C   223.2 S 5
+ragged64     tail f5% k4                  pos  A   214.8 C  6.58 A+C   221.4 S 7
+ragged64     tail f5% k8                  pos  A   214.1 C  6.78 A+C   220.9 S 11
+ragged64     tail f10% k2                 pos  A   220.5 C  6.53 A+C   227.1 S 5
+ragged64     tail f10% k4                 pos  A   215.7 C  6.66 A+C   222.3 S 7
+ragged64     tail f10% k8                 pos  A   215.2 C  6.98 A+C   222.1 S 11
+ragged64     tail f20% k2                 pos  A   229.4 C  6.53 A+C   236.0 S 5
+ragged64     tail f20% k4                 pos  A   221.2 C  6.75 A+C   228.0 S 7
+ragged64     tail f20% k8                 pos  A   218.3 C  7.10 A+C   225.4 S 11
+
+## all configs mq
+b8kv4096     static                       -    A    26.3 C  0.18 A+C    26.5 S 4
+b8kv4096     queue_pf C256 cap32          pos  A    33.4 C  0.13 A+C    33.5 S 16
+b8kv4096     queue_pf C256 cap32/pair     pair A    33.9 C  0.10 A+C    34.0 S 16
+b8kv4096     queue_pf C512 cap32          pos  A    30.2 C  0.13 A+C    30.3 S 8
+b8kv4096     queue_pf C512 cap32/pair     pair A    30.1 C  0.11 A+C    30.2 S 8
+b8kv4096     queue_pf C1024 cap32         pos  A    27.7 C  0.19 A+C    27.9 S 4
+b8kv4096     queue_pf C1024 cap32/pair    pair A    28.1 C  0.19 A+C    28.3 S 4
+b8kv4096     queue C256 cap32             pos  A    33.3 C  0.11 A+C    33.4 S 16
+b8kv4096     queue C256 cap32/pair        pair A    34.0 C  0.10 A+C    34.1 S 16
+b8kv4096     queue C512 cap32             pos  A    29.7 C  0.10 A+C    29.9 S 8
+b8kv4096     queue C512 cap32/pair        pair A    29.9 C  0.10 A+C    30.0 S 8
+b8kv4096     queue C1024 cap32            pos  A    27.5 C  0.19 A+C    27.6 S 4
+b8kv4096     queue C1024 cap32/pair       pair A    27.6 C  0.22 A+C    27.8 S 4
+b8kv16384    static                       -    A    85.2 C  0.13 A+C    85.3 S 4
+b8kv16384    queue_pf C256 cap32          pos  A    93.5 C  0.10 A+C    93.6 S 26
+b8kv16384    queue_pf C256 cap32/pair     pair A    91.6 C  0.10 A+C    91.7 S 26
+b8kv16384    queue_pf C512 cap32          pos  A    93.3 C  0.10 A+C    93.4 S 26
+b8kv16384    queue_pf C512 cap32/pair     pair A    91.5 C  0.10 A+C    91.6 S 26
+b8kv16384    queue_pf C1024 cap32         pos  A    86.7 C  0.19 A+C    86.9 S 16
+b8kv16384    queue_pf C1024 cap32/pair    pair A    87.0 C  0.19 A+C    87.3 S 16
+b8kv16384    queue C256 cap32             pos  A    91.0 C  0.10 A+C    91.1 S 26
+b8kv16384    queue C256 cap32/pair        pair A    91.2 C  0.10 A+C    91.3 S 26
+b8kv16384    queue C512 cap32             pos  A    91.1 C  0.10 A+C    91.2 S 26
+b8kv16384    queue C512 cap32/pair        pair A    91.3 C  0.10 A+C    91.4 S 26
+b8kv16384    queue C1024 cap32            pos  A    86.0 C  0.22 A+C    86.3 S 16
+b8kv16384    queue C1024 cap32/pair       pair A    87.4 C  0.18 A+C    87.7 S 16
+b8kv32768    static                       -    A   157.9 C  0.13 A+C   158.0 S 4
+b8kv32768    queue_pf C256 cap32          pos  A   165.0 C  0.10 A+C   165.1 S 29
+b8kv32768    queue_pf C256 cap32/pair     pair A   169.1 C  0.10 A+C   169.2 S 29
+b8kv32768    queue_pf C512 cap32          pos  A   165.4 C  0.10 A+C   165.4 S 29
+b8kv32768    queue_pf C512 cap32/pair     pair A   168.8 C  0.10 A+C   168.9 S 29
+b8kv32768    queue_pf C1024 cap32         pos  A   164.4 C  0.10 A+C   164.6 S 29
+b8kv32768    queue_pf C1024 cap32/pair    pair A   168.7 C  0.10 A+C   168.8 S 29
+b8kv32768    queue C256 cap32             pos  A   163.2 C  0.10 A+C   163.4 S 29
+b8kv32768    queue C256 cap32/pair        pair A   168.7 C  0.10 A+C   168.8 S 29
+b8kv32768    queue C512 cap32             pos  A   163.0 C  0.10 A+C   163.1 S 29
+b8kv32768    queue C512 cap32/pair        pair A   169.1 C  0.10 A+C   169.2 S 29
+b8kv32768    queue C1024 cap32            pos  A   163.0 C  0.10 A+C   163.1 S 29
+b8kv32768    queue C1024 cap32/pair       pair A   168.8 C  0.10 A+C   169.0 S 29
+b8kv30720    static                       -    A   149.2 C  0.10 A+C   149.3 S 4
+b8kv30720    queue_pf C256 cap32          pos  A   157.2 C  0.13 A+C   157.3 S 30
+b8kv30720    queue_pf C256 cap32/pair     pair A   159.6 C  0.10 A+C   159.7 S 30
+b8kv30720    queue_pf C512 cap32          pos  A   156.9 C  0.13 A+C   157.0 S 30
+b8kv30720    queue_pf C512 cap32/pair     pair A   160.0 C  0.10 A+C   160.1 S 30
+b8kv30720    queue_pf C1024 cap32         pos  A   158.0 C  0.13 A+C   158.1 S 30
+b8kv30720    queue_pf C1024 cap32/pair    pair A   159.6 C  0.10 A+C   159.7 S 30
+b8kv30720    queue C256 cap32             pos  A   155.2 C  0.13 A+C   155.4 S 30
+b8kv30720    queue C256 cap32/pair        pair A   159.8 C  0.10 A+C   159.9 S 30
+b8kv30720    queue C512 cap32             pos  A   155.3 C  0.13 A+C   155.5 S 30
+b8kv30720    queue C512 cap32/pair        pair A   159.8 C  0.10 A+C   159.9 S 30
+b8kv30720    queue C1024 cap32            pos  A   155.3 C  0.13 A+C   155.4 S 30
+b8kv30720    queue C1024 cap32/pair       pair A   160.0 C  0.11 A+C   160.1 S 30
+b1kv245760   static                       -    A   150.4 C  0.10 A+C   150.5 S 19
+b1kv245760   queue_pf C256 cap32          pos  A   151.8 C  0.13 A+C   151.9 S 32
+b1kv245760   queue_pf C256 cap32/pair     pair A   154.1 C  0.10 A+C   154.2 S 32
+b1kv245760   queue_pf C512 cap32          pos  A   151.8 C  0.13 A+C   152.0 S 32
+b1kv245760   queue_pf C512 cap32/pair     pair A   154.2 C  0.10 A+C   154.4 S 32
+b1kv245760   queue_pf C1024 cap32         pos  A   151.7 C  0.13 A+C   151.9 S 32
+b1kv245760   queue_pf C1024 cap32/pair    pair A   154.2 C  0.10 A+C   154.3 S 32
+b1kv245760   queue C256 cap32             pos  A   149.6 C  0.13 A+C   149.8 S 32
+b1kv245760   queue C256 cap32/pair        pair A   152.0 C  0.10 A+C   152.1 S 32
+b1kv245760   queue C512 cap32             pos  A   149.7 C  0.10 A+C   149.8 S 32
+b1kv245760   queue C512 cap32/pair        pair A   152.0 C  0.13 A+C   152.1 S 32
+b1kv245760   queue C1024 cap32            pos  A   149.9 C  0.13 A+C   150.0 S 32
+b1kv245760   queue C1024 cap32/pair       pair A   152.0 C  0.11 A+C   152.1 S 32
+b1kv32768    static                       -    A    26.7 C  0.13 A+C    26.9 S 19
+b1kv32768    queue_pf C256 cap32          pos  A    29.7 C  0.19 A+C    29.9 S 29
+b1kv32768    queue_pf C256 cap32/pair     pair A    29.8 C  0.19 A+C    30.0 S 29
+b1kv32768    queue_pf C512 cap32          pos  A    29.8 C  0.16 A+C    30.0 S 29
+b1kv32768    queue_pf C512 cap32/pair     pair A    30.0 C  0.19 A+C    30.2 S 29
+b1kv32768    queue_pf C1024 cap32         pos  A    29.7 C  0.19 A+C    29.8 S 29
+b1kv32768    queue_pf C1024 cap32/pair    pair A    29.9 C  0.19 A+C    30.1 S 29
+b1kv32768    queue C256 cap32             pos  A    29.5 C  0.16 A+C    29.6 S 29
+b1kv32768    queue C256 cap32/pair        pair A    29.4 C  0.24 A+C    29.7 S 29
+b1kv32768    queue C512 cap32             pos  A    29.6 C  0.16 A+C    29.7 S 29
+b1kv32768    queue C512 cap32/pair        pair A    29.3 C  0.22 A+C    29.6 S 29
+b1kv32768    queue C1024 cap32            pos  A    29.7 C  0.19 A+C    29.9 S 29
+b1kv32768    queue C1024 cap32/pair       pair A    29.4 C  0.19 A+C    29.6 S 29
+b64kv1024    static                       -    A    47.4 C  0.22 A+C    47.6 S 1
+b64kv1024    queue_pf C256 cap32          pos  A    64.8 C  0.22 A+C    65.0 S 4
+b64kv1024    queue_pf C256 cap32/pair     pair A    58.2 C  0.16 A+C    58.3 S 4
+b64kv1024    queue_pf C512 cap32          pos  A    53.7 C  0.16 A+C    53.8 S 2
+b64kv1024    queue_pf C512 cap32/pair     pair A    50.4 C  0.16 A+C    50.5 S 2
+b64kv1024    queue_pf C1024 cap32         pos  A    47.4 C  0.16 A+C    47.6 S 1
+b64kv1024    queue_pf C1024 cap32/pair    pair A    47.4 C  0.16 A+C    47.6 S 1
+b64kv1024    queue C256 cap32             pos  A    64.3 C  0.19 A+C    64.5 S 4
+b64kv1024    queue C256 cap32/pair        pair A    58.1 C  0.22 A+C    58.3 S 4
+b64kv1024    queue C512 cap32             pos  A    53.6 C  0.16 A+C    53.8 S 2
+b64kv1024    queue C512 cap32/pair        pair A    50.0 C  0.19 A+C    50.2 S 2
+b64kv1024    queue C1024 cap32            pos  A    47.4 C  0.16 A+C    47.5 S 1
+b64kv1024    queue C1024 cap32/pair       pair A    47.4 C  0.16 A+C    47.6 S 1
+b128kv512    static                       -    A    47.1 C  0.16 A+C    47.2 S 1
+b128kv512    queue_pf C256 cap32          pos  A    67.1 C  0.19 A+C    67.3 S 2
+b128kv512    queue_pf C256 cap32/pair     pair A    60.5 C  0.19 A+C    60.7 S 2
+b128kv512    queue_pf C512 cap32          pos  A    48.6 C  0.19 A+C    48.7 S 1
+b128kv512    queue_pf C512 cap32/pair     pair A    48.4 C  0.21 A+C    48.6 S 1
+b128kv512    queue_pf C1024 cap32         pos  A    48.4 C  0.16 A+C    48.6 S 1
+b128kv512    queue_pf C1024 cap32/pair    pair A    48.4 C  0.19 A+C    48.6 S 1
+b128kv512    queue C256 cap32             pos  A    64.7 C  0.19 A+C    64.8 S 2
+b128kv512    queue C256 cap32/pair        pair A    60.3 C  0.21 A+C    60.5 S 2
+b128kv512    queue C512 cap32             pos  A    48.6 C  0.21 A+C    48.8 S 1
+b128kv512    queue C512 cap32/pair        pair A    48.7 C  0.19 A+C    48.9 S 1
+b128kv512    queue C1024 cap32            pos  A    48.7 C  0.21 A+C    48.9 S 1
+b128kv512    queue C1024 cap32/pair       pair A    48.6 C  0.19 A+C    48.8 S 1
+ragged8      static                       -    A   102.1 C  0.10 A+C   102.2 S 9
+ragged8      queue_pf C256 cap32          pos  A   112.1 C  0.13 A+C   112.2 S 31
+ragged8      queue_pf C256 cap32/pair     pair A   106.8 C  0.13 A+C   106.9 S 31
+ragged8      queue_pf C512 cap32          pos  A   111.0 C  0.18 A+C   111.2 S 31
+ragged8      queue_pf C512 cap32/pair     pair A   105.5 C  0.16 A+C   105.6 S 31
+ragged8      queue_pf C1024 cap32         pos  A   109.4 C  0.10 A+C   109.5 S 31
+ragged8      queue_pf C1024 cap32/pair    pair A   106.7 C  0.10 A+C   106.8 S 31
+ragged8      queue C256 cap32             pos  A   104.6 C  0.16 A+C   104.9 S 31
+ragged8      queue C256 cap32/pair        pair A   106.8 C  0.16 A+C   107.0 S 31
+ragged8      queue C512 cap32             pos  A   103.6 C  0.18 A+C   103.7 S 31
+ragged8      queue C512 cap32/pair        pair A   105.2 C  0.16 A+C   105.4 S 31
+ragged8      queue C1024 cap32            pos  A   103.5 C  0.10 A+C   103.6 S 31
+ragged8      queue C1024 cap32/pair       pair A   105.7 C  0.10 A+C   105.8 S 31
+ragged64     static                       -    A   226.4 C  0.13 A+C   226.6 S 3
+ragged64     queue_pf C256 cap32          pos  A   237.7 C  0.19 A+C   238.0 S 32
+ragged64     queue_pf C256 cap32/pair     pair A   243.9 C  0.24 A+C   244.1 S 32
+ragged64     queue_pf C512 cap32          pos  A   224.3 C  0.16 A+C   224.5 S 32
+ragged64     queue_pf C512 cap32/pair     pair A   228.2 C  0.16 A+C   228.4 S 32
+ragged64     queue_pf C1024 cap32         pos  A   217.3 C  0.10 A+C   217.4 S 30
+ragged64     queue_pf C1024 cap32/pair    pair A   221.6 C  0.10 A+C   221.7 S 30
+ragged64     queue C256 cap32             pos  A   235.9 C  0.24 A+C   236.2 S 32
+ragged64     queue C256 cap32/pair        pair A   244.8 C  0.19 A+C   245.0 S 32
+ragged64     queue C512 cap32             pos  A   222.3 C  0.16 A+C   222.4 S 32
+ragged64     queue C512 cap32/pair        pair A   227.6 C  0.16 A+C   227.9 S 32
+ragged64     queue C1024 cap32            pos  A   214.9 C  0.10 A+C   214.9 S 30
+ragged64     queue C1024 cap32/pair       pair A   220.6 C  0.10 A+C   220.6 S 30

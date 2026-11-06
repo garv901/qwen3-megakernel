@@ -1,0 +1,58 @@
+REPO=/raid/garv901/regime-mk-core mk-core c2bc494 MODE=tail2
+GPU 0: NVIDIA B200 (UUID: GPU-17dce9e8-fd5a-2fcc-3847-dc31ae451efc)
+== 1. calibration
+build mk: defines ['SKV_KV_EVICT_FIRST=1', 'SKV_MERGE_CHUNK=20', 'SKV_TC=1'] attend smem 148224 dyn smem 165248
+{"point": "b8kv32768", "engine": "tma", "s_max": 4, "items_max": 2, "part_bytes": 222816, "n_cta": 148, "mode": 1, "build": "mk", "defines": ["SKV_KV_EVICT_FIRST=1", "SKV_MERGE_CHUNK=20", "SKV_TC=1"], "dyn_smem": 165248, "attend_smem": 148224, "plan_opts": {}, "one_item": false, "timing_only": false, "iface": 1, "mma": true, "ticket": false, "no_split": false, "A_med": 160.38400000000001, "A_p10": 157.344, "A_p90": 166.88, "C_med": 1.728, "C_p10": 1.696, "C_p90": 1.888, "launches": 10, "kv_bytes_layer": 1073774592, "kind": "time", "comb": "head", "job": "12048"}
+{"point": "b1kv245760", "engine": "tma", "s_max": 19, "items_max": 1, "part_bytes": 156288, "n_cta": 148, "mode": 1, "build": "mk", "defines": ["SKV_KV_EVICT_FIRST=1", "SKV_MERGE_CHUNK=20", "SKV_TC=1"], "dyn_smem": 165248, "attend_smem": 148224, "plan_opts": {}, "one_item": true, "timing_only": false, "iface": 1, "mma": true, "ticket": false, "no_split": false, "A_med": 152.608, "A_p10": 150.688, "A_p90": 158.976, "C_med": 1.984, "C_p10": 1.952, "C_p90": 2.048, "launches": 10, "kv_bytes_layer": 1006637056, "kind": "time", "comb": "head", "job": "12048"}
+build      point       kind  engine S max     A med (p10/p90) us  C med us  check rel-L2 (l0 / l27) result
+mk         b8kv32768   time  tma        4   160.38 (157.34/166.88)      1.73                        - head
+mk         b1kv245760  time  tma       19   152.61 (150.69/158.98)      1.98                        - head
+checks failed: 0
+exit 0
+ptxas: {'stack': 0, 'spill_stores': 0, 'spill_loads': 0} regs 121 local 0 dyn_smem 165248 swiz 0
+CHECK b8kv32768 static C=0 f=0.0 - K=0 tk=0 acc=0: PASS (cover True, visited True, xor True, part True, ml True, merge True relmax 2.6e-07, tickets None, units 211)
+b8kv32768    static    C=    0 f=0.00 -    K=  0 tk=0 acc=0 A   154.72 Cc   1.92 A+C   156.67 imb   3.84 tail   5.10 spread   8.69 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4/4
+CALIBRATION vs a1ub ld: A 154.72 (156.864, -1.4%)  imb 3.84 (4.352, -11.8%)
+CHECK b1kv245760 static C=0 f=0.0 - K=0 tk=0 acc=0: PASS (cover True, visited True, xor True, part True, ml True, merge True relmax 3.1e-07, tickets None, units 148)
+b1kv245760   static    C=    0 f=0.00 -    K=  0 tk=0 acc=0 A   147.39 Cc   2.24 A+C   149.74 imb   6.14 tail   7.38 spread  13.04 B/CTA 6.62-6.99MB u/CTA 1-1 units 148 S_max 19/19
+# b8kv32768: a1ub head C 1.73  kvq static C 1.92  ok
+# b1kv245760: a1ub head C 1.98  kvq static C 2.24  ok
+gate: '1'
+== 2. sweep tail2
+b8kv16384    tail      C=   16 f=0.05 pos  K=  0 tk=0 acc=0 A    81.09 Cc   2.34 A+C    83.52 imb   1.02 tail   2.19 spread   2.18 B/CTA 3.41-3.83MB u/CTA 2-7 units 591 S_max 10/10
+b8kv16384    tail      C=   32 f=0.05 pos  K=  0 tk=0 acc=0 A    81.30 Cc   2.30 A+C    83.58 imb   1.28 tail   2.34 spread   2.40 B/CTA 3.41-3.83MB u/CTA 2-7 units 591 S_max 10/10
+b8kv16384    tail      C=   16 f=0.10 pos  K=  0 tk=0 acc=0 A    83.94 Cc   2.64 A+C    86.56 imb   1.02 tail   1.95 spread   1.98 B/CTA 3.26-3.92MB u/CTA 3-11 units 967 S_max 16/16
+b8kv16384    tail      C=   32 f=0.10 pos  K=  0 tk=0 acc=0 A    83.38 Cc   2.62 A+C    86.11 imb   1.02 tail   1.95 spread   1.95 B/CTA 3.26-3.92MB u/CTA 3-12 units 967 S_max 16/16
+b8kv16384    tail      C=   16 f=0.20 pos  K=  0 tk=0 acc=0 A    81.39 Cc   2.83 A+C    84.29 imb   1.28 tail   2.50 spread   2.66 B/CTA 3.12-4.03MB u/CTA 2-16 units 1207 S_max 19/19
+b8kv16384    tail      C=   32 f=0.20 pos  K=  0 tk=0 acc=0 A    86.64 Cc   3.74 A+C    90.48 imb   1.02 tail   1.98 spread   2.05 B/CTA 2.98-4.13MB u/CTA 6-19 units 1655 S_max 26/26
+b8kv32768    tail      C=   16 f=0.05 pos  K=  0 tk=0 acc=0 A   155.95 Cc   2.64 A+C   158.61 imb   1.02 tail   2.00 spread   1.98 B/CTA 6.85-7.58MB u/CTA 3-12 units 975 S_max 16/16
+b8kv32768    tail      C=   32 f=0.05 pos  K=  0 tk=0 acc=0 A   155.95 Cc   2.62 A+C   158.64 imb   1.02 tail   1.90 spread   1.94 B/CTA 6.85-7.58MB u/CTA 3-12 units 975 S_max 16/16
+b8kv32768    tail      C=   16 f=0.10 pos  K=  0 tk=0 acc=0 A   154.21 Cc   2.91 A+C   157.12 imb   1.41 tail   2.45 spread   2.69 B/CTA 6.72-7.68MB u/CTA 2-16 units 1223 S_max 20/20
+b8kv32768    tail      C=   32 f=0.10 pos  K=  0 tk=0 acc=0 A   159.07 Cc   3.79 A+C   162.85 imb   1.02 tail   2.14 spread   2.11 B/CTA 6.59-7.83MB u/CTA 5-20 units 1671 S_max 27/27
+b8kv32768    tail      C=   16 f=0.20 pos  K=  0 tk=0 acc=0 A   153.62 Cc   2.91 A+C   156.46 imb   1.79 tail   2.96 spread   3.74 B/CTA 6.62-7.84MB u/CTA 2-16 units 1207 S_max 19/19
+b8kv32768    tail      C=   32 f=0.20 pos  K=  0 tk=0 acc=0 A   155.54 Cc   4.88 A+C   160.43 imb   1.02 tail   1.98 spread   1.98 B/CTA 6.30-8.00MB u/CTA 4-29 units 2231 S_max 35/35
+b1kv245760   tail      C=   16 f=0.05 pos  K=  0 tk=0 acc=0 A   149.39 Cc   4.54 A+C   154.06 imb   7.17 tail   8.40 spread 137.38 B/CTA 0.33-7.38MB u/CTA 1-2 units 276 S_max 35/35
+b1kv245760   tail      C=   32 f=0.05 pos  K=  0 tk=0 acc=0 A   148.37 Cc   5.66 A+C   154.03 imb   6.53 tail   7.62 spread  71.09 B/CTA 3.08-7.19MB u/CTA 2-17 units 404 S_max 51/51
+b1kv245760   tail      C=   16 f=0.10 pos  K=  0 tk=0 acc=0 A   150.69 Cc   4.45 A+C   155.02 imb   7.81 tail   8.93 spread 132.45 B/CTA 0.66-7.78MB u/CTA 1-2 units 268 S_max 34/34
+b1kv245760   tail      C=   32 f=0.10 pos  K=  0 tk=0 acc=0 A   149.12 Cc   5.58 A+C   154.74 imb   6.91 tail   8.10 spread  71.71 B/CTA 3.41-7.38MB u/CTA 2-9 units 396 S_max 50/50
+b1kv245760   tail      C=   16 f=0.20 pos  K=  0 tk=0 acc=0 A   156.27 Cc   3.47 A+C   159.82 imb   8.96 tail  10.11 spread 124.37 B/CTA 1.32-8.56MB u/CTA 1-2 units 252 S_max 32/32
+b1kv245760   tail      C=   32 f=0.20 pos  K=  0 tk=0 acc=0 A   150.62 Cc   5.54 A+C   156.30 imb   6.91 tail   8.03 spread  70.45 B/CTA 3.68-7.78MB u/CTA 2-5 units 380 S_max 48/48
+b1kv32768    tail      C=   16 f=0.05 pos  K=  0 tk=0 acc=0 A    25.20 Cc   3.39 A+C    28.66 imb   2.30 tail   3.34 spread  19.90 B/CTA 0.04-1.01MB u/CTA 1-2 units 244 S_max 31/31
+b1kv32768    tail      C=   32 f=0.05 pos  K=  0 tk=0 acc=0 A    25.31 Cc   3.50 A+C    28.75 imb   2.30 tail   3.46 spread  19.92 B/CTA 0.04-1.01MB u/CTA 1-2 units 244 S_max 31/31
+b1kv32768    tail      C=   16 f=0.10 pos  K=  0 tk=0 acc=0 A    25.14 Cc   4.61 A+C    29.57 imb   2.05 tail   3.10 spread  19.01 B/CTA 0.09-1.04MB u/CTA 1-2 units 268 S_max 34/34
+b1kv32768    tail      C=   32 f=0.10 pos  K=  0 tk=0 acc=0 A    25.25 Cc   5.34 A+C    30.59 imb   2.05 tail   3.06 spread  11.73 B/CTA 0.22-1.01MB u/CTA 2-4 units 324 S_max 41/41
+b1kv32768    tail      C=   16 f=0.20 pos  K=  0 tk=0 acc=0 A    25.70 Cc   3.54 A+C    29.18 imb   2.05 tail   3.14 spread  17.57 B/CTA 0.17-1.15MB u/CTA 1-2 units 252 S_max 32/32
+b1kv32768    tail      C=   32 f=0.20 pos  K=  0 tk=0 acc=0 A    24.86 Cc   5.63 A+C    30.50 imb   1.66 tail   2.64 spread   8.54 B/CTA 0.43-1.04MB u/CTA 2-5 units 380 S_max 48/48
+ragged8      tail      C=   16 f=0.05 pos  K=  0 tk=0 acc=0 A    94.61 Cc   3.30 A+C    97.92 imb   2.05 tail   3.17 spread   4.02 B/CTA 3.44-4.56MB u/CTA 2-15 units 597 S_max 25/25
+ragged8      tail      C=   32 f=0.05 pos  K=  0 tk=0 acc=0 A    95.12 Cc   3.60 A+C    98.70 imb   1.54 tail   2.59 spread   3.63 B/CTA 3.37-4.53MB u/CTA 2-15 units 653 S_max 32/32
+ragged8      tail      C=   16 f=0.10 pos  K=  0 tk=0 acc=0 A    96.58 Cc   3.39 A+C   100.00 imb   4.35 tail   5.46 spread   6.74 B/CTA 3.04-4.71MB u/CTA 2-24 units 767 S_max 25/25
+ragged8      tail      C=   32 f=0.10 pos  K=  0 tk=0 acc=0 A    95.47 Cc   5.18 A+C   100.64 imb   1.54 tail   2.66 spread   3.02 B/CTA 2.81-4.67MB u/CTA 2-27 units 967 S_max 41/41
+ragged8      tail      C=   16 f=0.20 pos  K=  0 tk=0 acc=0 A    98.50 Cc   3.44 A+C   102.02 imb   7.42 tail   8.50 spread  10.61 B/CTA 3.14-5.03MB u/CTA 2-23 units 873 S_max 24/24
+ragged8      tail      C=   32 f=0.20 pos  K=  0 tk=0 acc=0 A    97.78 Cc   4.70 A+C   102.40 imb   3.97 tail   5.12 spread   6.56 B/CTA 2.47-4.87MB u/CTA 3-30 units 1305 S_max 40/40
+ragged64     tail      C=   16 f=0.05 pos  K=  0 tk=0 acc=0 A   215.25 Cc   6.94 A+C   222.24 imb   2.30 tail   3.31 spread   3.76 B/CTA 8.57-10.31MB u/CTA 4-38 units 1786 S_max 15/15
+ragged64     tail      C=   32 f=0.05 pos  K=  0 tk=0 acc=0 A   215.10 Cc   6.98 A+C   222.06 imb   2.56 tail   3.70 spread   4.06 B/CTA 8.62-10.37MB u/CTA 4-40 units 1786 S_max 15/15
+ragged64     tail      C=   16 f=0.10 pos  K=  0 tk=0 acc=0 A   218.90 Cc   7.36 A+C   226.26 imb   1.79 tail   2.99 spread   2.99 B/CTA 8.61-10.55MB u/CTA 7-45 units 2596 S_max 19/19
+ragged64     tail      C=   32 f=0.10 pos  K=  0 tk=0 acc=0 A   219.20 Cc   9.20 A+C   228.37 imb   1.54 tail   2.51 spread   3.17 B/CTA 8.61-10.60MB u/CTA 8-46 units 2772 S_max 27/27
+ragged64     tail      C=   16 f=0.20 pos  K=  0 tk=0 acc=0 A   221.49 Cc   7.68 A+C   229.17 imb   3.07 tail   4.05 spread   6.05 B/CTA 8.84-11.13MB u/CTA 9-50 units 3543 S_max 19/19
+ragged64     tail      C=   32 f=0.20 pos  K=  0 tk=0 acc=0 A   227.94 Cc  11.36 A+C   239.38 imb   1.02 tail   2.13 spread   2.34 B/CTA 8.79-11.12MB u/CTA 14-55 units 4423 S_max 34/34
+done; check FAIL count 0

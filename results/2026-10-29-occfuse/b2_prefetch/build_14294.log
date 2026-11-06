@@ -1,0 +1,31 @@
+/raid/garv901/regime-mk-core/probe/mk_core/occfuse/common/ub.cuh(69): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/raid/garv901/regime-mk-core/probe/mk_core/occfuse/common/ub.cuh(92): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z4k_b214CUtensorMap_stS_PjPyS1_i3Cfg' for 'sm_100a'
+ptxas info    : Function properties for _Z4k_b214CUtensorMap_stS_PjPyS1_i3Cfg
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 36 registers, used 1 barriers
+ptxas info    : Compile time = 67.065 ms
+ptxas info    : Compiling entry function '_Z9k_l2flushP5uint4mj' for 'sm_100a'
+ptxas info    : Function properties for _Z9k_l2flushP5uint4mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 14 registers, used 0 barriers
+ptxas info    : Compile time = 1.456 ms
+ptxas info    : Compiling entry function '_Z10k_init_f32Pfmj' for 'sm_100a'
+ptxas info    : Function properties for _Z10k_init_f32Pfmj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 12 registers, used 0 barriers
+ptxas info    : Compile time = 1.624 ms
+ptxas info    : Compiling entry function '_Z11k_init_bf16P13__nv_bfloat16mj' for 'sm_100a'
+ptxas info    : Function properties for _Z11k_init_bf16P13__nv_bfloat16mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.678 ms

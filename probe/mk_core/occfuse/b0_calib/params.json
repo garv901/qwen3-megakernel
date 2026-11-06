@@ -1,0 +1,119 @@
+{
+ "t_bar": {
+  "formula": "T(N,W) = t_bar(N) + s*W (globaltimer spin, arm a); t_bar_us = coeffs.t_bar_us[N]",
+  "coeffs": {
+   "N": [
+    8,
+    16,
+    32,
+    64,
+    96,
+    128,
+    148
+   ],
+   "t_bar_us": [
+    1.1534,
+    1.1831,
+    1.1929,
+    1.2029,
+    1.2162,
+    1.2234,
+    1.2152
+   ],
+   "slope": [
+    0.9972,
+    1.0031,
+    1.0039,
+    1.0058,
+    1.0076,
+    1.0106,
+    1.0092
+   ]
+  },
+  "units": "us",
+  "fit_rmse": 0.03905990346584917,
+  "range": {
+   "N": [
+    8,
+    148
+   ],
+   "W_us": [
+    0,
+    4
+   ]
+  },
+  "jobs": [
+   14278,
+   14277
+  ]
+ },
+ "t_window_exposed": {
+  "formula": "extra T vs empty phase = a + b*nld (nld x 32 KB loads issued in the barrier window, N=148, W=0, drained before the next arrive)",
+  "coeffs": {
+   "a_us": 0.1271,
+   "b_us_per_load": 0.4498
+  },
+  "units": "us",
+  "fit_rmse": 0.02632073650868359,
+  "range": {
+   "nld": [
+    1,
+    4
+   ]
+  },
+  "jobs": [
+   14278,
+   14277
+  ]
+ },
+ "lat_bar": {
+  "formula": "lat (median exit - max arrive) = a + b*nld",
+  "coeffs": {
+   "a_us": 0.8098,
+   "b_us_per_load": 0.0871,
+   "lat_nld0_us": 0.8245
+  },
+  "units": "us",
+  "fit_rmse": 0.024512473531978544,
+  "range": {
+   "nld": [
+    0,
+    4
+   ]
+  },
+  "jobs": [
+   14278,
+   14277
+  ]
+ },
+ "clock_mhz": {
+  "formula": "clk_sample MHz (median over launches)",
+  "coeffs": {
+   "c_busy": 1699.3,
+   "c_idle": 1964.6
+  },
+  "units": "MHz",
+  "fit_rmse": null,
+  "range": {
+   "W": "idle spin 3us / 48 tcgen05 MMAs per phase"
+  },
+  "jobs": [
+   14278,
+   14277
+  ]
+ },
+ "gtstep": {
+  "formula": "globaltimer step",
+  "coeffs": {
+   "step_ns": 32,
+   "median_quantization_ns": 256
+  },
+  "units": "ns",
+  "fit_rmse": null,
+  "range": {},
+  "jobs": [
+   14278,
+   14277
+  ]
+ }
+}

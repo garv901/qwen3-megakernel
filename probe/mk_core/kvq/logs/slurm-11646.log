@@ -1,0 +1,4 @@
+GPU 0: NVIDIA B200 (UUID: GPU-17dce9e8-fd5a-2fcc-3847-dc31ae451efc)
+== kvq --data randn --nl 4
+b8kv32768    static    C=    0 -    A   166.96 imb   3.33 tail   4.32 spread   5.78 B/CTA 7.26-7.26MB u/CTA 1-2 units 211 S_max 4
+CALIBRATION vs a1ub ld: A 166.96 (156.864, +6.4%)  imb 3.33 (4.352, -23.5%)

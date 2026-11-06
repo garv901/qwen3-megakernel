@@ -1,0 +1,7 @@
+# nvidia-smi -lgc 1965 (no sudo)
+The current user does not have permission to change clocks for GPU 00000000:1B:00.0.
+Terminating early due to previous errors.
+exit=4
+# sudo -n true
+sudo: a password is required
+exit=1

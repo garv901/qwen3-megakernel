@@ -1,0 +1,23 @@
+# mref_real: R1 (fixed-reference split-K accumulation) on real Qwen3-0.6B decode
+
+Run: `sbatch probe/mk_core/mref_real/mref_real.sbatch` (job 12259, B200, priority, ~2 min). Script `mref_real.py run|analyze`. Output `results/2026-10-28-mref-real/` : `report.txt` (all tables), `summary.json`, `records.npz` (per seq/step/layer/head stats and errors), `meta.json`.
+
+## Method
+- 24 sequences: kv 1K/4K/16K/32K (prefill L-8 tokens, 8 greedy decode steps) x {prose = raw ShareGPT text, chat = ShareGPT turns in the Qwen chat template (starts `<|im_start|>`; Qwen3 has no BOS), code = python source files of transformers/torch}. 12 cal + 12 test, disjoint documents. 9 records per sequence: prefill last token (step -1) + 8 decode steps. 28 layers x 16 q-heads. kv 1016..32768.
+- q (post q_norm, RoPE; hooked by patching `modeling_qwen3.apply_rotary_pos_emb` in-process) and cached K/V (post k_norm, RoPE) are bf16 as the model computes them; scores in mk's domain s = q.k/sqrt(128)*log2e in fp32.
+- Window per record, g = m_ref - true_max: g > g_lo = max(log2 sum p, log2 max_d sum p|v_d|) - 128 (no fp32 overflow of any partial l or o); g <= g_hi = 126 - d* where terms flushed by ex2.ftz (p < 2^-126) hold <= 1e-6 of l. Measured over all test records: g_lo <= -119.1, g_hi >= 94.2, so the window is about (-119, +94], centre about -12; log2 sum p max 8.9, max|v| up to 134 (late layers) only costs ~7 bits in g_lo.
+- Numerics: fp32 R1 with p = flush(exp2(s - m_ref)), S = 32 and 128 pieces, pieces summed in a random permutation by cumsum (a scan, not strictly the atomic order; fp32 order noise ~1e-6 is same as in mref_num), error = max_d |out - exact_fp64| / max_d |exact|, max over heads. bf16-p variant rounds p before PV (l stays fp32). Baseline = local-max split-K with the same pieces.
+- (b) table = max true_max over cal seqs per (layer, head), (e2) = max |k| per (layer, kv-head) over cal seqs. (c) = true max at the previous record.
+
+## Results (test split)
+- Spreads (log2): max-min median 33-48 per layer, max up to 290 (layer 0) and 64-146 elsewhere; max - second-largest median 1-5, max 10-22; max - p99.9 median 4-10, max 12-27; true max itself 13-23 median, up to 69 (layers 0, 6, 11, 16). Sink (argmax==position 0) in ~65-70% of rows overall, ~0 at layers 0-2, 0.6-0.95 in layers 3-27. Sink also dominates with `<|im_start|>` first token and with raw text (first token has no special form), so there is no BOS dependence.
+- (a) norm bound: gap median 15-1240, max 2487 (layer 0, heads 12/5/4/15/13/9). Inside the window for every record only in layers 11, 13, 16, 18, 26; 52% of records overall. Fails by up to 2386 above g_hi. Numerics: l underflows to 0 in 6656 head-rows; errors inf. (e1 per-seq layer max over kv-heads and e2 static table are worse or equal.)
+- (b) static constant (margin 0): g in [-9.2, +45.8], per-layer max 11-35, true max exceeded in few rows by <= 9 (harmless, g_lo is -119). Min margin to the window 56.7 (high side), 113.9 (low side). Generalises across kv 1K..32K and calibration to test docs. Best shift -29 gives min margin 84.9.
+- (c) previous step's max: g in [-34.7, +31.4], p50 0.1, 44% of rows g < 0, 1% below -8; min margin 70.4 (hi) / 93.3 (lo). Best uniform shift -11 gives 81.4.
+- (d) q.k_sink: g <= 0 always; in layers 1-27 g in [-54, 0] and median 0, margin >= ~79 low side. Fails in layer 0 (no sink; g down to -267 in heads 4, 5, 12, 13: 70 of 48384 rows, partial sums overflow to inf, 80 head-rows). Needs a layer-0 exception (use (b) or (c) there).
+- Errors vs exact (max over everything, S128 fp32 p): local-max 4.9e-6; oracle 4.2e-6; (b) 5.9e-6; (c) 5.0e-6. Medians identical (4e-7). S32: local 1.6e-5, (b) 1.8e-5, (c) 1.7e-5. No NaN/inf/underflow for b, c, b+8, c+8. bf16 p: local median 7e-4 / max 4.1e-3; R1 median 3.0e-3 (b, c), 1.8e-3 (d), 1.3e-3 (oracle); max 1.5e-2 (b), 2.0e-2 (c), vs 6.5e-3 oracle. The bf16 degradation comes from the rounding of p when the top term is not exactly 1 (local max makes the dominant p exactly 1); it is not a window effect, it is independent of g.
+
+## Caveats
+- ShareGPT / code files, no LongBench or c4 (not materialised in the cache; no parquet reader in the venv). One 0.6B model, greedy continuation of mid-document truncation, 8 steps per sequence, 12 test sequences.
+- Max kv 32K. b1 x kv245K not tested; log2 sum p grows only ~log2(n) so g_lo shifts by < 4 bits, but the tail of the (b) constant could grow with length (the observed maximum grew only mildly 1K -> 32K: g range -2.6 -> -8.0 vs a fixed table).
+- cumsum is not a true atomic-order emulation. q is not rounded to bf16 after pre-scaling as mk does (a few 1e-3 relative on s, i.e. < 0.1 log2 for |s| < 30).

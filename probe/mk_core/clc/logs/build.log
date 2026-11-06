@@ -1,0 +1,46 @@
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z8k_streamILi6EEvPK5uint4PK5uint2iPjP3RecS6_S6_' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_streamILi6EEvPK5uint4PK5uint2iPjP3RecS6_S6_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 1 barriers, 88 bytes smem
+ptxas info    : Compile time = 12.273 ms
+ptxas info    : Compiling entry function '_Z8k_streamILi7EEvPK5uint4PK5uint2iPjP3RecS6_S6_' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_streamILi7EEvPK5uint4PK5uint2iPjP3RecS6_S6_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 1 barriers, 64 bytes smem
+ptxas info    : Compile time = 8.845 ms
+ptxas info    : Compiling entry function '_Z8k_streamILi5EEvPK5uint4PK5uint2iPjP3RecS6_S6_' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_streamILi5EEvPK5uint4PK5uint2iPjP3RecS6_S6_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 1 barriers, 88 bytes smem
+ptxas info    : Compile time = 10.560 ms
+ptxas info    : Compiling entry function '_Z8k_streamILi4EEvPK5uint4PK5uint2iPjP3RecS6_S6_' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_streamILi4EEvPK5uint4PK5uint2iPjP3RecS6_S6_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 80 registers, used 1 barriers, 64 bytes smem
+ptxas info    : Compile time = 16.700 ms
+ptxas info    : Compiling entry function '_Z8k_streamILi2EEvPK5uint4PK5uint2iPjP3RecS6_S6_' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_streamILi2EEvPK5uint4PK5uint2iPjP3RecS6_S6_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 1 barriers, 68 bytes smem
+ptxas info    : Compile time = 9.053 ms
+ptxas info    : Compiling entry function '_Z8k_streamILi1EEvPK5uint4PK5uint2iPjP3RecS6_S6_' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_streamILi1EEvPK5uint4PK5uint2iPjP3RecS6_S6_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 48 registers, used 1 barriers, 68 bytes smem
+ptxas info    : Compile time = 8.793 ms
+ptxas info    : Compiling entry function '_Z8k_streamILi0EEvPK5uint4PK5uint2iPjP3RecS6_S6_' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_streamILi0EEvPK5uint4PK5uint2iPjP3RecS6_S6_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 80 registers, used 1 barriers, 64 bytes smem
+ptxas info    : Compile time = 15.059 ms
+ptxas info    : Compiling entry function '_Z7k_flushP5uint4mj' for 'sm_100a'
+ptxas info    : Function properties for _Z7k_flushP5uint4mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 14 registers, used 0 barriers
+ptxas info    : Compile time = 1.741 ms
+ptxas info    : Compiling entry function '_Z6k_fillP5uint4m' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_fillP5uint4m
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 16 registers, used 0 barriers
+ptxas info    : Compile time = 2.292 ms

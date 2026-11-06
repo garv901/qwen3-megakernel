@@ -1,0 +1,175 @@
+rows 454 FAIL rows 0
+
+== GATE QKV T128 TT128 (redadd): KS4 vs KS8, us_Tmean per pass file
+pf1 KS4 gate2_14301.jsonl            T 6.199 (reps 6.167..6.209) mhz 1818
+pf1 KS4 p1_QKV_T128_14301.jsonl      T 6.195 (reps 6.169..6.206) mhz 1819
+pf1 KS4 p2_QKV_T128_14301.jsonl      T 6.199 (reps 6.158..6.206) mhz 1819
+pf1 KS4 sanity_14301.jsonl           T 6.197 (reps 6.149..6.204) mhz 1820
+pf1 KS8 gate2_14301.jsonl            T 7.424 (reps 7.385..7.433) mhz 1831
+pf1 KS8 p1_QKV_T128_14301.jsonl      T 7.417 (reps 7.369..7.438) mhz 1831
+pf1 KS8 p2_QKV_T128_14301.jsonl      T 7.419 (reps 7.364..7.426) mhz 1831
+pf1 KS8 sanity_14301.jsonl           T 7.412 (reps 7.380..7.424) mhz 1835
+pf1: KS8 - KS4 = 1.220 us (median over passes: KS4 6.198, KS8 7.418); gate >= 0.8: PASS
+pf0 KS4 gate2_14301.jsonl            T 6.400 (reps 6.379..6.414) mhz 1825
+pf0 KS4 p1_QKV_T128_14301.jsonl      T 6.391 (reps 6.384..6.412) mhz 1825
+pf0 KS8 gate2_14301.jsonl            T 7.592 (reps 7.544..7.606) mhz 1832
+pf0 KS8 p1_QKV_T128_14301.jsonl      T 7.592 (reps 7.565..7.609) mhz 1832
+pf0: KS8 - KS4 = 1.197 us (median over passes: KS4 6.395, KS8 7.592); gate >= 0.8: PASS
+per-pass diffs (pf 1): [1.225 1.222 1.22  1.215]
+
+== T tables: us_Tmean (pf1 / pf0) | tiles busy max_steps tiles_max | ws arm pf1 (gemm work / reduce work, busy CTAs)
+QKV T8
+  KS 1 TT 16 ring6 tiles   32 busy  32 steps  8 tiles_max 1 | redadd   9.51 /   9.16 (busy work 5.89 idle 0.51 last 6.14 lat 0.90)
+  KS 2 TT 16 ring6 tiles   64 busy  64 steps  4 tiles_max 1 | redadd   6.55 /   5.94 (busy work 3.84 idle 0.51 last 4.10 lat 0.77) | ws   8.50 /   7.94 (gemm 3.58, reduce 0.51)
+  KS 4 TT 16 ring6 tiles  128 busy 128 steps  2 tiles_max 1 | redadd   4.83 /   5.18 (busy work 2.82 idle 0.64 last 3.07 lat 0.77) | ws   7.37 /   7.71 (gemm 2.69, reduce 0.51)
+  KS 8 TT 16 ring6 tiles  256 busy 148 steps  2 tiles_max 2 | redadd   5.06 /   5.37 (busy work 3.07 idle -1.00 last 3.33 lat 0.77) | ws   7.94 /   8.28 (gemm 2.82, reduce 0.51)
+QKV T32
+  KS 1 TT 32 ring5 tiles   32 busy  32 steps  8 tiles_max 1 | redadd   9.49 /   9.31 (busy work 6.40 idle 0.51 last 6.66 lat 0.77)
+  KS 2 TT 32 ring5 tiles   64 busy  64 steps  4 tiles_max 1 | redadd   6.69 /   6.09 (busy work 4.10 idle 0.51 last 4.35 lat 0.77) | ws   8.78 /   8.21 (gemm 3.84, reduce 0.77)
+  KS 4 TT 32 ring5 tiles  128 busy 128 steps  2 tiles_max 1 | redadd   4.94 /   5.07 (busy work 3.07 idle 0.64 last 3.33 lat 0.77) | ws   7.58 /   7.73 (gemm 2.82, reduce 0.77)
+  KS 8 TT 32 ring5 tiles  256 busy 148 steps  2 tiles_max 2 | redadd   5.05 /   5.26 (busy work 3.33 idle -1.00 last 3.58 lat 0.77) | ws   8.09 /   8.34 (gemm 3.07, reduce 0.77)
+QKV T128
+  KS 1 TT128 ring3 tiles   32 busy  32 steps  8 tiles_max 1 | redadd  10.29 /  10.06 (busy work 7.94 idle 0.51 last 8.19 lat 0.77)
+  KS 2 TT128 ring3 tiles   64 busy  64 steps  4 tiles_max 1 | redadd   8.20 /   7.43 (busy work 5.38 idle 0.51 last 6.14 lat 0.77) | ws  10.76 /  10.00 (gemm 5.50, reduce 1.54)
+  KS 4 TT128 ring3 tiles  128 busy 128 steps  2 tiles_max 1 | redadd   6.20 /   6.40 (busy work 4.35 idle 0.51 last 4.86 lat 0.77) | ws   9.29 /   9.36 (gemm 4.10, reduce 2.30)
+  KS 8 TT128 ring3 tiles  256 busy 148 steps  2 tiles_max 2 | redadd   7.42 /   7.59 (busy work 5.63 idle -1.00 last 5.89 lat 0.77) | ws  11.05 /  11.20 (gemm 4.86, reduce 3.33)
+QKV T256
+  KS 1 TT128 ring3 tiles   64 busy  64 steps  8 tiles_max 1 | redadd  10.33 /  10.17 (busy work 7.94 idle 0.51 last 8.19 lat 0.77)
+  KS 2 TT128 ring3 tiles  128 busy 128 steps  4 tiles_max 1 | redadd   8.03 /   7.75 (busy work 5.89 idle 0.51 last 6.40 lat 0.77) | ws  11.56 /  11.09 (gemm 5.63, reduce 2.30)
+  KS 4 TT128 ring3 tiles  256 busy 148 steps  4 tiles_max 2 | redadd   9.39 /   8.95 (busy work 7.17 idle -1.00 last 7.68 lat 0.77) | ws  13.70 /  13.22 (gemm 6.40, reduce 3.33)
+  KS 8 TT128 ring3 tiles  512 busy 148 steps  4 tiles_max 4 | redadd  11.90 /  11.47 (busy work 8.19 idle -1.00 last 9.98 lat 0.77) | ws  16.61 /  16.55 (gemm 6.91, reduce 4.61)
+O T8
+  KS 1 TT 16 ring6 tiles    8 busy   8 steps 16 tiles_max 1 | redadd  14.28 /  13.75 (busy work 10.62 idle 0.51 last 10.75 lat 0.77)
+  KS 2 TT 16 ring6 tiles   16 busy  16 steps  8 tiles_max 1 | redadd   9.74 /   9.33 (busy work 6.14 idle 0.51 last 6.40 lat 0.77) | ws  11.05 /  11.25 (gemm 5.89, reduce 0.51)
+  KS 4 TT 16 ring6 tiles   32 busy  32 steps  4 tiles_max 1 | redadd   6.53 /   5.87 (busy work 3.84 idle 0.51 last 4.10 lat 1.02) | ws   8.02 /   8.30 (gemm 3.58, reduce 0.51)
+  KS 8 TT 16 ring6 tiles   64 busy  64 steps  2 tiles_max 1 | redadd   4.70 /   4.73 (busy work 2.82 idle 0.51 last 3.07 lat 0.77) | ws   6.99 /   7.49 (gemm 2.56, reduce 0.51)
+O T32
+  KS 1 TT 32 ring5 tiles    8 busy   8 steps 16 tiles_max 1 | redadd  14.19 /  13.88 (busy work 11.01 idle 0.51 last 11.26 lat 0.77)
+  KS 2 TT 32 ring5 tiles   16 busy  16 steps  8 tiles_max 1 | redadd   9.69 /   9.41 (busy work 6.66 idle 0.51 last 6.66 lat 0.77) | ws  11.41 /  11.39 (gemm 6.40, reduce 0.51)
+  KS 4 TT 32 ring5 tiles   32 busy  32 steps  4 tiles_max 1 | redadd   6.68 /   6.01 (busy work 4.10 idle 0.51 last 4.35 lat 0.90) | ws   8.87 /   8.51 (gemm 3.84, reduce 0.51)
+  KS 8 TT 32 ring5 tiles   64 busy  64 steps  2 tiles_max 1 | redadd   4.85 /   4.70 (busy work 3.07 idle 0.51 last 3.33 lat 0.77) | ws   7.50 /   7.55 (gemm 2.82, reduce 0.51)
+O T128
+  KS 1 TT128 ring3 tiles    8 busy   8 steps 16 tiles_max 1 | redadd  14.96 /  14.65 (busy work 12.54 idle 0.51 last 12.80 lat 0.77)
+  KS 2 TT128 ring3 tiles   16 busy  16 steps  8 tiles_max 1 | redadd  10.57 /  10.26 (busy work 8.19 idle 0.51 last 8.45 lat 0.77) | ws  12.42 /  12.20 (gemm 7.94, reduce 0.77)
+  KS 4 TT128 ring3 tiles   32 busy  32 steps  4 tiles_max 1 | redadd   7.96 /   7.32 (busy work 5.38 idle 0.51 last 5.89 lat 0.77) | ws  10.49 /   9.77 (gemm 5.38, reduce 0.77)
+  KS 8 TT128 ring3 tiles   64 busy  64 steps  2 tiles_max 1 | redadd   5.82 /   5.83 (busy work 4.10 idle 0.51 last 4.35 lat 0.77) | ws   8.63 /   8.55 (gemm 3.84, reduce 0.77)
+O T256
+  KS 1 TT128 ring3 tiles   16 busy  16 steps 16 tiles_max 1 | redadd  14.79 /  14.62 (busy work 12.54 idle 0.51 last 12.80 lat 0.77)
+  KS 2 TT128 ring3 tiles   32 busy  32 steps  8 tiles_max 1 | redadd  10.51 /  10.24 (busy work 8.19 idle 0.51 last 8.45 lat 0.77) | ws  12.36 /  12.25 (gemm 7.68, reduce 1.28)
+  KS 4 TT128 ring3 tiles   64 busy  64 steps  4 tiles_max 1 | redadd   7.96 /   7.36 (busy work 5.38 idle 0.51 last 5.63 lat 0.77) | ws  10.48 /   9.85 (gemm 5.38, reduce 1.79)
+  KS 8 TT128 ring3 tiles  128 busy 128 steps  2 tiles_max 1 | redadd   6.05 /   6.15 (busy work 4.35 idle 0.51 last 4.61 lat 0.77) | ws   9.02 /   8.90 (gemm 4.10, reduce 2.05)
+GU T8
+  KS 1 TT 16 ring6 tiles   48 busy  48 steps  8 tiles_max 1 | redadd   9.56 /   9.24 (busy work 5.89 idle 0.51 last 6.14 lat 0.90)
+  KS 2 TT 16 ring6 tiles   96 busy  96 steps  4 tiles_max 1 | redadd   6.59 /   6.07 (busy work 3.84 idle 0.51 last 4.10 lat 0.77) | ws   8.62 /   8.11 (gemm 3.58, reduce 0.51)
+  KS 4 TT 16 ring6 tiles  192 busy 148 steps  4 tiles_max 2 | redadd   6.91 /   6.46 (busy work 3.07 idle -1.00 last 4.35 lat 0.77) | ws   9.42 /   8.97 (gemm 2.82, reduce 0.51)
+  KS 8 TT 16 ring6 tiles  384 busy 148 steps  3 tiles_max 3 | redadd   6.21 /   6.30 (busy work 3.84 idle -1.00 last 4.10 lat 0.77) | ws   9.02 /   9.13 (gemm 3.58, reduce 0.51)
+GU T32
+  KS 1 TT 32 ring5 tiles   48 busy  48 steps  8 tiles_max 1 | redadd   9.53 /   9.41 (busy work 6.40 idle 0.51 last 6.66 lat 0.77)
+  KS 2 TT 32 ring5 tiles   96 busy  96 steps  4 tiles_max 1 | redadd   6.74 /   6.22 (busy work 4.10 idle 0.51 last 4.35 lat 0.77) | ws   8.87 /   8.41 (gemm 3.84, reduce 1.28)
+  KS 4 TT 32 ring5 tiles  192 busy 148 steps  4 tiles_max 2 | redadd   6.99 /   6.35 (busy work 3.07 idle -1.00 last 4.61 lat 0.77) | ws   9.42 /   8.87 (gemm 3.07, reduce 1.54)
+  KS 8 TT 32 ring5 tiles  384 busy 148 steps  3 tiles_max 3 | redadd   6.33 /   6.11 (busy work 4.10 idle -1.00 last 4.35 lat 0.77) | ws   9.37 /   9.42 (gemm 3.84, reduce 1.79)
+GU T128
+  KS 1 TT128 ring3 tiles   48 busy  48 steps  8 tiles_max 1 | redadd  10.39 /  10.21 (busy work 7.94 idle 0.51 last 8.19 lat 0.77)
+  KS 2 TT128 ring3 tiles   96 busy  96 steps  4 tiles_max 1 | redadd   8.13 /   7.66 (busy work 5.89 idle 0.51 last 6.14 lat 0.77) | ws  11.20 /  10.50 (gemm 5.63, reduce 2.05)
+  KS 4 TT128 ring3 tiles  192 busy 148 steps  4 tiles_max 2 | redadd   9.23 /   8.90 (busy work 4.86 idle -1.00 last 7.42 lat 0.77) | ws  12.89 /  12.66 (gemm 4.35, reduce 3.07)
+  KS 8 TT128 ring3 tiles  384 busy 148 steps  3 tiles_max 3 | redadd  10.24 /   9.99 (busy work 7.68 idle -1.00 last 8.19 lat 0.77) | ws  14.24 /  14.14 (gemm 6.40, reduce 4.10)
+GU T256
+  KS 1 TT128 ring3 tiles   96 busy  96 steps  8 tiles_max 1 | redadd  10.42 /  10.36 (busy work 8.19 idle 0.51 last 8.45 lat 0.77)
+  KS 2 TT128 ring3 tiles  192 busy 148 steps  8 tiles_max 2 | redadd  11.52 /  11.41 (busy work 6.40 idle -1.00 last 9.73 lat 0.77) | ws  15.08 /  15.03 (gemm 5.89, reduce 2.88)
+  KS 4 TT128 ring3 tiles  384 busy 148 steps  6 tiles_max 3 | redadd  11.61 /  11.75 (busy work 9.28 idle -1.00 last 9.73 lat 0.77) | ws  16.86 /  17.12 (gemm 8.45, reduce 4.61)
+  KS 8 TT128 ring3 tiles  768 busy 148 steps  6 tiles_max 6 | redadd  16.25 /  16.01 (busy work 11.78 idle -1.00 last 14.34 lat 0.77) | ws  22.34 /  22.88 (gemm 9.73, reduce 6.66)
+D T8
+  KS 1 TT 16 ring6 tiles    8 busy   8 steps 24 tiles_max 1 | redadd  19.00 /  18.51 (busy work 15.36 idle 0.51 last 15.62 lat 0.77)
+  KS 2 TT 16 ring6 tiles   16 busy  16 steps 12 tiles_max 1 | redadd  12.15 /  11.69 (busy work 8.45 idle 0.51 last 8.70 lat 0.77) | ws  13.41 /  13.62 (gemm 8.19, reduce 0.51)
+  KS 3 TT 16 ring6 tiles   24 busy  24 steps  8 tiles_max 1 | redadd   9.79 /   9.37 (busy work 6.14 idle 0.51 last 6.40 lat 0.77) | ws  11.14 /  11.54 (gemm 5.89, reduce 0.51)
+  KS 4 TT 16 ring6 tiles   32 busy  32 steps  6 tiles_max 1 | redadd   8.41 /   7.29 (busy work 4.86 idle 0.51 last 5.12 lat 1.02) | ws   9.81 /   9.74 (gemm 4.48, reduce 0.51)
+  KS 6 TT 16 ring6 tiles   48 busy  48 steps  4 tiles_max 1 | redadd   6.55 /   5.93 (busy work 3.84 idle 0.51 last 4.10 lat 0.77) | ws   8.76 /   8.28 (gemm 3.58, reduce 0.51)
+  KS 8 TT 16 ring6 tiles   64 busy  64 steps  3 tiles_max 1 | redadd   5.82 /   5.29 (busy work 3.33 idle 0.51 last 3.71 lat 0.77) | ws   8.03 /   7.99 (gemm 3.07, reduce 0.51)
+  KS12 TT 16 ring6 tiles   96 busy  96 steps  2 tiles_max 1 | redadd   4.74 /   4.98 (busy work 2.82 idle 0.51 last 3.07 lat 0.77) | ws   7.72 /   8.12 (gemm 2.56, reduce 0.51)
+  KS24 TT 16 ring6 tiles  192 busy 148 steps  2 tiles_max 2 | redadd   4.86 /   5.18 (busy work 2.30 idle -1.00 last 3.33 lat 0.77) | ws   9.16 /   9.58 (gemm 2.05, reduce 0.51)
+D T32
+  KS 1 TT 32 ring5 tiles    8 busy   8 steps 24 tiles_max 1 | redadd  18.99 /  18.63 (busy work 15.87 idle 0.51 last 15.87 lat 0.77)
+  KS 2 TT 32 ring5 tiles   16 busy  16 steps 12 tiles_max 1 | redadd  12.09 /  11.79 (busy work 8.96 idle 0.51 last 9.22 lat 0.77) | ws  13.80 /  13.76 (gemm 8.70, reduce 0.51)
+  KS 3 TT 32 ring5 tiles   24 busy  24 steps  8 tiles_max 1 | redadd   9.71 /   9.44 (busy work 6.66 idle 0.51 last 6.91 lat 0.77) | ws  12.03 /  11.92 (gemm 6.34, reduce 0.51)
+  KS 4 TT 32 ring5 tiles   32 busy  32 steps  6 tiles_max 1 | redadd   8.30 /   7.62 (busy work 4.86 idle 0.51 last 5.38 lat 0.77) | ws  10.31 /  10.12 (gemm 4.61, reduce 0.51)
+  KS 6 TT 32 ring5 tiles   48 busy  48 steps  4 tiles_max 1 | redadd   6.70 /   6.09 (busy work 4.10 idle 0.51 last 4.35 lat 0.77) | ws   9.07 /   8.52 (gemm 3.84, reduce 0.51)
+  KS 8 TT 32 ring5 tiles   64 busy  64 steps  3 tiles_max 1 | redadd   5.97 /   5.43 (busy work 3.58 idle 0.51 last 3.84 lat 0.77) | ws   8.61 /   8.25 (gemm 3.33, reduce 0.51)
+  KS12 TT 32 ring5 tiles   96 busy  96 steps  2 tiles_max 1 | redadd   4.87 /   4.85 (busy work 3.07 idle 0.51 last 3.33 lat 0.77) | ws   8.07 /   8.16 (gemm 2.82, reduce 0.51)
+  KS24 TT 32 ring5 tiles  192 busy 148 steps  2 tiles_max 2 | redadd   5.00 /   5.06 (busy work 2.56 idle -1.00 last 3.58 lat 0.77) | ws   9.63 /   9.84 (gemm 2.30, reduce 0.51)
+D T128
+  KS 1 TT128 ring3 tiles    8 busy   8 steps 24 tiles_max 1 | redadd  19.72 /  19.41 (busy work 17.41 idle 0.51 last 17.41 lat 0.77)
+  KS 2 TT128 ring3 tiles   16 busy  16 steps 12 tiles_max 1 | redadd  12.98 /  12.66 (busy work 10.50 idle 0.51 last 10.75 lat 0.77) | ws  14.81 /  14.58 (gemm 10.24, reduce 0.77)
+  KS 3 TT128 ring3 tiles   24 busy  24 steps  8 tiles_max 1 | redadd  10.62 /  10.31 (busy work 8.19 idle 0.51 last 8.45 lat 0.77) | ws  13.03 /  12.71 (gemm 7.94, reduce 0.77)
+  KS 4 TT128 ring3 tiles   32 busy  32 steps  6 tiles_max 1 | redadd   9.47 /   9.16 (busy work 7.17 idle 0.51 last 7.42 lat 0.77) | ws  11.72 /  11.60 (gemm 6.66, reduce 0.77)
+  KS 6 TT128 ring3 tiles   48 busy  48 steps  4 tiles_max 1 | redadd   8.12 /   7.40 (busy work 5.38 idle 0.51 last 6.14 lat 0.77) | ws  10.57 /   9.75 (gemm 5.38, reduce 0.77)
+  KS 8 TT128 ring3 tiles   64 busy  64 steps  3 tiles_max 1 | redadd   7.14 /   6.60 (busy work 4.86 idle 0.51 last 4.86 lat 0.77) | ws   9.81 /   9.31 (gemm 4.35, reduce 0.77)
+  KS12 TT128 ring3 tiles   96 busy  96 steps  2 tiles_max 1 | redadd   5.98 /   6.06 (busy work 4.35 idle 0.51 last 4.61 lat 0.77) | ws   9.35 /   9.32 (gemm 4.10, reduce 0.77)
+  KS24 TT128 ring3 tiles  192 busy 148 steps  2 tiles_max 2 | redadd   7.08 /   7.26 (busy work 4.10 idle -1.00 last 5.63 lat 0.77) | ws  11.46 /  11.36 (gemm 3.58, reduce 0.77)
+D T256
+  KS 1 TT128 ring3 tiles   16 busy  16 steps 24 tiles_max 1 | redadd  19.54 /  19.39 (busy work 17.41 idle 0.51 last 17.66 lat 0.77)
+  KS 2 TT128 ring3 tiles   32 busy  32 steps 12 tiles_max 1 | redadd  12.90 /  12.65 (busy work 10.50 idle 0.51 last 10.75 lat 0.77) | ws  14.75 /  14.67 (gemm 10.24, reduce 1.28)
+  KS 3 TT128 ring3 tiles   48 busy  48 steps  8 tiles_max 1 | redadd  10.65 /  10.36 (busy work 8.19 idle 0.51 last 8.45 lat 0.77) | ws  12.97 /  12.81 (gemm 7.94, reduce 1.79)
+  KS 4 TT128 ring3 tiles   64 busy  64 steps  6 tiles_max 1 | redadd   9.49 /   9.20 (busy work 7.17 idle 0.51 last 7.42 lat 0.77) | ws  11.76 /  11.68 (gemm 6.66, reduce 1.79)
+  KS 6 TT128 ring3 tiles   96 busy  96 steps  4 tiles_max 1 | redadd   7.79 /   7.51 (busy work 5.38 idle 0.51 last 6.14 lat 0.77) | ws  10.68 /  10.05 (gemm 5.38, reduce 1.79)
+  KS 8 TT128 ring3 tiles  128 busy 128 steps  3 tiles_max 1 | redadd   7.12 /   6.90 (busy work 4.86 idle 0.51 last 5.12 lat 0.77) | ws  10.15 /   9.65 (gemm 4.61, reduce 2.05)
+  KS12 TT128 ring3 tiles  192 busy 148 steps  4 tiles_max 2 | redadd   9.15 /   8.70 (busy work 4.61 idle -1.00 last 7.42 lat 0.77) | ws  12.16 /  11.58 (gemm 4.35, reduce 2.56)
+  KS24 TT128 ring3 tiles  384 busy 148 steps  3 tiles_max 3 | redadd   9.91 /   9.51 (busy work 7.68 idle -1.00 last 7.94 lat 0.77) | ws  13.46 /  13.12 (gemm 6.40, reduce 3.84)
+
+== paired: same (shape, T), same max_steps, different KS (redadd pf1): d T and d (tiles_max, busy)
+  QKV T8 steps 2: KS4 (busy 128, tiles_max 1) 4.83 -> KS8 (busy 148, tiles_max 2) 5.06: +0.23 us
+  QKV T32 steps 2: KS4 (busy 128, tiles_max 1) 4.94 -> KS8 (busy 148, tiles_max 2) 5.05: +0.11 us
+  QKV T128 steps 2: KS4 (busy 128, tiles_max 1) 6.20 -> KS8 (busy 148, tiles_max 2) 7.42: +1.22 us
+  QKV T256 steps 4: KS2 (busy 128, tiles_max 1) 8.03 -> KS4 (busy 148, tiles_max 2) 9.39: +1.36 us
+  QKV T256 steps 4: KS2 (busy 128, tiles_max 1) 8.03 -> KS8 (busy 148, tiles_max 4) 11.90: +3.87 us
+  QKV T256 steps 4: KS4 (busy 148, tiles_max 2) 9.39 -> KS8 (busy 148, tiles_max 4) 11.90: +2.51 us
+  GU T8 steps 4: KS2 (busy 96, tiles_max 1) 6.59 -> KS4 (busy 148, tiles_max 2) 6.91: +0.32 us
+  GU T32 steps 4: KS2 (busy 96, tiles_max 1) 6.74 -> KS4 (busy 148, tiles_max 2) 6.99: +0.24 us
+  GU T128 steps 4: KS2 (busy 96, tiles_max 1) 8.13 -> KS4 (busy 148, tiles_max 2) 9.23: +1.10 us
+  GU T256 steps 6: KS4 (busy 148, tiles_max 3) 11.61 -> KS8 (busy 148, tiles_max 6) 16.25: +4.64 us
+  D T8 steps 2: KS12 (busy 96, tiles_max 1) 4.74 -> KS24 (busy 148, tiles_max 2) 4.86: +0.12 us
+  D T32 steps 2: KS12 (busy 96, tiles_max 1) 4.87 -> KS24 (busy 148, tiles_max 2) 5.00: +0.13 us
+  D T128 steps 2: KS12 (busy 96, tiles_max 1) 5.98 -> KS24 (busy 148, tiles_max 2) 7.08: +1.10 us
+  D T256 steps 4: KS6 (busy 96, tiles_max 1) 7.79 -> KS12 (busy 148, tiles_max 2) 9.15: +1.36 us
+  D T256 steps 3: KS8 (busy 128, tiles_max 1) 7.12 -> KS24 (busy 148, tiles_max 3) 9.91: +2.79 us
+
+== fits, redadd pf1 (n=80): T = t0 + a*max_steps + c_red*red_tiles + c_pl*plain_tiles [+ g*log2(KS)]; red_tiles = tiles_max * min(T,TT)/128 for KS>1 (one unit = 128 x 128 fp32 = 64 KB per CTA), plain_tiles same for KS=1
+  lin_steps  {'one': np.float64(5.17), 'ms': np.float64(0.609)} rmse 1.398 max 7.423
+  F1         {'one': np.float64(3.812), 'ms': np.float64(0.646), 'red_t': np.float64(1.382), 'pl_t': np.float64(0.956)} rmse 0.379 max 0.791
+  F2         {'one': np.float64(4.528), 'ms': np.float64(0.609), 'red_t': np.float64(1.455), 'pl_t': np.float64(0.73), 'lgks': np.float64(-0.278)} rmse 0.299 max 0.743
+  F3         {'one': np.float64(3.907), 'ms': np.float64(0.645), 'mt': np.float64(-0.101), 'red_t': np.float64(1.448), 'pl_t': np.float64(0.979)} rmse 0.376 max 0.812
+  F4_busy    {'one': np.float64(4.295), 'ms': np.float64(0.616), 'red_t': np.float64(1.486), 'pl_t': np.float64(1.067), 'busy': np.float64(-0.005)} rmse 0.337 max 0.871
+  F1 TT16 only (n=20): {'one': np.float64(3.892), 'ms': np.float64(0.66), 'red_t': np.float64(0.742), 'pl_t': np.float64(-0.669)} rmse 0.383
+  F1 TT32 only (n=20): {'one': np.float64(4.007), 'ms': np.float64(0.65), 'red_t': np.float64(0.191), 'pl_t': np.float64(-0.232)} rmse 0.336
+  F1 TT128 only (n=40): {'one': np.float64(3.969), 'ms': np.float64(0.621), 'red_t': np.float64(1.375), 'pl_t': np.float64(1.14)} rmse 0.338
+  F1 on pf0 rows: [3.591 0.629 1.401 1.222] rmse 0.319
+== fit ws pf1 (n=64): T = t0 + a*max_steps + c_pl*partial_tiles + r*reduce_MB (KS*T*N*4 read bytes)
+  W1 {'one': np.float64(6.274), 'ms': np.float64(0.598), 'wsw_t': np.float64(1.525), 'rdMB': np.float64(0.065)} rmse 0.430 max 1.452
+  W2 {'one': np.float64(6.083), 'ms': np.float64(0.613), 'wsw_t': np.float64(1.511), 'rdMB': np.float64(0.065), 'lgks': np.float64(0.059)} rmse 0.428 max 1.343
+  reduce-stage work = 0.616 + 133.773 us/GB-read... i.e. 0.1338 us/MB, rmse 0.410
+
+== ws minus redadd at the same (shape, T, KS), pf1
+  QKV T8KS2:+2.0 T8KS4:+2.5 T8KS8:+2.9 T32KS2:+2.1 T32KS4:+2.6 T32KS8:+3.0 T128KS2:+2.6 T128KS4:+3.1 T128KS8:+3.6 T256KS2:+3.5 T256KS4:+4.3 T256KS8:+4.7
+  O T8KS2:+1.3 T8KS4:+1.5 T8KS8:+2.3 T32KS2:+1.7 T32KS4:+2.2 T32KS8:+2.7 T128KS2:+1.8 T128KS4:+2.5 T128KS8:+2.8 T256KS2:+1.9 T256KS4:+2.5 T256KS8:+3.0
+  GU T8KS2:+2.0 T8KS4:+2.5 T8KS8:+2.8 T32KS2:+2.1 T32KS4:+2.4 T32KS8:+3.0 T128KS2:+3.1 T128KS4:+3.7 T128KS8:+4.0 T256KS2:+3.6 T256KS4:+5.3 T256KS8:+6.1
+  D T8KS2:+1.3 T8KS3:+1.3 T8KS4:+1.4 T8KS6:+2.2 T8KS8:+2.2 T8KS12:+3.0 T8KS24:+4.3 T32KS2:+1.7 T32KS3:+2.3 T32KS4:+2.0 T32KS6:+2.4 T32KS8:+2.6 T32KS12:+3.2 T32KS24:+4.6 T128KS2:+1.8 T128KS3:+2.4 T128KS4:+2.2 T128KS6:+2.5 T128KS8:+2.7 T128KS12:+3.4 T128KS24:+4.4 T256KS2:+1.8 T256KS3:+2.3 T256KS4:+2.3 T256KS6:+2.9 T256KS8:+3.0 T256KS12:+3.0 T256KS24:+3.5
+
+== oracle arms (QKV T128, pf1, us_Tmean): none / no-MMA(1) / no-epi-stores(2) / no-B(4) / no-A(8)
+  KS2: none 8.20  orc1: 7.36  orc2: 6.51  orc4: 7.04  orc8: 6.50
+  KS4: none 6.20  orc1: 5.33  orc2: 4.50  orc4: 5.70  orc8: 5.50
+  KS8: none 7.42  orc1: 6.74  orc2: 4.69  orc4: 6.80  orc8: 6.72
+
+== stamps.py cross-check (QKV, raw .st, last timed launch of each config): Tmean from stamps.metrics vs jsonl
+  40 configs, max |Tmean(stamps.py, last launch) - jsonl (median of launches)| = 0.025 us
+  launch/nph vs Tmean: median ratio-1 0.015, max |.| 0.033, n>5%: 0 of 442
+  mhz range over rows: 1803 .. 1886
+
+== pf1 - pf0 (arm r, us_Tmean) by busy CTAs
+  busy   8: n  6 median +0.34 min +0.31 max +0.53
+  busy  16: n  8 median +0.30 min +0.14 max +0.46
+  busy  24: n  3 median +0.31 min +0.26 max +0.42
+  busy  32: n 11 median +0.36 min +0.18 max +1.12
+  busy  48: n  7 median +0.32 min +0.12 max +0.72
+  busy  64: n 12 median +0.53 min -0.03 max +0.77
+  busy  96: n  8 median +0.17 min -0.24 max +0.52
+  busy 128: n  6 median -0.11 min -0.34 max +0.27
+  busy 148: n 19 median +0.22 min -0.32 max +0.64

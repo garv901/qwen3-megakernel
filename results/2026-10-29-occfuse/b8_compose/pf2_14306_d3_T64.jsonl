@@ -1,0 +1,7 @@
+STUCK mbar blk 70 tid 0 line 325 addr 212224 par 1
+STUCK mbar blk 73 tid 0 line 325 addr 212224 par 1
+STUCK mbar blk 86 tid 0 line 325 addr 212224 par 1
+STUCK mbar blk 80 tid 0 line 325 addr 212224 par 1
+STUCK mbar blk 77 tid 0 line 325 addr 212224 par 1
+STUCK mbar blk 83 tid 0 line 325 addr 212224 par 1
+{"bench":"b8_compose","row":"time","design":"ts_split","T":64,"pf":2,"null":0,"error":"unspecified launch failure"}

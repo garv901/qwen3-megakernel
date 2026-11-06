@@ -1,0 +1,70 @@
+/raid/garv901/regime-mk-core/probe/mk_core/occfuse/common/ub.cuh(69): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/raid/garv901/regime-mk-core/probe/mk_core/occfuse/common/ub.cuh(92): warning #550-D: variable "old" was set but never used
+      unsigned old;
+               ^
+
+/raid/garv901/regime-mk-core/probe/mk_core/occfuse/b8_compose/b8_compose.cu(733): warning #550-D: variable "dummy" was set but never used
+      std::vector<double> rLP, rM; double dummy = 0; (void)dummy;
+                                          ^
+
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z8k_cmp_ssPKfS0_iPj' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_cmp_ssPKfS0_iPj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 30 registers, used 0 barriers
+ptxas info    : Compile time = 5.967 ms
+ptxas info    : Compiling entry function '_Z8k_cmp_bfPK13__nv_bfloat16S1_mPj' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_cmp_bfPK13__nv_bfloat16S1_mPj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.507 ms
+ptxas info    : Compiling entry function '_Z8k_cmp_guPK13__nv_bfloat16PKfS3_iPjS4_' for 'sm_100a'
+ptxas info    : Function properties for _Z8k_cmp_guPK13__nv_bfloat16PKfS3_iPjS4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 17 registers, used 0 barriers
+ptxas info    : Compile time = 6.891 ms
+ptxas info    : Compiling entry function '_Z5k_cmpPKfS0_S0_mfPjS1_' for 'sm_100a'
+ptxas info    : Function properties for _Z5k_cmpPKfS0_S0_mfPjS1_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 15 registers, used 0 barriers
+ptxas info    : Compile time = 2.048 ms
+ptxas info    : Compiling entry function '_Z6k_refgPK13__nv_bfloat16iiS1_iiPf' for 'sm_100a'
+ptxas info    : Function properties for _Z6k_refgPK13__nv_bfloat16iiS1_iiPf
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers
+ptxas info    : Compile time = 9.385 ms
+ptxas info    : Compiling entry function '_Z7k_cvt_dPKfS0_P13__nv_bfloat16i' for 'sm_100a'
+ptxas info    : Function properties for _Z7k_cvt_dPKfS0_P13__nv_bfloat16i
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 20 registers, used 0 barriers
+ptxas info    : Compile time = 6.377 ms
+ptxas info    : Compiling entry function '_Z5k_cvtPKfPK13__nv_bfloat16PS1_ii' for 'sm_100a'
+ptxas info    : Function properties for _Z5k_cvtPKfPK13__nv_bfloat16PS1_ii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 18 registers, used 0 barriers
+ptxas info    : Compile time = 4.405 ms
+ptxas info    : Compiling entry function '_Z4k_b814CUtensorMap_stS_S_S_S_S_S_4BufsPjPyS2_3Cfg' for 'sm_100a'
+ptxas info    : Function properties for _Z4k_b814CUtensorMap_stS_S_S_S_S_S_4BufsPjPyS2_3Cfg
+    56 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 118 registers, used 16 barriers, 56 bytes cumulative stack size, 1040 bytes smem
+ptxas info    : Compile time = 1197.491 ms
+ptxas info    : Compiling entry function '_Z9k_l2flushP5uint4mj' for 'sm_100a'
+ptxas info    : Function properties for _Z9k_l2flushP5uint4mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 14 registers, used 0 barriers
+ptxas info    : Compile time = 2.002 ms
+ptxas info    : Compiling entry function '_Z10k_init_f32Pfmj' for 'sm_100a'
+ptxas info    : Function properties for _Z10k_init_f32Pfmj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 12 registers, used 0 barriers
+ptxas info    : Compile time = 1.872 ms
+ptxas info    : Compiling entry function '_Z11k_init_bf16P13__nv_bfloat16mj' for 'sm_100a'
+ptxas info    : Function properties for _Z11k_init_bf16P13__nv_bfloat16mj
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 1.785 ms

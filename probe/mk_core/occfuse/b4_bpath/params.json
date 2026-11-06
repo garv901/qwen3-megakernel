@@ -1,0 +1,386 @@
+{
+ "t_B_a1_idle": {
+  "formula": "t_B = lat_us + bytes / thr_B_per_us (bytes: T*kb*4 fp32 bytes)",
+  "coeffs": {
+   "lat_us": 1.92277,
+   "thr_B_per_us": 34121.64973,
+   "us_per_KB": 0.03001
+  },
+  "units": "us; bytes in B",
+  "fit_rmse": 1.2922,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B_a1_loaded": {
+  "formula": "t_B = lat_us + bytes / thr_B_per_us (bytes: T*kb*4 fp32 bytes)",
+  "coeffs": {
+   "lat_us": 2.91142,
+   "thr_B_per_us": 23108.62412,
+   "us_per_KB": 0.04431
+  },
+  "units": "us; bytes in B",
+  "fit_rmse": 3.2353,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B_a2_idle": {
+  "formula": "t_B = lat_us + bytes / thr_B_per_us (bytes: T*kb*4 fp32 bytes)",
+  "coeffs": {
+   "lat_us": 0.55279,
+   "thr_B_per_us": 28453.50409,
+   "us_per_KB": 0.03599
+  },
+  "units": "us; bytes in B",
+  "fit_rmse": 0.2163,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B_a2_loaded": {
+  "formula": "t_B = lat_us + bytes / thr_B_per_us (bytes: T*kb*4 fp32 bytes)",
+  "coeffs": {
+   "lat_us": -0.12019,
+   "thr_B_per_us": 18162.80157,
+   "us_per_KB": 0.05638
+  },
+  "units": "us; bytes in B",
+  "fit_rmse": 1.2861,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B_b_idle": {
+  "formula": "t_B = lat_us + bytes / thr_B_per_us (bytes: T*kb*2 [TT*kb*2 incl. pad rows])",
+  "coeffs": {
+   "lat_us": 0.70498,
+   "thr_B_per_us": 267797.75641,
+   "us_per_KB": 0.00382
+  },
+  "units": "us; bytes in B",
+  "fit_rmse": 0.3011,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B_b_loaded": {
+  "formula": "t_B = lat_us + bytes / thr_B_per_us (bytes: T*kb*2 [TT*kb*2 incl. pad rows])",
+  "coeffs": {
+   "lat_us": 1.18354,
+   "thr_B_per_us": 331163.33995,
+   "us_per_KB": 0.00309
+  },
+  "units": "us; bytes in B",
+  "fit_rmse": 0.3292,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B_c_idle": {
+  "formula": "t_B = lat_us + bytes / thr_B_per_us (bytes: T*kb*4 fp32 bytes)",
+  "coeffs": {
+   "lat_us": 1.11909,
+   "thr_B_per_us": 290483.44026,
+   "us_per_KB": 0.00353
+  },
+  "units": "us; bytes in B",
+  "fit_rmse": 0.6282,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B_c_loaded": {
+  "formula": "t_B = lat_us + bytes / thr_B_per_us (bytes: T*kb*4 fp32 bytes)",
+  "coeffs": {
+   "lat_us": 1.58175,
+   "thr_B_per_us": 319032.04418,
+   "us_per_KB": 0.00321
+  },
+  "units": "us; bytes in B",
+  "fit_rmse": 0.6602,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B3_a1_idle": {
+  "formula": "t_B = lat_us + per_unit_us*(kb/128 k-steps for a1, TMA boxes else) + us_per_KB*KB (bytes_smem = TT*kb*2; c: T*kb*4)",
+  "coeffs": {
+   "lat_us": 0.3726,
+   "per_unit_us": 0.4394,
+   "us_per_KB": 0.05603
+  },
+  "units": "us",
+  "fit_rmse": 0.4933,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B3_a1_loaded": {
+  "formula": "t_B = lat_us + per_unit_us*(kb/128 k-steps for a1, TMA boxes else) + us_per_KB*KB (bytes_smem = TT*kb*2; c: T*kb*4)",
+  "coeffs": {
+   "lat_us": -0.69,
+   "per_unit_us": 1.0852,
+   "us_per_KB": 0.07814
+  },
+  "units": "us",
+  "fit_rmse": 1.4404,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B3_a2_idle": {
+  "formula": "t_B = lat_us + per_unit_us*(kb/128 k-steps for a1, TMA boxes else) + us_per_KB*KB (bytes_smem = TT*kb*2; c: T*kb*4)",
+  "coeffs": {
+   "lat_us": 0.4238,
+   "per_unit_us": -0.0273,
+   "us_per_KB": 0.07356
+  },
+  "units": "us",
+  "fit_rmse": 0.4432,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B3_a2_loaded": {
+  "formula": "t_B = lat_us + per_unit_us*(kb/128 k-steps for a1, TMA boxes else) + us_per_KB*KB (bytes_smem = TT*kb*2; c: T*kb*4)",
+  "coeffs": {
+   "lat_us": -0.1844,
+   "per_unit_us": -0.0687,
+   "us_per_KB": 0.11604
+  },
+  "units": "us",
+  "fit_rmse": 1.1981,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B3_b_idle": {
+  "formula": "t_B = lat_us + per_unit_us*(kb/128 k-steps for a1, TMA boxes else) + us_per_KB*KB (bytes_smem = TT*kb*2; c: T*kb*4)",
+  "coeffs": {
+   "lat_us": 0.3514,
+   "per_unit_us": 0.0604,
+   "us_per_KB": 0.00242
+  },
+  "units": "us",
+  "fit_rmse": 0.094,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B3_b_loaded": {
+  "formula": "t_B = lat_us + per_unit_us*(kb/128 k-steps for a1, TMA boxes else) + us_per_KB*KB (bytes_smem = TT*kb*2; c: T*kb*4)",
+  "coeffs": {
+   "lat_us": 0.7894,
+   "per_unit_us": 0.0673,
+   "us_per_KB": 0.00153
+  },
+  "units": "us",
+  "fit_rmse": 0.0817,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B3_c_idle": {
+  "formula": "t_B = lat_us + per_unit_us*(kb/128 k-steps for a1, TMA boxes else) + us_per_KB*KB (bytes_smem = TT*kb*2; c: T*kb*4)",
+  "coeffs": {
+   "lat_us": 0.3713,
+   "per_unit_us": 0.0619,
+   "us_per_KB": 0.00219
+  },
+  "units": "us",
+  "fit_rmse": 0.1992,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ },
+ "t_B3_c_loaded": {
+  "formula": "t_B = lat_us + per_unit_us*(kb/128 k-steps for a1, TMA boxes else) + us_per_KB*KB (bytes_smem = TT*kb*2; c: T*kb*4)",
+  "coeffs": {
+   "lat_us": 0.7885,
+   "per_unit_us": 0.0657,
+   "us_per_KB": 0.00179
+  },
+  "units": "us",
+  "fit_rmse": 0.1908,
+  "range": {
+   "T": [
+    1,
+    256
+   ],
+   "kb": [
+    128,
+    1024
+   ]
+  },
+  "jobs": [
+   14284,
+   14286
+  ]
+ }
+}

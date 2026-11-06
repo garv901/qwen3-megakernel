@@ -1,0 +1,220 @@
+{
+ "cands": [
+  "oracle",
+  "a_norm",
+  "e1_norm_seqmax",
+  "e2_norm_static",
+  "b_static0",
+  "b_static8",
+  "c_prev0",
+  "c_prev8",
+  "d_sink0",
+  "d_sink8"
+ ],
+ "cfgs": [
+  "S32_fp32",
+  "S32_bf16",
+  "S128_fp32",
+  "S128_bf16"
+ ],
+ "local": [
+  "local_S32_fp32",
+  "local_S32_bf16",
+  "local_S128_fp32",
+  "local_S128_bf16"
+ ],
+ "seqs": [
+  {
+   "name": "prose-cal-1K",
+   "kind": "prose",
+   "split": "cal",
+   "L": 1024,
+   "ntok": 1016,
+   "first_tok": "Con"
+  },
+  {
+   "name": "chat-cal-1K",
+   "kind": "chat",
+   "split": "cal",
+   "L": 1024,
+   "ntok": 1016,
+   "first_tok": "<|im_start|>"
+  },
+  {
+   "name": "code-cal-1K",
+   "kind": "code",
+   "split": "cal",
+   "L": 1024,
+   "ntok": 1016,
+   "first_tok": "#"
+  },
+  {
+   "name": "prose-test-1K",
+   "kind": "prose",
+   "split": "test",
+   "L": 1024,
+   "ntok": 1016,
+   "first_tok": "What"
+  },
+  {
+   "name": "chat-test-1K",
+   "kind": "chat",
+   "split": "test",
+   "L": 1024,
+   "ntok": 1016,
+   "first_tok": "<|im_start|>"
+  },
+  {
+   "name": "code-test-1K",
+   "kind": "code",
+   "split": "test",
+   "L": 1024,
+   "ntok": 1016,
+   "first_tok": "#"
+  },
+  {
+   "name": "prose-cal-4K",
+   "kind": "prose",
+   "split": "cal",
+   "L": 4096,
+   "ntok": 4088,
+   "first_tok": "1"
+  },
+  {
+   "name": "chat-cal-4K",
+   "kind": "chat",
+   "split": "cal",
+   "L": 4096,
+   "ntok": 4088,
+   "first_tok": "<|im_start|>"
+  },
+  {
+   "name": "code-cal-4K",
+   "kind": "code",
+   "split": "cal",
+   "L": 4096,
+   "ntok": 4088,
+   "first_tok": "#"
+  },
+  {
+   "name": "prose-test-4K",
+   "kind": "prose",
+   "split": "test",
+   "L": 4096,
+   "ntok": 4088,
+   "first_tok": "from"
+  },
+  {
+   "name": "chat-test-4K",
+   "kind": "chat",
+   "split": "test",
+   "L": 4096,
+   "ntok": 4088,
+   "first_tok": "<|im_start|>"
+  },
+  {
+   "name": "code-test-4K",
+   "kind": "code",
+   "split": "test",
+   "L": 4096,
+   "ntok": 4088,
+   "first_tok": "#"
+  },
+  {
+   "name": "prose-cal-16K",
+   "kind": "prose",
+   "split": "cal",
+   "L": 16384,
+   "ntok": 16376,
+   "first_tok": "in"
+  },
+  {
+   "name": "chat-cal-16K",
+   "kind": "chat",
+   "split": "cal",
+   "L": 16384,
+   "ntok": 16376,
+   "first_tok": "<|im_start|>"
+  },
+  {
+   "name": "code-cal-16K",
+   "kind": "code",
+   "split": "cal",
+   "L": 16384,
+   "ntok": 16376,
+   "first_tok": "from"
+  },
+  {
+   "name": "prose-test-16K",
+   "kind": "prose",
+   "split": "test",
+   "L": 16384,
+   "ntok": 16376,
+   "first_tok": "What"
+  },
+  {
+   "name": "chat-test-16K",
+   "kind": "chat",
+   "split": "test",
+   "L": 16384,
+   "ntok": 16376,
+   "first_tok": "<|im_start|>"
+  },
+  {
+   "name": "code-test-16K",
+   "kind": "code",
+   "split": "test",
+   "L": 16384,
+   "ntok": 16376,
+   "first_tok": "#"
+  },
+  {
+   "name": "prose-cal-32K",
+   "kind": "prose",
+   "split": "cal",
+   "L": 32768,
+   "ntok": 32760,
+   "first_tok": "We"
+  },
+  {
+   "name": "chat-cal-32K",
+   "kind": "chat",
+   "split": "cal",
+   "L": 32768,
+   "ntok": 32760,
+   "first_tok": "<|im_start|>"
+  },
+  {
+   "name": "code-cal-32K",
+   "kind": "code",
+   "split": "cal",
+   "L": 32768,
+   "ntok": 32760,
+   "first_tok": "#"
+  },
+  {
+   "name": "prose-test-32K",
+   "kind": "prose",
+   "split": "test",
+   "L": 32768,
+   "ntok": 32760,
+   "first_tok": "Act"
+  },
+  {
+   "name": "chat-test-32K",
+   "kind": "chat",
+   "split": "test",
+   "L": 32768,
+   "ntok": 32760,
+   "first_tok": "<|im_start|>"
+  },
+  {
+   "name": "code-test-32K",
+   "kind": "code",
+   "split": "test",
+   "L": 32768,
+   "ntok": 32760,
+   "first_tok": "#"
+  }
+ ]
+}

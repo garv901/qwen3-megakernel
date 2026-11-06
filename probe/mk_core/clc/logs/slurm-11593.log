@@ -1,0 +1,29 @@
+GPU 0: NVIDIA B200 (UUID: GPU-c09878e8-fb6a-ff0c-3c33-05993065d679)
+built: bin/clc (ptxas log: logs/build.log)
+PASS static C=7255012 nchunks=148 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue C=65536 nchunks=16384 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue C=262144 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue C=1048576 nchunks=1024 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue C=4194304 nchunks=256 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_pf C=65536 nchunks=16384 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_pf C=262144 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_pf C=1048576 nchunks=1024 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS queue_pf C=4194304 nchunks=256 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS guided C=0 nchunks=1506 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS hw C=65536 nchunks=16384 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS hw C=262144 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS hw C=1048576 nchunks=1024 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS hw C=4194304 nchunks=256 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS clc C=65536 nchunks=16384 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS clc C=262144 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS clc C=1048576 nchunks=1024 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS clc C=4194304 nchunks=256 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS clc_np C=65536 nchunks=16384 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS clc_np C=262144 nchunks=4096 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS clc_np C=1048576 nchunks=1024 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS clc_np C=4194304 nchunks=256 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_il C=65536 nchunks=16428 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_il C=262144 nchunks=4144 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_il C=1048576 nchunks=1036 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+PASS static_il C=4194304 nchunks=296 visited_bad=0 csum=d3bc1dd4 host=d3bc1dd4
+ALL PASS

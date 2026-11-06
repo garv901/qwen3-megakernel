@@ -1,0 +1,74 @@
+/raid/garv901/regime-mk-core/probe/mk_core/smallt/analyze.py:49: RuntimeWarning: All-NaN slice encountered
+  rows[PH[p]] = {k: (float(np.nanmedian(v)) if len(v) else np.nan) for k, v in res.items()}
+
+R1-b128-kv128__C  (engine classic; layer time 92.75 us)
+  phase |     T |  work |  busy |  idle |  last | last=busy | CTAs w/ work, max
+  QKV   |  8.45 |  6.21 |  6.21 |    -  |  7.39 |     1.00  | (148, 2)
+  RoPE  |  3.33 |  1.54 |    -  |    -  |  2.46 |       -   | None
+  attn  | 52.99 | 50.68 |    -  |    -  | 52.03 |       -   | None
+  O     |  4.61 |  2.88 |  2.91 |  0.42 |  3.36 |     1.00  | (128, 1)
+  GU    | 10.75 |  7.94 |  7.94 |    -  |  9.63 |     1.00  | (148, 3)
+  D     | 12.29 |  6.75 |  6.75 |    -  | 11.36 |     1.00  | (148, 2)
+
+R1-b128-kv128__C_null  (engine classic; layer time 65.50 us)
+  phase |     T |  work |  busy |  idle |  last | last=busy | CTAs w/ work, max
+  QKV   |  2.30 |  0.70 |  0.70 |    -  |  1.25 |     1.00  | (148, 2)
+  RoPE  |  3.84 |  1.81 |    -  |    -  |  2.88 |       -   | None
+  attn  | 52.22 | 49.82 |    -  |    -  | 51.23 |       -   | None
+  O     |  1.54 |  0.45 |  0.45 |  0.35 |  0.50 |     1.00  | (128, 1)
+  GU    |  3.58 |  1.54 |  1.54 |    -  |  2.54 |     1.00  | (148, 3)
+  D     |  2.05 |  0.48 |  0.48 |    -  |  0.93 |     1.00  | (148, 2)
+
+R1-b128-kv128__T  (engine TS; layer time 83.98 us)
+  phase |     T |  work |  busy |  idle |  last | last=busy | CTAs w/ work, max
+  QKV   |  5.12 |  3.58 |  3.62 |  0.94 |  4.03 |     1.00  | (128, 1)
+  RoPE  |  3.33 |  1.50 |    -  |    -  |  2.37 |       -   | None
+  attn  | 53.25 | 50.86 |    -  |    -  | 52.29 |       -   | None
+  O     |  6.91 |  5.26 |  5.26 |  5.25 |  5.62 |     1.00  | (128, 1)
+  GU    |  8.19 |  6.82 |  6.78 |  6.85 |  6.98 |     0.00  | (48, 1)
+  D     |  6.91 |  5.47 |  5.44 |  5.50 |  5.98 |     0.00  | (96, 1)
+
+R1-b128-kv128__T_null  (engine TS; layer time 68.09 us)
+  phase |     T |  work |  busy |  idle |  last | last=busy | CTAs w/ work, max
+  QKV   |  2.56 |  1.22 |  1.28 |  0.27 |  1.50 |     1.00  | (128, 1)
+  RoPE  |  3.84 |  1.79 |    -  |    -  |  2.88 |       -   | None
+  attn  | 52.99 | 50.40 |    -  |    -  | 52.03 |       -   | None
+  O     |  1.54 |  0.29 |  0.29 |  0.16 |  0.32 |     1.00  | (128, 1)
+  GU    |  4.35 |  3.14 |  3.18 |  3.14 |  3.55 |     0.00  | (48, 1)
+  D     |  2.82 |  1.32 |  1.54 |  0.42 |  1.76 |     1.00  | (96, 1)
+
+R1-b256-kv128__C  (engine classic; layer time 191.90 us)
+  phase |     T |  work |  busy |  idle |  last | last=busy | CTAs w/ work, max
+  QKV   | 16.38 | 12.66 | 12.66 |    -  | 15.41 |     1.00  | (148, 2)
+  RoPE  |  4.61 |  3.00 |    -  |    -  |  3.49 |       -   | None
+  attn  |111.87 |108.22 |    -  |    -  |110.85 |       -   | None
+  O     |  7.94 |  5.95 |  5.98 |  0.67 |  6.66 |     1.00  | (128, 1)
+  GU    | 19.20 | 15.07 | 15.07 |    -  | 18.30 |     1.00  | (148, 3)
+  D     | 32.00 | 16.77 | 16.77 |    -  | 30.96 |     1.00  | (148, 2)
+
+R1-b256-kv128__C_null  (engine classic; layer time 122.44 us)
+  phase |     T |  work |  busy |  idle |  last | last=busy | CTAs w/ work, max
+  QKV   |  2.05 |  0.70 |  0.70 |    -  |  1.22 |     1.00  | (148, 2)
+  RoPE  |  4.86 |  3.23 |    -  |    -  |  3.84 |       -   | None
+  attn  |108.29 |103.52 |    -  |    -  |107.20 |       -   | None
+  O     |  1.54 |  0.48 |  0.48 |  0.35 |  0.48 |     1.00  | (128, 1)
+  GU    |  3.58 |  1.54 |  1.54 |    -  |  2.48 |     1.00  | (148, 3)
+  D     |  2.05 |  0.48 |  0.48 |    -  |  0.93 |     1.00  | (148, 2)
+
+R1-b256-kv128__T  (engine TS; layer time 144.61 us)
+  phase |     T |  work |  busy |  idle |  last | last=busy | CTAs w/ work, max
+  QKV   |  6.40 |  4.80 |  4.83 |  1.14 |  5.25 |     1.00  | (128, 1)
+  RoPE  |  4.35 |  2.99 |    -  |    -  |  3.52 |       -   | None
+  attn  |106.50 |101.45 |    -  |    -  |105.57 |       -   | None
+  O     |  9.47 |  7.74 |  7.75 |  7.73 |  8.21 |     0.00  | (128, 1)
+  GU    | 10.50 |  8.99 |  8.86 |  9.02 |  9.31 |     0.00  | (48, 1)
+  D     |  7.42 |  5.86 |  5.86 |  5.87 |  6.40 |     1.00  | (96, 1)
+
+R1-b256-kv128__T_null  (engine TS; layer time 122.91 us)
+  phase |     T |  work |  busy |  idle |  last | last=busy | CTAs w/ work, max
+  QKV   |  3.58 |  2.24 |  2.30 |  0.26 |  2.59 |     1.00  | (128, 1)
+  RoPE  |  5.12 |  3.39 |    -  |    -  |  4.03 |       -   | None
+  attn  |105.22 |101.01 |    -  |    -  |104.30 |       -   | None
+  O     |  1.28 |  0.26 |  0.26 |  0.16 |  0.29 |     1.00  | (128, 1)
+  GU    |  4.86 |  3.64 |  3.62 |  3.63 |  4.00 |     0.00  | (48, 1)
+  D     |  2.82 |  1.44 |  1.45 |  1.42 |  1.70 |     1.00  | (96, 1)
