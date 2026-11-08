@@ -304,8 +304,8 @@ def test_interleave_gu_formula():
 
 def test_tsb_map_specs():
     """Maps 9, 10, 11: xb2 {HID, MAXTOK} box {64, TT_GU}; wgu {HID, NL * 6144} box {64, 128}; act {INTER, MAXTOK} box {64, TT_D}; maps 8..11 are encoded per bucket."""
-    assert B.TSB_MAPS == ("xb2", "wgu", "act") and B.WS_ORDER == ("xb", "xb2", "wgu", "act")
-    assert B.workspace_map_specs(256, B.WS_ORDER) == [([1024, 256], [2048], [64, 128]), ([1024, 256], [2048], [64, 96]),
+    assert B.TSB_MAPS == ("xb2", "wgu", "act") and B.WS_ORDER == ("xb", "xb2", "wgu", "act", "ao")   # ao = map 12, MK_BIGT only
+    assert B.workspace_map_specs(256, B.WS_ORDER[:4]) == [([1024, 256], [2048], [64, 128]), ([1024, 256], [2048], [64, 96]),
                                                       ([1024, 28 * 6144], [2048], [64, 128]), ([3072, 256], [6144], [64, 128])]
     assert B.workspace_map_specs(128, B.WS_ORDER)[1] == ([1024, 256], [2048], [64, 48])
     assert B.workspace_map_specs() == [([1024, 256], [2048], [64, 128])]

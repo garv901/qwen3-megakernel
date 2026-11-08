@@ -8,6 +8,10 @@ the tile stream with act / xb2 buffers, the interleaved wg|wu weights and the id
 at TSB buckets when n_lm == ntok and lm_tok[s] == s; else the v0 LM path), ``attn`` ("placeholder" | "splitkv" | "auto"; default "placeholder"; SPEC-P2: splitkv = A1 split-KV attention v2 (splitkv-v2)
 + combine_head in the O phase when plan.s_max > 1 (else ao is staged, no combine); q_len > 1 (<= 16) builds with -DSKV_QMAX=16; auto = splitkv when every seq has q_len == 1 and max kv >= 512, else the placeholder, chosen per workload at prepare()). The step clones the fixture KV into a packed cache with CTX zero padding rows
 (as hv2g), encodes the 8 weight tensor maps once, and ``outputs()`` gathers k_new / v_new from the cache.
+
+MK_BIGT (step 1 of the large-T engine, branch mk-bigt): ``bigt`` (-1 = auto: total_q > 256, 1 = always, 0 = never) and ``maxt`` (MK_MAXT, default 8192).
+The BIGT build reuses the NPAD 128 layout with a run-time token count 1..maxt: every GEMM on the tile stream (O on map 12 = ao), tickets and
+workspace sized by maxt, the placeholder attention, and the LM rows compacted by the last D finalizer (lm_inv), so n_seq <= 256.
 """
 
 from __future__ import annotations
@@ -56,17 +60,21 @@ class MkStep:
         import torch
         self.torch, self.w, self.variant, self.device = torch, w, variant, device
         _, direct = _parse(variant)
-        self.npad = B.bucket_for(w.total_q)
+        self.bigt = arm.use_bigt(w)
+        self.npad = B.BIGT_NPAD if self.bigt else B.bucket_for(w.total_q)
         g = w.model
         dev = torch.device(device)
-        self.attn = arm.resolve_attn(w)   # "placeholder" | "splitkv" (auto resolved per workload)
+        self.attn = "placeholder" if self.bigt else arm.resolve_attn(w)   # "placeholder" | "splitkv" (auto resolved per workload)
         self.qmax = B.skv_qmax_of([(s.kv_len, s.q_len) for s in w.seqs]) if self.attn == "splitkv" else 1   # R6 build (-DSKV_QMAX=16) iff some q_len > 1
         tune = B.skv_tune(self.npad, self.qmax, [(s.kv_len, s.q_len) for s in w.seqs], arm.skvtc, arm.skvsi) if self.attn == "splitkv" and arm.skvtune else ()
+        if self.bigt:
+            tune = (("MK_BIGT", 1), ("MK_MAXT", arm.maxt))
         ld = arm._kernel(self.npad, dev, self.attn, self.qmax, tune)
         self.kern = ld
         self.nb = ld.nb
-        self.desc = d = B.build_descriptors([(s.kv_len, s.q_len) for s in w.seqs], B.MAXTOK)
-        assert len(d.chunks) == 1, "mk handles one launch of <= 256 tokens"
+        M = arm.maxt if self.bigt else B.MAXTOK_MK
+        self.desc = d = B.build_descriptors([(s.kv_len, s.q_len) for s in w.seqs], M)
+        assert len(d.chunks) == 1, f"mk handles one launch of <= {M} tokens"
         c = d.chunks[0]
         rows = d.cache_rows
         assert rows == w.cache_tokens
@@ -80,17 +88,16 @@ class MkStep:
         self.vview.copy_(inputs["vcache"])
         self.logits = torch.zeros((w.n_seq, g.vocab), dtype=torch.float32, device=dev)
         self.next_token = torch.zeros(w.n_seq, dtype=torch.int64, device=dev)
-        M = B.MAXTOK_MK
         f32 = dict(dtype=torch.float32, device=dev)
         self.x = torch.zeros(M * B.H, **f32)
         self.qkv = torch.zeros(M * 4096, **f32)
         self.qb = torch.zeros(M * B.QH * B.HD, dtype=torch.bfloat16, device=dev)
         self.ao = torch.zeros(M * B.QH * B.HD, dtype=torch.bfloat16, device=dev)
-        self.gu = torch.zeros(M * 6144, **f32)
+        self.tsb = B.tsb_on(self.npad, ld.knobs)
+        self.gu = torch.zeros(4 if self.bigt and self.tsb else M * 6144, **f32)   # MK_TSB: gu is not used (GU writes act); kept full size at the buckets
         self.rr = torch.zeros(2 * M, **f32)
         self.xb = torch.zeros(M * B.H, dtype=torch.bfloat16, device=dev)   # MK_TS: bf16(x * ln1) [MAXTOK][HID], rows >= ntok stay zero (B tiles of the tile-stream QKV)
-        self.tk = torch.zeros(B.TK_SIZE, dtype=torch.int32, device=dev)     # MK_TS: D-phase row-block tickets (the last user resets them); MK_TSB: O tickets [0, 16), D tickets [16, 32)
-        self.tsb = B.tsb_on(self.npad, ld.knobs)
+        self.tk = torch.zeros(B.tk_size(arm.maxt if self.bigt else 0), dtype=torch.int32, device=dev)     # MK_TS: D-phase row-block tickets (the last user resets them); MK_TSB: O tickets [0, 16), D tickets [16, 32)
         if self.tsb:   # P5b: bf16(x * ln2) [MAXTOK][HID], sum x^2 per token, act = bf16(silu * up) [MAXTOK][INTER] (rows >= ntok stay zero), wgu (built once per weight set)
             self.xb2 = torch.zeros(M * B.H, dtype=torch.bfloat16, device=dev)
             self.ss2 = torch.zeros(3 * M, **f32)   # [0, M) = ss2 (sum x^2 per token after O), [M, 2M) = ssf (after the last D, MK_LMTS; SPEC-P3c), [2M, 3M) = ss1 (MK_QR)
@@ -122,20 +129,29 @@ class MkStep:
             assert self.skv_maps.data_ptr() % 64 == 0
             skv_args = (self.skv_items.data_ptr(), i32(pl.stride), self.skv_pair.data_ptr(), self.skv_part.data_ptr(),
                         self.skv_maps.data_ptr(), i32(pl.engine), i32(int(pl.s_max > 1)))
-        self.pkey = torch.zeros(self.nb * M, dtype=torch.int32, device=dev)
-        self.pidx = torch.zeros(self.nb * M, dtype=torch.int32, device=dev)
+        self.pkey = torch.zeros(self.nb * B.MAXTOK_MK, dtype=torch.int32, device=dev)   # stride MAXLM = 256 (LM slots) in every build
+        self.pidx = torch.zeros(self.nb * B.MAXTOK_MK, dtype=torch.int32, device=dev)
         self.rope = B.rope_table(d.max_pos).to(dev)
         self.tokens = inputs["tokens"]
         self.t_base = torch.tensor(d.t_base, dtype=torch.int32, device=dev)
         self.t_vis = torch.tensor(d.t_vis, dtype=torch.int32, device=dev)
         self.lm_tok = torch.tensor(c.lm_tok or [0], dtype=torch.int32, device=dev)
         self.lm_seq = torch.tensor(c.lm_seq or [0], dtype=torch.int32, device=dev)
+        bigt_args: tuple = ()
+        if self.bigt:   # lm_inv[t] = LM slot of token t, or -1 (the last D finalizer compacts the LM rows of xb / ssf)
+            inv = [-1] * c.ntok
+            for s_, t_ in enumerate(c.lm_tok):
+                inv[t_] = s_
+            self.lm_inv = torch.tensor(inv, dtype=torch.int32, device=dev)
+            bigt_args = (self.lm_inv.data_ptr(),)
         self._weights = {k: inputs[k] for k in (*B.WEIGHT_MAPS, *VEC_WEIGHTS)}   # keep the fixture tensors referenced
         ts = bool(ld.knobs["MK_TS"])
         ws = {"xb": self.xb.data_ptr()} if ts else None   # map 8 = xb (128 B more) only for MK_TS builds
         if self.tsb:   # maps 9, 10, 11 = xb2, wgu, act
             ws.update({"xb2": self.xb2.data_ptr(), "wgu": self.wgu.data_ptr(), "act": self.act.data_ptr()})
-        blob = B.encode_maps(self._weights, {k: self._weights[k].data_ptr() for k in B.WEIGHT_MAPS}, workspace=ws, npad=self.npad, gu_tt=ld.knobs["MK_GU_TT"])
+        if self.bigt:   # map 12 = ao (B of the tile-stream O phase)
+            ws["ao"] = self.ao.data_ptr()
+        blob = B.encode_maps(self._weights, {k: self._weights[k].data_ptr() for k in B.WEIGHT_MAPS}, workspace=ws, npad=self.npad, gu_tt=ld.knobs["MK_GU_TT"], maxt=M)
         self.maps = torch.frombuffer(bytearray(blob), dtype=torch.uint8).to(dev)
         assert self.maps.data_ptr() % 128 == 0
         wp = [self._weights[k].data_ptr() for k in VEC_WEIGHTS]
@@ -146,9 +162,9 @@ class MkStep:
                           self.t_vis.data_ptr(), self.lm_tok.data_ptr(), self.lm_seq.data_ptr(),
                           i32(c.ntok), i32(len(c.lm_tok)), i32(self.rows), self.xb.data_ptr(), self.tk.data_ptr(),
                           *((self.xb2.data_ptr(), self.ss2.data_ptr(), self.act.data_ptr()) if self.tsb else (0, 0, 0)),
-                          *skv_args])   # xb, tk, xb2, ss2, act, then (attn=splitkv) items, items_stride, pair_info, part, skv_maps, engine, skv_comb: last kernel arguments
+                          *skv_args, *bigt_args])   # xb, tk, xb2, ss2, act, then (attn=splitkv) items, items_stride, pair_info, part, skv_maps, engine, skv_comb: last kernel arguments
         self.config: dict[str, Any] = {
-            "kernel": B.KERNEL, "npad": self.npad, "graph": not direct, "proxy": False, "launches_per_step": 1,
+            "kernel": B.KERNEL, "npad": self.npad, "bigt": self.bigt, "maxt": M, "graph": not direct, "proxy": False, "launches_per_step": 1,
             "grid": self.nb, "block": 512, "dyn_smem": ld.dyn_smem, "regs": ld.regs, "static_smem": ld.static_smem,
             "local_bytes": ld.local_bytes, "ptxas": ld.ptxas, "attn": self.attn, "attn_option": arm.attn, "skv_engine": getattr(getattr(self, "plan", None), "engine_name", None), "knobs": dict(ld.knobs),
             "source_sha256": B.source_sha256(self.attn),
@@ -209,7 +225,7 @@ class MkStep:
         self._graph = None
         self.args = None
         for n in ("kc", "vc", "kview", "vview", "logits", "next_token", "x", "qkv", "qb", "ao", "gu", "rr", "xb", "tk", "xb2", "ss2", "act", "wgu", "sync", "pkey", "pidx",
-                  "rope", "t_base", "t_vis", "lm_tok", "lm_seq", "maps", "skv_items", "skv_pair", "skv_part", "skv_maps", "plan"):
+                  "rope", "t_base", "t_vis", "lm_tok", "lm_seq", "lm_inv", "maps", "skv_items", "skv_pair", "skv_part", "skv_maps", "plan"):
             if hasattr(self, n):
                 delattr(self, n)
         self._weights = {}
@@ -218,7 +234,7 @@ class MkStep:
 class MkArm:
     name = "mk"
 
-    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, skvtc: int = 1, skvgrp: int = 1, skvsi: int = -1, **_: Any):
+    def __init__(self, stamps: int = 0, null: int = 0, ku: int = 128, ring: int = 2, ts: int = 128, tsb: int = 1, lmts: int = 1, attn: str = "auto", skvtune: int = 1, skvtc: int = 1, skvgrp: int = 1, skvsi: int = -1, bigt: int = -1, maxt: int = 8192, **_: Any):
         if attn not in ATTN_OPTIONS:
             raise ValueError(f"unknown attn {attn!r} (one of {ATTN_OPTIONS})")
         self.attn = attn
@@ -227,6 +243,10 @@ class MkArm:
         self.skvgrp = int(skvgrp)     # 1 (default, job 14935): splitkv plan(groups=SKV_GROUPS, group_mode="auto") on SKV_HALVES builds, q_len 1 (R10-1, splitkv-v12)
         self.skvsi = int(skvsi)       # SKV_SI (stage-interleaved g8 consumer, splitkv-v13a) at NPAD 64 / 128 + plan(groups=1): 1 on, 0 off, -1 (default, job 14991) iff max kv >= B.SKV_SI_MIN_KV
         self.knobs = {"MK_STAMPS": int(stamps), "MK_NULL": int(null), "MK_KU": int(ku), "MK_RING": int(ring), "MK_TS": int(ts), "MK_TSB": int(tsb), "MK_LMTS": int(lmts)}
+        self.bigt = int(bigt)   # MK_BIGT: -1 auto (total_q > 256), 1 always, 0 never
+        self.maxt = int(maxt)   # MK_MAXT of the BIGT build (multiple of 128, >= 256)
+        if self.maxt % 128 or self.maxt < 256:
+            raise ValueError(f"maxt {self.maxt}: a multiple of 128, >= 256")
         self._loaded: dict[tuple, _Loaded] = {}
         self._wgu_cache: dict[tuple, Any] = {}
 
@@ -248,14 +268,28 @@ class MkArm:
             return "mk is specialised to Qwen3-0.6B"
         if w.total_q < 1:
             return "empty step"
+        if self.use_bigt(w):
+            if w.total_q > self.maxt:
+                return f"mk BIGT handles 1..{self.maxt} tokens per step (total_q {w.total_q}; raise maxt)"
+            if w.n_seq > B.MAXTOK_MK:
+                return f"mk BIGT: at most {B.MAXTOK_MK} sequences (LM rows) per step (n_seq {w.n_seq})"
+            if self.attn == "splitkv":
+                return "mk BIGT step 1 has the placeholder attention only (attn=splitkv)"
+            if self.knobs["MK_KU"] != 128 or not (self.knobs["MK_TS"] and self.knobs["MK_TSB"] and self.knobs["MK_LMTS"]):
+                return "mk BIGT needs MK_KU 128 and MK_TS / MK_TSB / MK_LMTS on"
+            return None
         if w.total_q > B.BUCKETS[-1]:
-            return f"mk handles 1..{B.BUCKETS[-1]} tokens per step (total_q {w.total_q})"
+            return f"mk handles 1..{B.BUCKETS[-1]} tokens per step (total_q {w.total_q}; bigt=-1 or 1 for larger steps)"
         if self.attn == "splitkv":
             if any(s.q_len > 16 for s in w.seqs):
                 return "attn=splitkv supports q_len <= 16 (R6 build, SKV_QMAX 16)"
             if self.knobs["MK_KU"] != 128:
                 return "attn=splitkv needs MK_KU 128"
         return None
+
+    def use_bigt(self, w: Workload) -> bool:
+        """The MK_BIGT build serves this workload: option bigt = 1, or -1 (auto) and total_q > 256."""
+        return self.bigt == 1 or (self.bigt == -1 and w.total_q > B.BUCKETS[-1])
 
     def resolve_attn(self, w: Workload) -> str:
         """The attention build of a workload: the option, with "auto" = splitkv iff every sequence has q_len == 1 (A1 v1 limit), else the placeholder.

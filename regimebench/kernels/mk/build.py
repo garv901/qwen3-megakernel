@@ -28,13 +28,19 @@ ATTN_SPLITKV = COMMON / "splitkv" / "splitkv.cuh"
 SKV_STAGE_BYTES = 128 * 512   # one 128-row K + V ring stage of the q_len 1 build
 SKV_BAR_OFF, SKV_BAR_BYTES = 147968, 64   # splitkv-v1 (128 x 2 TMA ring): skv::kBarOff, skv::kBarBytes; attend scratch = kBarOff + kBarBytes = 148,032 B (compile-checked by MK_EXPECT_DYN)
 OWN_SOURCES = ("mk_common.cuh", "mk_step.cu")
-DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 128, "MK_TSB": 1, "MK_LMTS": 1, "MK_DBG_NOATT": 0, "MK_GU_TT": 0, "MK_FIN": -1, "MK_PFE": 0, "MK_QR": 0, "MK_L2PF": 0, "MK_WU": -1, "MK_CMB": -1, "MK_KVE": 0}
+DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 128, "MK_TSB": 1, "MK_LMTS": 1, "MK_DBG_NOATT": 0, "MK_GU_TT": 0, "MK_FIN": -1, "MK_PFE": 0, "MK_QR": 0, "MK_L2PF": 0, "MK_WU": -1, "MK_CMB": -1, "MK_KVE": 0, "MK_BIGT": 0, "MK_MAXT": 8192, "MK_BIG_QKS": 2, "MK_BIG_OKS": 2, "MK_BIG_DKS": 4}
 WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map order (kernel: maps 0..7)
 WORKSPACE_MAPS = ("xb",)   # kernel map 8 (MK_TS): bf16 [MAXTOK_MK][H] workspace of the tile-stream QKV (B tiles by TMA)
 TSB_MAPS = ("xb2", "wgu", "act")   # kernel maps 9, 10, 11 (MK_TSB): xb2 bf16 [MAXTOK][H] (B of GU), wgu bf16 [NL * 6144][H] (A of GU), act bf16 [MAXTOK][INTER] (B of D)
-WS_ORDER = WORKSPACE_MAPS + TSB_MAPS
+WS_ORDER = WORKSPACE_MAPS + TSB_MAPS + ("ao",)   # "ao" = kernel map 12 (MK_BIGT only): bf16 [MAXT][QH * HD] attention output, B of the tile-stream O phase
+BIGT_NPAD = 128   # MK_BIGT reuses the NPAD 128 layout (mk_common.cuh static_assert)
 TS_TT = 128   # TS token tile at NPAD >= 128 (mk_common.cuh TS_TT = min(NPAD, 128))
 TS_EXCH = 12288   # MK_TSB: GU exchange region after the ring (mk_common.cuh TS_EXCH)
+def tk_size(maxt: int = 0) -> int:
+    """u32 tickets: TK_SIZE for the buckets; MK_BIGT (maxt > 0): 32 * ceil(maxt / 128) (O [0, 8 NTT), D [8 NTT, 16 NTT), seen O / D [16 NTT, 32 NTT))."""
+    return 32 * ((maxt + 127) // 128) if maxt else TK_SIZE
+
+
 TK_SIZE = 192     # u32 tickets: O at [0, 16), D at [16, 32) (mk_step.cu TK_D); MK_FIN seen counters at [32, 64); MK_QR QKV tickets [64, 128), rope seen [128, 192)
 
 
@@ -217,6 +223,8 @@ def compile_build(npad: int, nb: int = GRID, knobs: tuple = (), arch: str = "sm_
     """-> (cubin, ptxas info, log). ``knobs``: sorted tuple of (name, value). ``skv_qmax``: attn = splitkv only, 1 = default build, 2..16 = the R6 build (-DSKV_QMAX, SPEC-P2b)."""
     if npad not in BUCKETS:
         raise ValueError(f"NPAD {npad} not in {BUCKETS}")
+    if dict(knobs).get("MK_BIGT", 0) and (npad != BIGT_NPAD or attn != "placeholder"):
+        raise ValueError(f"MK_BIGT needs NPAD {BIGT_NPAD} and the placeholder attention (step 1)")
     src = source(attn, Path(attn_path) if attn_path else None)
     if stripped:
         src = strip_knobs(src)
@@ -391,18 +399,20 @@ def map_specs(weights: dict) -> list[tuple[list[int], list[int], list[int]]]:
     return out
 
 
-def workspace_map_specs(npad: int = 256, names: tuple = WORKSPACE_MAPS, gu_tt: int = 0) -> list[tuple[list[int], list[int], list[int]]]:
+def workspace_map_specs(npad: int = 256, names: tuple = WORKSPACE_MAPS, gu_tt: int = 0, maxt: int = MAXTOK_MK) -> list[tuple[list[int], list[int], list[int]]]:
     """(dims, strides_bytes, box) of the workspace maps ``names`` (default map 8 ``xb``: bf16 [MAXTOK_MK][H], dims {H, MAXTOK_MK}, box {64 k, TS_TT tokens}, SW128).
-    MK_TSB: ``xb2`` {H, MAXTOK_MK} box {64, TT_GU}; ``wgu`` {H, NL * 6144} box {64, 128}; ``act`` {INTER, MAXTOK_MK} box {64, TT_D}. TT per bucket: ts_tt(npad)."""
+    MK_TSB: ``xb2`` {H, MAXTOK_MK} box {64, TT_GU}; ``wgu`` {H, NL * 6144} box {64, 128}; ``act`` {INTER, MAXTOK_MK} box {64, TT_D}. TT per bucket: ts_tt(npad).
+    MK_BIGT: token dims are ``maxt`` (MK_MAXT) instead of MAXTOK_MK, plus ``ao`` {QH * HD, maxt} box {64, 128}."""
     tt = ts_tt(npad, gu_tt)
-    spec = {"xb": ([H, MAXTOK_MK], [H * 2], [64, tt["qkv"]]),
-            "xb2": ([H, MAXTOK_MK], [H * 2], [64, tt["gu"]]),
+    spec = {"xb": ([H, maxt], [H * 2], [64, tt["qkv"]]),
+            "xb2": ([H, maxt], [H * 2], [64, tt["gu"]]),
             "wgu": ([H, NL * 2 * INTER], [H * 2], [64, 128]),
-            "act": ([INTER, MAXTOK_MK], [INTER * 2], [64, tt["d"]])}
+            "act": ([INTER, maxt], [INTER * 2], [64, tt["d"]]),
+            "ao": ([QH * HD, maxt], [QH * HD * 2], [64, 128])}
     return [spec[n] for n in names]
 
 
-def encode_maps(weights: dict, ptrs: dict, workspace: dict | None = None, npad: int = 256, gu_tt: int = 0) -> bytes:
+def encode_maps(weights: dict, ptrs: dict, workspace: dict | None = None, npad: int = 256, gu_tt: int = 0, maxt: int = MAXTOK_MK) -> bytes:
     """128 B x 8 tensor maps with the real device addresses (+ 128 B per workspace map of ``workspace`` = {"xb": device ptr, and with MK_TSB "xb2", "wgu", "act"},
     appended in WS_ORDER = maps 8, 9, 10, 11). Needs cuInit (a GPU host)."""
     from cuda.bindings import driver as d
@@ -412,7 +422,7 @@ def encode_maps(weights: dict, ptrs: dict, workspace: dict | None = None, npad: 
     if workspace is not None:
         wn = tuple(n for n in WS_ORDER if n in workspace)
         names += list(wn)
-        specs += workspace_map_specs(npad, wn, gu_tt)
+        specs += workspace_map_specs(npad, wn, gu_tt, maxt)
         ptrs = {**ptrs, **workspace}
     for name, (dims, strides, box) in zip(names, specs):
         res = d.cuTensorMapEncodeTiled(

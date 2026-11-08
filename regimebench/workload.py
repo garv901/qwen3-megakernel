@@ -133,6 +133,9 @@ def regime_grid() -> list[Workload]:
     for d in (8, 32, 128):
         seqs = (Seq(1 * K, 512),) + tuple(Seq(1 * K, 1) for _ in range(d))
         w.append(Workload(f"R7-p512-d{d}", "R7", seqs, {"D": d}, check=d == 8))
+    for d in (32, 128):   # MK_BIGT (2026-11-06): one 2K prefill chunk next to d decodes (2080 / 2176 tokens per step)
+        seqs = (Seq(1 * K, 2 * K),) + tuple(Seq(1 * K, 1) for _ in range(d))
+        w.append(Workload(f"R7-p2048-d{d}", "R7", seqs, {"D": d, "P": 2 * K}, check=d == 32))
     rng = random.Random(20261022)
     seqs = tuple(Seq(rng.randint(128, 8 * K), 1) for _ in range(32))
     w.append(Workload("R8-b32-ragged", "R8", seqs, {"B": 32, "kv": "U[128,8K]"}, check=True))
@@ -209,6 +212,9 @@ OWNER_POINTS: dict[str, tuple[str, ...]] = {
     "mk_iso240": tuple(f"R9-b{b}-kv{240 * K // b}" for b in (1, 2, 4, 8, 16)),
     # R10 (2026-10-31): decode, 33-256 requests, long KV; uniform grid + 3 real trace steps (heterogeneous kv)
     "mk_r10": tuple(f"R10-b{b}-kv{kv}" for b, kvs in _R10_GRID for kv in kvs) + ("R10-conv-L3-n54", "R10-conv-L4-n87", "R10-code-L3-n40"),
+    # MK_BIGT step 1 (branch mk-bigt): steps of 257..8192 tokens on the one-launch large-T build (placeholder attention); R5-b16-T2048 (32K tokens) is out of range
+    "mk_bigt": ("R4-b1-T1024", "R4-b1-T4096", "R4-b1-T8192", "R5-b4-T512", "R5-b4-T2048", "R5-b16-T512",
+                "R7-p512-d8", "R7-p512-d32", "R7-p512-d128", "R7-p2048-d32", "R7-p2048-d128"),
     "mk_b8kv_p2": ("R3-b8-kv16384", *(f"R9-b8-kv{kv}" for kv in (15 * K, 17 * K, 24 * K, 31 * K, 32 * K, 33 * K))),
 }
 

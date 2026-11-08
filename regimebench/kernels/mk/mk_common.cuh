@@ -102,6 +102,23 @@ constexpr int CMB = MK_CMB >= 0 ? MK_CMB : (NPAD >= 64 ? 1 : 0);   // default me
 #ifndef MK_STG
 #define MK_STG 4   // staging chunks (16 B) in flight per thread
 #endif
+#ifndef MK_BIGT
+#define MK_BIGT 0   // 1: large-T build (branch mk-bigt, step 1). Smem layout of the NPAD 128 bucket; the token count is a run-time value 1..MK_MAXT; every GEMM
+                    // (QKV, O, GU, D, LM) runs on the tile stream with a run-time token-tile count; tickets are laid out by that count; the last D finalizer writes
+                    // the LM rows compacted (lm_inv), so the LM tables stay MAXLM (n_lm <= 256). 0 (default): the bucket builds, SASS unchanged.
+#endif
+#ifndef MK_MAXT
+#define MK_MAXT 8192   // MK_BIGT: token capacity of the global per-token buffers (x, qkv, xb, xb2, act, ao, ss2, rr; the host allocates them with this size)
+#endif
+#ifndef MK_BIG_QKS
+#define MK_BIG_QKS 2   // MK_BIGT: split-K of the QKV tile stream (K 1024: 1, 2, 4 or 8)
+#endif
+#ifndef MK_BIG_OKS
+#define MK_BIG_OKS 2   // MK_BIGT: split-K of the O tile stream (K 2048: 1, 2, 4, 8 or 16)
+#endif
+#ifndef MK_BIG_DKS
+#define MK_BIG_DKS 4   // MK_BIGT: split-K of the D tile stream (K 3072: 1, 2, 3, 4, 6, 8, 12 or 24)
+#endif
 static_assert(NPAD == 16 || NPAD == 32 || NPAD == 64 || NPAD == 128 || NPAD == 256, "NPAD bucket");
 static_assert(MK_KU == 128 || MK_KU == 64, "MK_KU");
 static_assert(MK_RING >= 2 && MK_RING <= 4, "MK_RING");
@@ -119,14 +136,16 @@ typedef unsigned short bf16_t;
 constexpr int NT = 512, NW = 16;
 constexpr int HID = 1024, NLAY = 28, NQH = 16, NKVH = 8, HDIM = 128, INTER = 3072, VOCAB = 151936;
 constexpr int QKVN = 4096, GUN = 6144, QDIM = 2048;
-constexpr int MAXTOK = 256;
+constexpr bool BIGT = MK_BIGT != 0;
+constexpr int MAXLM = 256;                        // LM slots: smem LM tables, pkey / pidx stride (n_lm <= MAXLM in every build)
+constexpr int MAXT = BIGT ? MK_MAXT : 256;        // token capacity of the global per-token buffers (ss2 / rr sections); 256 in the bucket builds
 constexpr float EPS = 1e-6f;
 constexpr int TS_MIN = MK_TS == 1 ? 128 : MK_TS;   // smallest NPAD bucket on the tile stream (keep in sync with build.py:ts_min)
 constexpr bool TS = MK_TS && NPAD >= TS_MIN && MK_KU == 128;   // tile-stream QKV (SPEC-P5a)
 constexpr bool TSB = TS && MK_TSB;
 constexpr bool LMTS = TSB && MK_LMTS;   // SPEC-P3c: tile-stream LM head (run time: lm_ident)
-// tensor maps: wq, wk, wv, wo, wg, wu, wd, embed (+ xb when TS) (+ xb2, wgu, act when TSB: maps 9, 10, 11), 128 B each, in global memory
-constexpr int NMAP = TSB ? 12 : TS ? 9 : 8;
+// tensor maps: wq, wk, wv, wo, wg, wu, wd, embed (+ xb when TS) (+ xb2, wgu, act when TSB: maps 9, 10, 11) (+ ao when BIGT: map 12), 128 B each, in global memory
+constexpr int NMAP = BIGT ? 13 : TSB ? 12 : TS ? 9 : 8;
 
 constexpr int KU = MK_KU, NBOX = KU / 64, RING = MK_RING;
 constexpr int UB = NBOX * 16384;              // bytes of one weight unit in the ring (128 rows x KU k bf16)
@@ -153,15 +172,20 @@ constexpr int LMB_FULL = 192, LMB_EMPTY = 256, LMB_ACCF = 320, LMB_ACCE = 336;
 // full[TS_R] at +LMB_FULL, empty[TS_R] at +LMB_EMPTY, accfull[2] at +LMB_ACCF, accempty[2] at +LMB_ACCE. With LMP and TS (NPAD <= 64) every ts_first re-initialises the block
 // for its phase and lm_first re-initialises it for the LM head (LMP path).
 constexpr int TS_TT = NPAD < 128 ? NPAD : 128;              // tokens per tile (B box rows); NPAD 256: 2 token tiles, NPAD <= 128: 1
-constexpr int TS_KS = (NPAD == 256) ? 2 : 4;                // split-K factor of the tile stream (job 9592 best per bucket)
+constexpr int TS_KS = BIGT ? MK_BIG_QKS : (NPAD == 256) ? 2 : 4;   // split-K factor of the tile stream (job 9592 best per bucket; MK_BIGT: knob)
 constexpr int TS_SLOT = 32768 + TS_TT * 256;                // ring slot bytes: A (128 rows x 128 k bf16) + B (TS_TT x 128 k bf16)
 // P5b phase configs (TT tokens per tile / KS split-K): GU 96 / 1 (NPAD 256, ragged: 96 + 96 + 64), 48 / 1 (NPAD 128, 48 + 48 + 32), NPAD / 1 (NPAD <= 64); D TS_TT / 8 (256), TS_TT / 12 (<= 128)
 // (xover4 job 10214 at T 32 / 64: QKV TT T KS 4, GU TT T KS 1, D TT T KS 12). QKV = (TS_TT, TS_KS).
 constexpr int FIN = MK_FIN >= 0 ? MK_FIN : (NPAD >= 128 ? 2 : 0);
 constexpr bool WU = MK_WU >= 0 ? MK_WU != 0 : NPAD == 128;   // P14 per bucket
 constexpr int GU_TT = MK_GU_TT ? MK_GU_TT : (NPAD == 256 ? 96 : NPAD == 128 ? 48 : NPAD), GU_KS = 1;   // MK_GU_TT: ragged tiles allowed (NTT = ceil(NPAD / TT); B rows past MAXTOK are TMA OOB zero fill)
-constexpr int D_TT = TS_TT, D_KS = NPAD == 256 ? 8 : 12;
-constexpr int TK_NTT = (NPAD + 127) / 128;                  // 128-token tiles of the O / D tickets and the idle-CTA finalizer jobs (job = rb * TK_NTT + tt)
+constexpr int D_TT = TS_TT, D_KS = BIGT ? MK_BIG_DKS : NPAD == 256 ? 8 : 12;
+constexpr int O_TT = 128, O_KS = MK_BIG_OKS;                // MK_BIGT: O on the tile stream (B = ao by TMA, map 12)
+constexpr int TK_NTT = (NPAD + 127) / 128;                  // 128-token tiles of the O / D tickets and the idle-CTA finalizer jobs (job = rb * TK_NTT + tt); MK_BIGT: run time (tk_ntt)
+static_assert(!BIGT || (NPAD == 128 && MK_KU == 128 && MK_TS != 0 && MK_TSB && MK_LMTS && MK_QR == 0 && MK_PFE == 0 && MK_FIN == -1 && MK_LMP == 1),
+              "MK_BIGT: the NPAD 128 tile-stream layout (TS + TSB + LMTS, FIN 2) without QR / PFE");
+static_assert(!BIGT || (MK_MAXT % 128 == 0 && MK_MAXT >= 256), "MK_MAXT: multiple of 128, >= 256");
+static_assert(!BIGT || (HID % (MK_BIG_QKS * 128) == 0 && QDIM % (MK_BIG_OKS * 128) == 0 && INTER % (MK_BIG_DKS * 128) == 0), "MK_BIG_*KS: split-K must divide K into 128-k steps");
 constexpr int TS_EXCH = TSB ? 12288 : 0;                    // GU exchange region: [3 groups][2 quadrant pairs][16 tokens][32 lanes] fp32
 constexpr int TS_SMEM_AVAIL = 227 * 1024 - 11280 - (MK_STAMPS ? 8 * (2 * (1 + 6 * NLAY) + 8) : 0) - 1024 - 384 - TS_EXCH;   // dyn smem budget after static smem (+ mk_sk_s with MK_STAMPS), alignment slack, barriers and the exchange region
 constexpr int ts_slot(int tt) { return 32768 + tt * 256; }
@@ -220,6 +244,7 @@ __device__ __forceinline__ float warp_sum(float v) {
 __device__ __forceinline__ u32 smem_u32(const void* p) { return (u32)__cvta_generic_to_shared(p); }
 __device__ __forceinline__ ull gt() { ull t; asm volatile("mov.u64 %0, %globaltimer;" : "=l"(t)); return t; }
 __device__ __forceinline__ void mbar_init(u32 a, u32 cnt) { asm volatile("mbarrier.init.shared::cta.b64 [%0], %1;" :: "r"(a), "r"(cnt) : "memory"); }
+__device__ __forceinline__ void mbar_inval(u32 a) { asm volatile("mbarrier.inval.shared::cta.b64 [%0];" :: "r"(a) : "memory"); }
 __device__ __forceinline__ void mbar_fence_init() { asm volatile("fence.mbarrier_init.release.cluster;" ::: "memory"); }
 __device__ __forceinline__ void mbar_wait(u32 a, u32 parity) {
     u32 ok;
