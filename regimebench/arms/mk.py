@@ -11,7 +11,8 @@ at TSB buckets when n_lm == ntok and lm_tok[s] == s; else the v0 LM path), ``att
 
 MK_BIGT (step 1 of the large-T engine, branch mk-bigt): ``bigt`` (-1 = auto: total_q > 256, 1 = always, 0 = never) and ``maxt`` (MK_MAXT, default 8192).
 The BIGT build reuses the NPAD 128 layout with a run-time token count 1..maxt: every GEMM on the tile stream (O on map 12 = ao), tickets and
-workspace sized by maxt, the placeholder attention, and the LM rows compacted by the last D finalizer (lm_inv), so n_seq <= 256.
+workspace sized by maxt, the tcgen05 causal prefill attention of attn_prefill.cuh (step 3: items per (sequence, 64-query block, kv head), build.py pf_plan,
+maps 13..15), and the LM rows compacted by the last D finalizer (lm_inv), so n_seq <= 256.
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ class MkStep:
         self.npad = B.BIGT_NPAD if self.bigt else B.bucket_for(w.total_q)
         g = w.model
         dev = torch.device(device)
-        self.attn = "placeholder" if self.bigt else arm.resolve_attn(w)   # "placeholder" | "splitkv" (auto resolved per workload)
+        self.attn = "placeholder" if self.bigt else arm.resolve_attn(w)   # "placeholder" | "splitkv" (auto resolved per workload); MK_BIGT: the build key keeps "placeholder", the kernel uses attn_prefill.cuh
         self.qmax = B.skv_qmax_of([(s.kv_len, s.q_len) for s in w.seqs]) if self.attn == "splitkv" else 1   # R6 build (-DSKV_QMAX=16) iff some q_len > 1
         tune = B.skv_tune(self.npad, self.qmax, [(s.kv_len, s.q_len) for s in w.seqs], arm.skvtc, arm.skvsi) if self.attn == "splitkv" and arm.skvtune else ()
         if self.bigt:
@@ -143,7 +144,10 @@ class MkStep:
             for s_, t_ in enumerate(c.lm_tok):
                 inv[t_] = s_
             self.lm_inv = torch.tensor(inv, dtype=torch.int32, device=dev)
-            bigt_args = (self.lm_inv.data_ptr(),)
+            items = B.pf_plan([(s.kv_len, s.q_len) for s in w.seqs])   # prefill attention work items (attn_prefill.cuh), longest first
+            self.pf_items = torch.tensor(items, dtype=torch.int32, device=dev).view(-1, 4)
+            self.pf_ctr = torch.zeros(B.NL, dtype=torch.int32, device=dev)   # per-layer item counters (the kernel zeroes them in its prologue)
+            bigt_args = (self.lm_inv.data_ptr(), self.pf_items.data_ptr(), i32(len(items)), self.pf_ctr.data_ptr())
         self._weights = {k: inputs[k] for k in (*B.WEIGHT_MAPS, *VEC_WEIGHTS)}   # keep the fixture tensors referenced
         ts = bool(ld.knobs["MK_TS"])
         ws = {"xb": self.xb.data_ptr()} if ts else None   # map 8 = xb (128 B more) only for MK_TS builds
@@ -152,6 +156,8 @@ class MkStep:
         if self.bigt:   # map 12 = ao (B of the tile-stream O phase)
             ws["ao"] = self.ao.data_ptr()
         blob = B.encode_maps(self._weights, {k: self._weights[k].data_ptr() for k in B.WEIGHT_MAPS}, workspace=ws, npad=self.npad, gu_tt=ld.knobs["MK_GU_TT"], maxt=M)
+        if self.bigt:   # maps 13, 14, 15 = qb, K cache, V cache (prefill attention)
+            blob += B.encode_pf_maps(self.qb.data_ptr(), self.kc.data_ptr(), self.vc.data_ptr(), rows, M)
         self.maps = torch.frombuffer(bytearray(blob), dtype=torch.uint8).to(dev)
         assert self.maps.data_ptr() % 128 == 0
         wp = [self._weights[k].data_ptr() for k in VEC_WEIGHTS]
@@ -166,7 +172,7 @@ class MkStep:
         self.config: dict[str, Any] = {
             "kernel": B.KERNEL, "npad": self.npad, "bigt": self.bigt, "maxt": M, "graph": not direct, "proxy": False, "launches_per_step": 1,
             "grid": self.nb, "block": 512, "dyn_smem": ld.dyn_smem, "regs": ld.regs, "static_smem": ld.static_smem,
-            "local_bytes": ld.local_bytes, "ptxas": ld.ptxas, "attn": self.attn, "attn_option": arm.attn, "skv_engine": getattr(getattr(self, "plan", None), "engine_name", None), "knobs": dict(ld.knobs),
+            "local_bytes": ld.local_bytes, "ptxas": ld.ptxas, "attn": "prefill" if self.bigt else self.attn, "attn_option": arm.attn, "skv_engine": getattr(getattr(self, "plan", None), "engine_name", None), "knobs": dict(ld.knobs),
             "source_sha256": B.source_sha256(self.attn),
         }
         self._graph = None
@@ -225,7 +231,7 @@ class MkStep:
         self._graph = None
         self.args = None
         for n in ("kc", "vc", "kview", "vview", "logits", "next_token", "x", "qkv", "qb", "ao", "gu", "rr", "xb", "tk", "xb2", "ss2", "act", "wgu", "sync", "pkey", "pidx",
-                  "rope", "t_base", "t_vis", "lm_tok", "lm_seq", "lm_inv", "maps", "skv_items", "skv_pair", "skv_part", "skv_maps", "plan"):
+                  "rope", "t_base", "t_vis", "lm_tok", "lm_seq", "lm_inv", "pf_items", "pf_ctr", "maps", "skv_items", "skv_pair", "skv_part", "skv_maps", "plan"):
             if hasattr(self, n):
                 delattr(self, n)
         self._weights = {}
@@ -274,7 +280,7 @@ class MkArm:
             if w.n_seq > B.MAXTOK_MK:
                 return f"mk BIGT: at most {B.MAXTOK_MK} sequences (LM rows) per step (n_seq {w.n_seq})"
             if self.attn == "splitkv":
-                return "mk BIGT step 1 has the placeholder attention only (attn=splitkv)"
+                return "mk BIGT has its own prefill attention (attn_prefill.cuh), not splitkv (attn=splitkv)"
             if self.knobs["MK_KU"] != 128 or not (self.knobs["MK_TS"] and self.knobs["MK_TSB"] and self.knobs["MK_LMTS"]):
                 return "mk BIGT needs MK_KU 128 and MK_TS / MK_TSB / MK_LMTS on"
             return None

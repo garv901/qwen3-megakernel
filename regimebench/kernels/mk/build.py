@@ -27,7 +27,7 @@ ATTN_PLACEHOLDER = HERE / "attn_placeholder.cuh"
 ATTN_SPLITKV = COMMON / "splitkv" / "splitkv.cuh"
 SKV_STAGE_BYTES = 128 * 512   # one 128-row K + V ring stage of the q_len 1 build
 SKV_BAR_OFF, SKV_BAR_BYTES = 147968, 64   # splitkv-v1 (128 x 2 TMA ring): skv::kBarOff, skv::kBarBytes; attend scratch = kBarOff + kBarBytes = 148,032 B (compile-checked by MK_EXPECT_DYN)
-OWN_SOURCES = ("mk_common.cuh", "mk_step.cu")
+OWN_SOURCES = ("mk_common.cuh", "attn_prefill.cuh", "mk_step.cu")   # attn_prefill.cuh: MK_BIGT only (empty under #if MK_BIGT in the bucket builds)
 DEFAULT_KNOBS = {"MK_KU": 128, "MK_RING": 2, "MK_XTMA": 0, "MK_STAMPS": 0, "MK_NULL": 0, "MK_STG": 4, "MK_EPI2": 0, "MK_DBG_EXIT": 0, "MK_PFA": 1, "MK_LMP": 1, "MK_LMR": 0, "MK_TS": 128, "MK_TSB": 1, "MK_LMTS": 1, "MK_DBG_NOATT": 0, "MK_GU_TT": 0, "MK_FIN": -1, "MK_PFE": 0, "MK_QR": 0, "MK_L2PF": 0, "MK_WU": -1, "MK_CMB": -1, "MK_KVE": 0, "MK_BIGT": 0, "MK_MAXT": 8192, "MK_BIG_QKS": 2, "MK_BIG_OKS": 2, "MK_BIG_DKS": 4}
 WEIGHT_MAPS = ("wq", "wk", "wv", "wo", "wg", "wu", "wd", "embed")   # tensor-map order (kernel: maps 0..7)
 WORKSPACE_MAPS = ("xb",)   # kernel map 8 (MK_TS): bf16 [MAXTOK_MK][H] workspace of the tile-stream QKV (B tiles by TMA)
@@ -433,5 +433,49 @@ def encode_maps(weights: dict, ptrs: dict, workspace: dict | None = None, npad: 
             d.CUtensorMapFloatOOBfill.CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE)
         if int(res[0]) != 0:
             raise RuntimeError(f"cuTensorMapEncodeTiled({name}): {res[0]}")
+        blob += struct.pack("<16Q", *[int(v) for v in res[1].opaque])
+    return blob
+
+
+# ---- MK_BIGT prefill attention (attn_prefill.cuh): work items and tensor maps 13, 14, 15 ----
+PF_QBLK = 64   # queries per work item (attn_prefill.cuh PF_QBLK): 2 q heads x 64 queries = the 128 MMA rows
+
+
+def pf_plan(seqs) -> list[tuple[int, int, int, int]]:
+    """Work items of the prefill attention, longest first: (tok0, nq | kvh << 8, pos0, row_base) per (sequence, 64-query block, kv head).
+    ``seqs``: (kv_len, q_len) in step order (fixture packing: sequence i owns cache rows from the sum of the previous kv_len + q_len, its tokens follow the
+    previous sequences' tokens). Query i of a block sits at position pos0 + i and sees positions 0 .. pos0 + i: the item reads ceil((pos0 + nq) / 128) KV blocks."""
+    blocks = []
+    tok, row = 0, 0
+    for kv, q in seqs:
+        kv, q = int(kv), int(q)
+        for b in range(0, q, PF_QBLK):
+            nq = min(PF_QBLK, q - b)
+            blocks.append((-((kv + b + nq + 127) // 128), tok + b, nq, kv + b, row))
+        tok += q
+        row += kv + q
+    blocks.sort()   # most KV blocks first (stable: step order among equals)
+    return [(t0, nq | (h << 8), p0, rb) for (_, t0, nq, p0, rb) in blocks for h in range(KVH)]
+
+
+def pf_map_specs(rows: int, maxt: int, n_layers: int = NL) -> list[tuple[list[int], list[int], list[int]]]:
+    """(dims, strides_bytes, box) of maps 13, 14, 15 (3D bf16 SW128): qb {128 d, 16 heads, maxt tokens} box {64, 1, 64}; K / V caches {128 d, 8 kv heads,
+    n_layers * rows + CTX} box {64, 1, 128} (the CTX zero rows behind the last layer are inside the map; rows past it are TMA zero fill)."""
+    kvd = ([HD, KVH, n_layers * rows + CTX], [HD * 2, KVH * HD * 2], [64, 1, 128])
+    return [([HD, QH, maxt], [HD * 2, QH * HD * 2], [64, 1, PF_QBLK]), kvd, kvd]
+
+
+def encode_pf_maps(qb_ptr: int, kc_ptr: int, vc_ptr: int, rows: int, maxt: int, n_layers: int = NL) -> bytes:
+    """3 x 128 B tensor maps (qb, K cache, V cache) of the prefill attention, appended to encode_maps' blob as maps 13..15; needs cuInit (a GPU host)."""
+    from cuda.bindings import driver as d
+    blob = b""
+    for ptr, (dims, strides, box) in zip((qb_ptr, kc_ptr, vc_ptr), pf_map_specs(rows, maxt, n_layers)):
+        res = d.cuTensorMapEncodeTiled(
+            d.CUtensorMapDataType.CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, len(dims), int(ptr),
+            [d.cuuint64_t(v) for v in dims], [d.cuuint64_t(v) for v in strides], [d.cuuint32_t(v) for v in box],
+            [d.cuuint32_t(1)] * len(dims), d.CUtensorMapInterleave.CU_TENSOR_MAP_INTERLEAVE_NONE, d.CUtensorMapSwizzle.CU_TENSOR_MAP_SWIZZLE_128B,
+            d.CUtensorMapL2promotion.CU_TENSOR_MAP_L2_PROMOTION_L2_128B, d.CUtensorMapFloatOOBfill.CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE)
+        if int(res[0]) != 0:
+            raise RuntimeError(f"cuTensorMapEncodeTiled(prefill map): {res[0]}")
         blob += struct.pack("<16Q", *[int(v) for v in res[1].opaque])
     return blob

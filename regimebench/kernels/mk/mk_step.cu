@@ -54,7 +54,7 @@ static_assert(SKV_TAIL % 64 == 0 && (OFF_BARS % 1024) == 512 && (OFF_BARS - (int
 static_assert(OFF_X + XREG <= OFF_BARS && LM_BYTES <= OFF_BARS && TS_BYTES <= OFF_BARS, "all overlays (GEMM ring, B tiles, LM ring, TS ring + exchange) stay below OFF_BARS");
 static_assert(OFF_BARS - (int)skv::kBarOff + ATTN_BYTES == OFF_MB, "scratch end == start of mk's barrier block");
 static_assert(QDIM / KU == NQH && PhO::NRB * (PhO::K / KU) == 128, "O units: u = rb * 16 + kc, kc = q-head");
-static_assert(!BIGT, "MK_BIGT step 1: placeholder attention only (splitkv items for q_len > 16 and n_lm > 256 are steps 2 and 3)");
+static_assert(!BIGT, "MK_BIGT: its attention is attn_prefill.cuh (built with the placeholder header, not splitkv)");
 #else
 static_assert(NW == SKV_NW, "attention header assumes 16 warps");
 static_assert(XREG >= ATTN_BYTES, "attention smem overlay");
@@ -723,11 +723,15 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
 #endif
 #if MK_BIGT
     , const int* __restrict__ lm_inv   // MK_BIGT: per token its LM slot (lm_tok[s] == t) or -1: the last D finalizer writes LM row s of xb / ssf (compacted)
+    , const int4* __restrict__ pf_items, const int pf_n, unsigned* pf_ctr   // MK_BIGT prefill attention: work items (build.py pf_plan), their count, per-layer item counters [NLAY]
 #endif
     )
 {
 #if !MK_BIGT
-    constexpr const int* lm_inv = nullptr;   // name for the discarded MK_BIGT branches
+    constexpr const int* lm_inv = nullptr;   // names for the discarded MK_BIGT branches
+    constexpr const int4* pf_items = nullptr;
+    constexpr int pf_n = 0;
+    constexpr unsigned* pf_ctr = nullptr;
 #endif
     extern __shared__ unsigned char smraw[];
     __shared__ float s_ss[MAXLM];        // LM: sum of squares of the staged x rows (lm slot)
@@ -824,6 +828,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
         }
     }
     if constexpr (!TSB) zero_f32(gu, ntok * GUN);   // TSB: no gu buffer (GU accumulates in TMEM, ss2 is zeroed in the QKV extra())
+    if constexpr (BIGT) if (blockIdx.x == 0 && tid < NLAY) pf_ctr[tid] = 0u;   // prefill attention item counters (first used after several grid barriers)
     if (MK_DBG_EXIT == 2) return;
     if constexpr (TS) fence_proxy_async_global();   // xb generic stores -> TMA reads of every CTA after the grid barrier
     MK_PF_ARRIVE(if constexpr (TS) { ts_first<PhQkv, TS_TT, TS_KS>(g, 0, ntok); } else if (tid == 0) {   // layer 0 QKV: first weight units (landing during the barrier)
@@ -880,7 +885,7 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
         bar_wait(bar_cnt, bar_target);
         }
 #else
-        if constexpr (BIGT) bar_arrive(bar_cnt);   // MK_BIGT: the O tile-stream ring overlaps the placeholder's attention scratch: O's first units are issued after attention
+        if constexpr (BIGT) bar_arrive(bar_cnt);   // MK_BIGT: the O tile-stream ring overlaps the prefill attention's smem: O's first units are issued after attention
         else MK_PF_ARRIVE(prefetch_next<PhO>(g, l));   // phases 2 and 3 do not use the ring: O's first units land meanwhile
         bar_wait(bar_cnt, bar_target);
 #endif
@@ -980,11 +985,13 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
         }
 #ifdef MK_SKV
         if constexpr (!mk_null(1)) fence_proxy_async_global();   // the new K / V row (generic stores) -> attend's TMA reads in other CTAs, after the grid barrier
+#else
+        if constexpr (BIGT && !mk_null(1)) fence_proxy_async_global();   // MK_BIGT: qb and the new K / V rows -> the prefill attention's TMA reads, after the grid barrier
 #endif
         bar_arrive(bar_cnt);
         bar_wait(bar_cnt, bar_target);
 
-        // ---- Phase 3: attention (A1 interface; placeholder: one CTA per (token, q-head) item) -> ao ----
+        // ---- Phase 3: attention (A1 interface; placeholder: one CTA per (token, q-head) item; MK_BIGT: attn_prefill.cuh) -> ao ----
 #ifdef MK_SKV
         if constexpr (TSB && (MK_L2PF & 1)) if (tid == 0) ts_l2pf_a<PhGu, GU_TT, GU_KS>(g, l, ntok);   // MK_L2PF: GU / D weights into L2 while attend streams the KV
         if constexpr (TSB && (MK_L2PF & 2)) if (tid == 0) ts_l2pf_a<PhD, D_TT, D_KS>(g, l, ntok);
@@ -997,7 +1004,9 @@ extern "C" __global__ void __launch_bounds__(NT, 1) mk_step(
             bar_arrive(bar_cnt);
         }
 #else
-        if constexpr (!mk_null(2))
+        if constexpr (BIGT) {
+            if constexpr (!mk_null(2)) pf_attention(base, sm, base + OFF_MB, g.tb, maps + PF_MAP0 * 128, l, cache_rows, pf_items, pf_n, pf_ctr, ao);   // attn_prefill.cuh
+        } else if constexpr (!mk_null(2))
             skv_attention(l, reinterpret_cast<const unsigned short*>(qb), reinterpret_cast<const unsigned short*>(kcache),
                           reinterpret_cast<const unsigned short*>(vcache), reinterpret_cast<unsigned short*>(ao), ntok, t_base, t_vis,
                           cache_rows, sm + OFF_X, blockIdx.x, gridDim.x);

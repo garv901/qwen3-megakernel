@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=00:50:00
 #SBATCH --output=runs/slurm-%j.log
-# MK_BIGT step 1: accuracy (FP32 oracle) + idempotence + timing of the large-T build, then the BIGT build forced onto small steps,
+# MK_BIGT (steps 1 + 3): accuracy (FP32 oracle) + idempotence + timing of the large-T build, then the BIGT build forced onto small steps,
 # then the default bucket points (regression). Arg 1 / 2: only the preset / only forced + buckets (default: all). Each pass under a timeout (a grid-barrier hang must not eat the job). Submit from the worktree root.
 set -uo pipefail
 source "${SLURM_SUBMIT_DIR:-$PWD}/slurm/env.sh"

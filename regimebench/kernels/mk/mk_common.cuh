@@ -144,8 +144,9 @@ constexpr int TS_MIN = MK_TS == 1 ? 128 : MK_TS;   // smallest NPAD bucket on th
 constexpr bool TS = MK_TS && NPAD >= TS_MIN && MK_KU == 128;   // tile-stream QKV (SPEC-P5a)
 constexpr bool TSB = TS && MK_TSB;
 constexpr bool LMTS = TSB && MK_LMTS;   // SPEC-P3c: tile-stream LM head (run time: lm_ident)
-// tensor maps: wq, wk, wv, wo, wg, wu, wd, embed (+ xb when TS) (+ xb2, wgu, act when TSB: maps 9, 10, 11) (+ ao when BIGT: map 12), 128 B each, in global memory
-constexpr int NMAP = BIGT ? 13 : TSB ? 12 : TS ? 9 : 8;
+// tensor maps: wq, wk, wv, wo, wg, wu, wd, embed (+ xb when TS) (+ xb2, wgu, act when TSB: maps 9, 10, 11) (+ ao when BIGT: map 12; + the prefill attention's qb, kcache,
+// vcache: maps 13, 14, 15, attn_prefill.cuh), 128 B each, in global memory
+constexpr int NMAP = BIGT ? 16 : TSB ? 12 : TS ? 9 : 8;
 
 constexpr int KU = MK_KU, NBOX = KU / 64, RING = MK_RING;
 constexpr int UB = NBOX * 16384;              // bytes of one weight unit in the ring (128 rows x KU k bf16)

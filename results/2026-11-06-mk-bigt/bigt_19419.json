@@ -1,0 +1,57 @@
+[
+ {
+  "workload": "R4-b1-T1024",
+  "verdict": "PASS",
+  "detail": "ratio 0.50 (logits 0.38 k 0.49 v 0.50) tok_match 1.00 (ref argmax 1.00, self 1.00) repeat 0.282 x band, max_abs 1.8e-02 | npad 128 regs 128 local 24 | 3435.6 us"
+ },
+ {
+  "workload": "R4-b1-T4096",
+  "verdict": "PASS",
+  "detail": "ratio 0.49 (logits 0.45 k 0.49 v 0.49) tok_match 1.00 (ref argmax 1.00, self 1.00) repeat 0.276 x band, max_abs 1.7e-02 | npad 128 regs 128 local 24 | 13074.8 us"
+ },
+ {
+  "workload": "R4-b1-T8192",
+  "verdict": "PASS",
+  "detail": "ratio 0.49 (logits 0.46 k 0.48 v 0.49) tok_match 1.00 (ref argmax 1.00, self 1.00) repeat 0.275 x band, max_abs 1.7e-02 | npad 128 regs 128 local 24 | 33331.0 us"
+ },
+ {
+  "workload": "R5-b4-T512",
+  "verdict": "PASS",
+  "detail": "ratio 0.50 (logits 0.47 k 0.49 v 0.50) tok_match 0.75 (ref argmax 0.75, self 1.00) repeat 0.281 x band, max_abs 1.6e-02 | npad 128 regs 128 local 24 | 5150.7 us"
+ },
+ {
+  "workload": "R5-b4-T2048",
+  "verdict": "PASS",
+  "detail": "ratio 0.50 (logits 0.46 k 0.49 v 0.50) tok_match 1.00 (ref argmax 1.00, self 1.00) repeat 0.272 x band, max_abs 1.7e-02 | npad 128 regs 128 local 24 | 21855.3 us"
+ },
+ {
+  "workload": "R5-b16-T512",
+  "verdict": "PASS",
+  "detail": "ratio 0.50 (logits 0.47 k 0.50 v 0.50) tok_match 0.94 (ref argmax 0.94, self 1.00) repeat 0.257 x band, max_abs 1.7e-02 | npad 128 regs 128 local 24 | 19051.5 us"
+ },
+ {
+  "workload": "R7-p512-d8",
+  "verdict": "PASS",
+  "detail": "ratio 0.48 (logits 0.45 k 0.48 v 0.48) tok_match 1.00 (ref argmax 1.00, self 1.00) repeat 0.221 x band, max_abs 4.8e-02 | npad 128 regs 128 local 24 | 2953.0 us"
+ },
+ {
+  "workload": "R7-p512-d32",
+  "verdict": "PASS",
+  "detail": "ratio 0.48 (logits 0.45 k 0.48 v 0.48) tok_match 0.91 (ref argmax 0.91, self 1.00) repeat 0.218 x band, max_abs 4.4e-02 | npad 128 regs 128 local 24 | 4048.8 us"
+ },
+ {
+  "workload": "R7-p512-d128",
+  "verdict": "PASS",
+  "detail": "ratio 0.48 (logits 0.45 k 0.48 v 0.48) tok_match 0.98 (ref argmax 0.98, self 1.00) repeat 0.211 x band, max_abs 4.3e-02 | npad 128 regs 128 local 24 | 7587.5 us"
+ },
+ {
+  "workload": "R7-p2048-d32",
+  "verdict": "PASS",
+  "detail": "ratio 0.48 (logits 0.44 k 0.48 v 0.48) tok_match 0.97 (ref argmax 0.97, self 1.00) repeat 0.227 x band, max_abs 3.5e-02 | npad 128 regs 128 local 24 | 8432.8 us"
+ },
+ {
+  "workload": "R7-p2048-d128",
+  "verdict": "PASS",
+  "detail": "ratio 0.48 (logits 0.45 k 0.48 v 0.48) tok_match 0.93 (ref argmax 0.93, self 1.00) repeat 0.223 x band, max_abs 3.6e-02 | npad 128 regs 128 local 24 | 11980.9 us"
+ }
+]
